@@ -8,6 +8,7 @@ export interface ShotPatch {
   dialogue: string
   camera: string
   duration: number
+  prompt: string
   assetIds: string[]
 }
 
@@ -31,6 +32,7 @@ export function ShotEditor({
   const [dialogue, setDialogue] = useState(shot.dialogue)
   const [camera, setCamera] = useState(shot.camera)
   const [duration, setDuration] = useState<number>(shot.duration)
+  const [prompt, setPrompt] = useState(shot.prompt || shot.description || '')
   const [assetIds, setAssetIds] = useState<string[]>(shot.assetIds)
 
   const toggleAsset = (id: string): void => {
@@ -44,6 +46,7 @@ export function ShotEditor({
       dialogue,
       camera: camera.trim(),
       duration: Number.isFinite(duration) && duration > 0 ? duration : 5,
+      prompt: prompt.trim(),
       assetIds
     })
   }
@@ -68,6 +71,19 @@ export function ShotEditor({
           value={description}
           onChange={(e) => setDescription(e.target.value)}
         />
+      </div>
+
+      <div>
+        <label className="label">视频提示词（详细，用于生成）</label>
+        <textarea
+          className="field min-h-[120px] resize-y"
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
+          placeholder="详细描述要生成的视频画面：主体、动作、镜头、光影、风格等，用于 H3 视频生成"
+        />
+        <div className="mt-1 text-[11px] text-slate-600">
+          与「画面描述」独立，这里写详细视频提示词；留空则回退用画面描述。
+        </div>
       </div>
 
       <div>

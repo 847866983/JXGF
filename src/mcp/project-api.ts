@@ -151,6 +151,7 @@ export interface ShotInput {
   dialogue?: string
   camera?: string
   duration?: number
+  prompt?: string
   characterIds?: string[]
   assetIds?: string[]
 }
@@ -165,6 +166,7 @@ export function makeShot(input: ShotInput): Shot {
     dialogue: input.dialogue ?? '',
     camera: input.camera ?? '',
     duration: input.duration ?? 5,
+    prompt: input.prompt ?? '',
     characterIds: input.characterIds ?? [],
     assetIds: input.assetIds ?? [],
     refImage: null,

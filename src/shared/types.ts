@@ -80,6 +80,8 @@ export interface Shot {
   dialogue: string
   camera: string
   duration: number
+  /** 视频生成提示词（详细版，用于 H3 视频生成；区别于简短的 description） */
+  prompt: string
   characterIds: string[]
   assetIds: string[]
   refImage: string | null

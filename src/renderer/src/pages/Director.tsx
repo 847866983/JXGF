@@ -80,7 +80,7 @@ export default function Director(): React.JSX.Element {
       projectId: project.id,
       shotId: shot.id,
       templateId: template.id,
-      positive: shot.description || shot.title,
+      positive: shot.prompt || shot.description || shot.title,
       width: preset.width,
       height: preset.height,
       frames: preset.frames,
