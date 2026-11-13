@@ -37,7 +37,7 @@ const api = {
   projectOpen: (id: string): Promise<Project> => ipcRenderer.invoke(CH.projectOpen, id),
   projectCreate: (name: string): Promise<Project> => ipcRenderer.invoke(CH.projectCreate, name),
   projectSave: (project: Project): Promise<Project> => ipcRenderer.invoke(CH.projectSave, project),
-  projectImportTemplate: (payload: { name: string; kind: 'image' | 'video'; apiJson: unknown }) =>
+  projectImportTemplate: (payload: { name: string; kind?: 'image' | 'video'; apiJson: unknown }) =>
     ipcRenderer.invoke(CH.projectImportTemplate, payload),
 
   jobGenerate: (params: JobParams) => ipcRenderer.invoke(CH.jobGenerate, params),

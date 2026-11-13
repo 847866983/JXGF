@@ -19,6 +19,7 @@ import { CATALOG, MODEL_CATALOG, resolveCatalog } from '../src/main/core/catalog
 import { extractArchive } from '../src/main/core/extract.ts'
 import { ProjectStore, uid, now } from '../src/main/core/store.ts'
 import { ComfyRuntime } from '../src/main/core/comfy-runtime.ts'
+import { detectWorkflowKind, isUiWorkflow } from '../src/main/core/workflow-convert.ts'
 
 const execFileAsync = promisify(execFile)
 
@@ -406,6 +407,18 @@ ok('runtime：探测到安装时 status=installed', () => {
 const stEmpty = await new ComfyRuntime(path.join(tmp5, 'empty-dir')).status()
 ok('runtime：空目录 status=missing', () => assert.equal(stEmpty.status, 'missing'))
 await fsp.rm(tmp5, { recursive: true, force: true })
+
+// ---- 工作流格式检测 ----
+ok('convert：识别 UI 格式（nodes+links）', () => {
+  assert.equal(isUiWorkflow({ nodes: [], links: [] }), true)
+  assert.equal(isUiWorkflow({ '1': { class_type: 'KSampler', inputs: {} } }), false)
+})
+ok('convert：视频工作流识别（含 CSGlide）', () => {
+  assert.equal(detectWorkflowKind({ '1': { class_type: 'CSGlideCastCS' }, '2': { class_type: 'KSampler' } }), 'video')
+})
+ok('convert：图片工作流识别', () => {
+  assert.equal(detectWorkflowKind({ '1': { class_type: 'KSampler' }, '2': { class_type: 'SaveImage' } }), 'image')
+})
 
 console.log(`\nselftest: ${pass} passed, ${fail} failed`)
 if (fail > 0) process.exit(1)

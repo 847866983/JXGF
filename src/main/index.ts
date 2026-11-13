@@ -22,6 +22,7 @@ import { DownloadManager } from './core/download'
 import { resolveCatalog } from './core/catalog'
 import { extractArchive } from './core/extract'
 import { ComfyRuntime } from './core/comfy-runtime'
+import { isUiWorkflow, convertUiToApi, detectWorkflowKind } from './core/workflow-convert'
 import { Updater } from './core/updater'
 
 let mainWindow: BrowserWindow | null = null
@@ -175,14 +176,23 @@ function registerIpc(): void {
   ipcMain.handle(CH.projectOpen, (_e, id: string) => store.open(id))
   ipcMain.handle(CH.projectSave, (_e, project: Project) => store.save(project))
 
-  ipcMain.handle(CH.projectImportTemplate, async (_e, payload: { name: string; kind: 'image' | 'video'; apiJson: unknown }) => {
+  ipcMain.handle(CH.projectImportTemplate, async (_e, payload: { name: string; kind?: 'image' | 'video'; apiJson: unknown }) => {
     const project = store.getCurrent()
     if (!project) throw new Error('请先打开一个项目')
+    let apiJson = payload.apiJson
+
+    // 如果是 UI 格式（含 nodes/links），自动转 API 格式
+    if (isUiWorkflow(payload.apiJson)) {
+      apiJson = await convertUiToApi(payload.apiJson, project.settings.comfy)
+    }
+
+    const kind = payload.kind ?? detectWorkflowKind(apiJson as Record<string, { class_type: string }>)
+
     const template = {
       id: uid('tpl_'),
       name: payload.name,
-      kind: payload.kind,
-      apiJson: payload.apiJson,
+      kind,
+      apiJson,
       mapping: { version: 1 },
       createdAt: now()
     }

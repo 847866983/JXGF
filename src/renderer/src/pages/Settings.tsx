@@ -6,17 +6,6 @@ import { PageHeader } from '../components/ui'
 
 const DEFAULT_COMFY: ComfySettings = { host: '127.0.0.1', port: 8188, protocol: 'http' }
 
-function detectKind(apiJson: unknown): 'image' | 'video' {
-  const nodes = (apiJson as { nodes?: unknown })?.nodes ?? apiJson
-  if (typeof nodes !== 'object' || nodes === null) return 'image'
-  const list = Array.isArray(nodes) ? nodes : Object.values(nodes)
-  for (const n of list) {
-    const ct = String((n as { class_type?: string })?.class_type ?? '')
-    if (/video|vhs|animatediff|\bh3\b|wan|csglide|mochi|ltx/i.test(ct)) return 'video'
-  }
-  return 'image'
-}
-
 export default function Settings(): React.JSX.Element {
   const comfy = useApp((s) => s.comfy)
   const update = useApp((s) => s.update)
@@ -84,14 +73,13 @@ export default function Settings(): React.JSX.Element {
     try {
       const text = await file.text()
       const json: unknown = JSON.parse(text)
-      const obj = json as { nodes?: unknown; links?: unknown }
-      if (obj && Array.isArray(obj.nodes) && Array.isArray(obj.links)) {
-        setImportError('这是 ComfyUI 界面格式工作流，请先在 ComfyUI 中「导出（API）」再导入。')
-        return
-      }
-      const kind = detectKind(json)
+      // 兼容两种格式：UI 格式（nodes/links）会在主进程自动转 API；API 格式直接导入
       const name = file.name.replace(/\.json$/i, '') || '未命名工作流'
-      await importTemplate(name, kind, json)
+      const isUi = Boolean((json as { nodes?: unknown }).nodes && (json as { links?: unknown }).links)
+      // kind 交给主进程自动判定（UI 格式转换后判定，API 格式直接判定）
+      await importTemplate(name, undefined, json)
+      setImportError(null)
+      void isUi
     } catch (err) {
       setImportError(`导入失败：${String((err as Error).message ?? err)}`)
     }
@@ -225,7 +213,7 @@ export default function Settings(): React.JSX.Element {
           </div>
 
           <div className="mb-2 text-xs text-slate-500">
-            导入 ComfyUI「导出（API）」格式的 JSON；视频类工作流会被导演台优先用于视频生成。
+            支持 ComfyUI 界面格式（含 nodes/links）与「导出（API）」格式；界面格式会自动转换为 API 格式。需 ComfyUI 在线。
           </div>
 
           {importError && (

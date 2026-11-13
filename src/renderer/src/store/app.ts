@@ -22,7 +22,7 @@ interface AppState {
   openProject: (id: string) => Promise<void>
   createProject: (name: string) => Promise<void>
   saveProject: (project: Project) => Promise<void>
-  importTemplate: (name: string, kind: 'image' | 'video', apiJson: unknown) => Promise<void>
+  importTemplate: (name: string, kind: 'image' | 'video' | undefined, apiJson: unknown) => Promise<void>
   refreshJobs: () => Promise<void>
   loadUpdate: () => Promise<void>
 }
