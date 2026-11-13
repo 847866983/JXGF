@@ -141,6 +141,30 @@ function clearH3Refs(clone: Workflow, mode?: string): void {
 }
 
 /**
+ * 把参考图文件名注入 H3 媒体架（CSGlideH3MediaRackCS 的 rack_data.slots.images）。
+ * refImages 是已上传到 ComfyUI input 的文件名（如 cglide/xxx.png）。
+ * 参考图会作为 ref2va 的素材，首张同时作为首帧。
+ */
+export function injectH3RefImages(clone: unknown, refImages: string[]): void {
+  if (refImages.length === 0) return
+  if (!isWorkflowObject(clone)) return
+  for (const node of Object.values(clone)) {
+    const ct = String(node.class_type)
+    if (ct !== 'CSGlideH3MediaRackCS') continue
+    const raw = node.inputs.rack_data
+    if (typeof raw !== 'string') continue
+    const rack = tryParse<Record<string, unknown>>(raw)
+    if (!rack) continue
+    const slots = (rack.slots as { images?: { file?: string; alias?: string[] }[] } | undefined) ?? {}
+    const images = Array.isArray(slots.images) ? slots.images : []
+    // 清掉旧参考，填入新参考
+    slots.images = refImages.map((f) => ({ file: f, alias: [f] }))
+    rack.slots = slots
+    node.inputs.rack_data = JSON.stringify(rack)
+  }
+}
+
+/**
  * H3 参数一致性修正（实测必需，否则 SelfLift 报错）：
  * 1. SelfLift「分段步数」合计必须等于 KSampler 的 steps，否则 ValueError。
  * 2. 无效调度器名（如 bong_tangent）会导致 calculate_sigmas 报错，改成 simple。

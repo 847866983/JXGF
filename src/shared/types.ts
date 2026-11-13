@@ -211,6 +211,7 @@ export interface ComfySystemStats {
 export interface JobParams {
   projectId: string
   shotId?: string
+  assetId?: string
   templateId: string
   positive?: string
   negative?: string

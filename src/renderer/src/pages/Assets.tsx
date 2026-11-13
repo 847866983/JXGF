@@ -1,10 +1,11 @@
 import { useState } from 'react'
-import { Plus } from 'lucide-react'
+import { Image, Plus } from 'lucide-react'
 import type { Asset, AssetKind } from '@shared/types'
 import { useApp } from '../store/app'
 import { EmptyState, PageHeader } from '../components/ui'
 import { AssetCard } from '../components/AssetCard'
 import { AssetForm, type AssetFormData } from '../components/AssetForm'
+import { AssetGenerateDialog } from '../components/AssetGenerateDialog'
 import { Modal } from '../components/Modal'
 import { persistProject } from '../components/mutate'
 
@@ -22,6 +23,7 @@ export default function Assets(): React.JSX.Element {
   const [filter, setFilter] = useState<Filter>('all')
   const [formOpen, setFormOpen] = useState(false)
   const [editing, setEditing] = useState<Asset | null>(null)
+  const [generating, setGenerating] = useState<Asset | null>(null)
 
   if (!project) {
     return (
@@ -140,6 +142,12 @@ export default function Assets(): React.JSX.Element {
                   删除
                 </button>
               )}
+              {editing && (
+                <button className="btn-ghost" onClick={() => setGenerating(editing)}>
+                  <Image size={15} />
+                  生成封面图
+                </button>
+              )}
               <button className="btn-ghost" onClick={closeForm}>
                 取消
               </button>
@@ -151,6 +159,10 @@ export default function Assets(): React.JSX.Element {
         >
           <AssetForm initial={editing} submitId="asset-form" onSubmit={(d) => void handleSubmit(d)} />
         </Modal>
+      )}
+
+      {generating && (
+        <AssetGenerateDialog asset={generating} onClose={() => setGenerating(null)} />
       )}
     </div>
   )

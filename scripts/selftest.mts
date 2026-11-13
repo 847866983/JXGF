@@ -12,7 +12,7 @@ import crypto from 'node:crypto'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { PRESETS, presetFor } from '../src/main/core/presets.ts'
-import { buildWorkflow, extractH3Chain } from '../src/main/core/workflow.ts'
+import { buildWorkflow, extractH3Chain, injectH3RefImages } from '../src/main/core/workflow.ts'
 import { ComfyClient } from '../src/main/core/comfy.ts'
 import { DownloadManager } from '../src/main/core/download.ts'
 import { CATALOG, MODEL_CATALOG, resolveCatalog } from '../src/main/core/catalog.ts'
@@ -147,6 +147,36 @@ ok('H3：buildWorkflow 后 chain 保留（不删）', () => {
 })
 ok('H3：非 H3 模板 extractH3Chain 返回 null', () => {
   assert.equal(extractH3Chain({ '1': { class_type: 'KSampler', inputs: {} } }), null)
+})
+
+// ---- H3 参考图注入 ----
+const rackTemplate = {
+  id: 'tpl_rack',
+  name: 'rack',
+  kind: 'video' as const,
+  description: '',
+  apiJson: {
+    '257': {
+      class_type: 'CSGlideH3MediaRackCS',
+      inputs: { rack_data: JSON.stringify({ slots: { images: [], videos: [], audios: [] }, cur: 'clip_0001' }) }
+    }
+  },
+  mapping: { version: 1 },
+  createdAt: new Date().toISOString()
+}
+const rackWf = buildWorkflow(rackTemplate, { mode: 'ref2va' }) as Record<string, { class_type: string; inputs: Record<string, unknown> }>
+injectH3RefImages(rackWf, ['cglide/a.png', 'cglide/b.png'])
+const rackOut = JSON.parse(String(rackWf['257'].inputs.rack_data)) as { slots: { images: { file: string }[] } }
+ok('H3：参考图注入媒体架 slots.images', () => {
+  assert.equal(rackOut.slots.images.length, 2)
+  assert.equal(rackOut.slots.images[0].file, 'cglide/a.png')
+  assert.equal(rackOut.slots.images[1].file, 'cglide/b.png')
+})
+ok('H3：空参考图不改变媒体架', () => {
+  const t2 = buildWorkflow(rackTemplate, { mode: 'ref2va' }) as Record<string, { class_type: string; inputs: Record<string, unknown> }>
+  injectH3RefImages(t2, [])
+  const r = JSON.parse(String(t2['257'].inputs.rack_data)) as { slots: { images: unknown[] } }
+  assert.equal(r.slots.images.length, 0)
 })
 
 // ---- 离线客户端优雅降级 ----

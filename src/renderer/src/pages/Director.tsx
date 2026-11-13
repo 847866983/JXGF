@@ -72,6 +72,10 @@ export default function Director(): React.JSX.Element {
 
   const submitJob = async (shot: Shot): Promise<void> => {
     if (!template || !preset) return
+    // 收集分镜引用资产的封面图作为视频参考图（H3 ref2va 素材）
+    const refImages = shot.assetIds
+      .map((id) => project.assets.find((a) => a.id === id)?.coverFile)
+      .filter((f): f is string => Boolean(f))
     await window.api.jobGenerate({
       projectId: project.id,
       shotId: shot.id,
@@ -79,7 +83,8 @@ export default function Director(): React.JSX.Element {
       positive: shot.description || shot.title,
       width: preset.width,
       height: preset.height,
-      frames: preset.frames
+      frames: preset.frames,
+      refImages: refImages.length > 0 ? refImages : undefined
     })
   }
 

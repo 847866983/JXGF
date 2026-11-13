@@ -1,7 +1,7 @@
 import path from 'node:path'
 import type { ComfySettings, JobInfo, JobParams, JobStatus, ShotOutput, Template } from '@shared/types'
 import { ComfyClient, makeClient } from './comfy'
-import { buildWorkflow, extractH3Chain } from './workflow'
+import { buildWorkflow, extractH3Chain, injectH3RefImages } from './workflow'
 import { uid, now, ProjectStore } from './store'
 
 interface QueuedJob {
@@ -102,6 +102,21 @@ export class JobManager {
         seed: params.seed
       })
 
+      // 参考图：分镜引用的资产封面，上传到 ComfyUI 后注入 H3 媒体架（ref2va 素材）。
+      const refImages = Array.isArray(params.refImages) ? params.refImages.filter(Boolean) : []
+      if (refImages.length > 0) {
+        try {
+          const uploaded: string[] = []
+          for (const localPath of refImages) {
+            const up = await this.client.uploadImage(localPath)
+            uploaded.push(up.subfolder ? `${up.subfolder}/${up.name}` : up.name)
+          }
+          injectH3RefImages(workflow, uploaded)
+        } catch (err) {
+          console.warn('[jobs] 上传参考图失败（不阻断生成）:', String((err as Error).message ?? err))
+        }
+      }
+
       // H3 链式续接：提交前登记工程名 + 当前段，否则存档节点会拒绝。
       // 失败不阻断生成（登记失败时 CSGlideCastCS 自己会兜底登记，只是存档节点可能跳过）。
       const chain = extractH3Chain(workflow)
@@ -123,6 +138,7 @@ export class JobManager {
       info.progress = 100
       info.finishedAt = now()
       this.writeShotOutputs(params.shotId, outputs)
+      this.writeAssetOutputs(params.assetId, outputs)
     } catch (err) {
       const project2 = this.store.getCurrent()
       const autoRetry = project2?.settings.autoRetry ?? 1
@@ -255,6 +271,23 @@ export class JobManager {
     if (!shot) return
     shot.outputs.push(...outputs)
     shot.status = 'done'
+    void this.store.flush()
+  }
+
+  /** 图片生成完成后，把产物写进资产的 images + coverFile，供剧本分镜引用 */
+  private writeAssetOutputs(assetId: string | undefined, outputs: ShotOutput[]): void {
+    if (!assetId || outputs.length === 0) return
+    const project = this.store.getCurrent()
+    if (!project) return
+    const asset = project.assets.find((a) => a.id === assetId)
+    if (!asset) return
+    // 只取图片产物
+    const imageFiles = outputs.filter((o) => o.kind === 'image').map((o) => o.file)
+    if (imageFiles.length === 0) return
+    asset.images.push(...imageFiles)
+    // 第一张作为封面（用于分镜引用 / 参考图）
+    if (!asset.coverFile) asset.coverFile = imageFiles[0]
+    asset.updatedAt = now()
     void this.store.flush()
   }
 }
