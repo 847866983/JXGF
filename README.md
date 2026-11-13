@@ -135,6 +135,7 @@ pnpm install
 | `pnpm build` | 构建主进程 / preload / 渲染进程到 `out/` |
 | `pnpm typecheck` | 类型检查（`tsconfig.node.json` + `tsconfig.web.json`） |
 | `pnpm test` | 核心逻辑自检（档位判定 / 工作流注入 / ComfyUI 客户端离线降级，17 项断言，无需 GUI） |
+| `pnpm test:integration` | 真实 ComfyUI 端到端联调（需 8188 在线）：上传→提交→WS→下载 全链路 |
 | `pnpm start` | 以 preview 模式运行已构建产物 |
 | `pnpm package` | 构建 + 打包 NSIS 安装包（见 [打包](#打包)） |
 | `pnpm package:dir` | 构建 + 输出未打包目录（`release/win-unpacked`，调试用） |
