@@ -53,6 +53,8 @@ export class ComfyClient extends EventEmitter {
       const sys = (raw.system ?? {}) as Record<string, unknown>
       const devices = Array.isArray(raw.devices) ? (raw.devices as Array<Record<string, unknown>>) : []
       const gpu = devices[0]
+      const ramTotal = Number(sys.ram_total ?? 0)
+      const ramFree = Number(sys.ram_free ?? 0)
       return {
         online: true,
         version: String(sys.comfyui_version ?? sys.version ?? ''),
@@ -63,13 +65,14 @@ export class ComfyClient extends EventEmitter {
               vramFree: Number(gpu.vram_free ?? 0)
             }
           : null,
+        ram: ramTotal > 0 ? { total: ramTotal, free: ramFree } : null,
         cpuAvailable: true,
         queueRemaining: 0,
         queueRunning: 0,
         raw
       }
     } catch {
-      return { online: false, version: '', gpu: null, cpuAvailable: false, queueRemaining: 0, queueRunning: 0 }
+      return { online: false, version: '', gpu: null, ram: null, cpuAvailable: false, queueRemaining: 0, queueRunning: 0 }
     }
   }
 

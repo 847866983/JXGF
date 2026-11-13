@@ -199,6 +199,7 @@ export interface ComfySystemStats {
   online: boolean
   version: string
   gpu?: { name?: string; vramTotal?: number; vramFree?: number } | null
+  ram?: { total?: number; free?: number } | null
   cpuAvailable: boolean
   queueRemaining: number
   queueRunning: number

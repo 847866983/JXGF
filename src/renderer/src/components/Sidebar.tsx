@@ -35,9 +35,26 @@ export function Sidebar(): React.JSX.Element {
     return () => clearInterval(timer)
   }, [refreshComfy])
 
-  const vramText = comfy?.gpu?.vramTotal
-    ? `${(comfy.gpu.vramTotal / 1024 / 1024 / 1024).toFixed(1)}GB`
-    : ''
+  // 字节 -> 人类可读
+  const gb = (bytes?: number): string => (bytes !== undefined && bytes > 0 ? `${(bytes / 1024 / 1024 / 1024).toFixed(1)}GB` : '—')
+  // 占用百分比（total - free）/ total
+  const pct = (total?: number, free?: number): number =>
+    total && total > 0 && free !== undefined ? Math.max(0, Math.min(100, Math.round(((total - free) / total) * 100))) : 0
+
+  const ramTotal = comfy?.ram?.total
+  const ramFree = comfy?.ram?.free
+  const ramUsed = ramTotal !== undefined && ramFree !== undefined ? ramTotal - ramFree : 0
+  const ramPct = pct(ramTotal, ramFree)
+
+  const vramTotal = comfy?.gpu?.vramTotal
+  const vramFree = comfy?.gpu?.vramFree
+  const vramPct = pct(vramTotal, vramFree)
+
+  const bar = (percent: number, tone: string): React.JSX.Element => (
+    <div className="h-1.5 w-full overflow-hidden rounded-full bg-white/10">
+      <div className={`h-full rounded-full ${tone}`} style={{ width: `${percent}%` }} />
+    </div>
+  )
 
   return (
     <aside className="flex w-60 shrink-0 flex-col border-r border-white/5 bg-ink-900">
@@ -88,7 +105,7 @@ export function Sidebar(): React.JSX.Element {
             </span>
           </div>
           {comfy?.online && (
-            <div className="mt-1.5 space-y-0.5 text-[11px] text-slate-400">
+            <div className="mt-2 space-y-2 text-[11px] text-slate-400">
               <div className="flex justify-between">
                 <span>版本</span>
                 <span className="text-slate-300">v{comfy.version}</span>
@@ -96,7 +113,7 @@ export function Sidebar(): React.JSX.Element {
               {comfy.gpu?.name && (
                 <div className="flex justify-between">
                   <span>显卡</span>
-                  <span className="truncate text-slate-300">{comfy.gpu.name}{vramText ? ` ${vramText}` : ''}</span>
+                  <span className="max-w-[120px] truncate text-slate-300">{comfy.gpu.name}</span>
                 </div>
               )}
               <div className="flex justify-between">
@@ -105,6 +122,32 @@ export function Sidebar(): React.JSX.Element {
                   {comfy.queueRunning} 运行 / {comfy.queueRemaining} 等待
                 </span>
               </div>
+
+              {/* 显存占用 */}
+              {vramTotal !== undefined && vramTotal > 0 && (
+                <div>
+                  <div className="flex justify-between">
+                    <span>显存占用</span>
+                    <span className="text-slate-300">
+                      {gb(vramTotal - (vramFree ?? 0))} / {gb(vramTotal)} · {vramPct}%
+                    </span>
+                  </div>
+                  {bar(vramPct, vramPct > 90 ? 'bg-rose-500' : vramPct > 70 ? 'bg-amber-500' : 'bg-accent-500')}
+                </div>
+              )}
+
+              {/* 内存占用 */}
+              {ramTotal !== undefined && ramTotal > 0 && (
+                <div>
+                  <div className="flex justify-between">
+                    <span>内存占用</span>
+                    <span className="text-slate-300">
+                      {gb(ramUsed)} / {gb(ramTotal)} · {ramPct}%
+                    </span>
+                  </div>
+                  {bar(ramPct, ramPct > 90 ? 'bg-rose-500' : ramPct > 70 ? 'bg-amber-500' : 'bg-accent-500')}
+                </div>
+              )}
             </div>
           )}
         </div>
