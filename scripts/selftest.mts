@@ -12,7 +12,7 @@ import crypto from 'node:crypto'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { PRESETS, presetFor } from '../src/main/core/presets.ts'
-import { buildWorkflow } from '../src/main/core/workflow.ts'
+import { buildWorkflow, extractH3Chain } from '../src/main/core/workflow.ts'
 import { ComfyClient } from '../src/main/core/comfy.ts'
 import { DownloadManager } from '../src/main/core/download.ts'
 import { CATALOG, MODEL_CATALOG, resolveCatalog } from '../src/main/core/catalog.ts'
@@ -121,6 +121,33 @@ ok('H3：h3_data 高度注入', () => assert.equal(h3Out.height, 360))
 ok('H3：h3_data 帧数注入', () => assert.equal(h3Out.length, 49))
 ok('H3：h3_data 模式注入', () => assert.equal(h3Out.mode, 't2v'))
 ok('H3：KSampler 种子注入', () => assert.equal(h3wf['277'].inputs.seed, 999))
+
+// ---- H3 链式续接登记提取 ----
+const h3ChainTemplate = {
+  id: 'tpl_chain',
+  name: 'chain',
+  kind: 'video' as const,
+  description: '',
+  apiJson: {
+    '506': {
+      class_type: 'CSGlideCastCS',
+      inputs: { h3_data: JSON.stringify({ mode: 'ref2va', chain: { name: '未命名工程 42', clip: 'clip_0001', shot: 'xmlekr2' } }) }
+    }
+  },
+  mapping: { version: 1 },
+  createdAt: new Date().toISOString()
+}
+const chainWf = buildWorkflow(h3ChainTemplate, { mode: 'ref2va', frames: 33 }) as Record<string, { class_type: string; inputs: Record<string, unknown> }>
+const chainInfo = extractH3Chain(chainWf)
+ok('H3：extractH3Chain 提取工程名', () => assert.equal(chainInfo?.name, '未命名工程 42'))
+ok('H3：extractH3Chain 提取 shot', () => assert.equal(chainInfo?.shot, 'xmlekr2'))
+ok('H3：buildWorkflow 后 chain 保留（不删）', () => {
+  const h3 = JSON.parse(String(chainWf['506'].inputs.h3_data)) as { chain?: { name?: string } }
+  assert.equal(h3.chain?.name, '未命名工程 42')
+})
+ok('H3：非 H3 模板 extractH3Chain 返回 null', () => {
+  assert.equal(extractH3Chain({ '1': { class_type: 'KSampler', inputs: {} } }), null)
+})
 
 // ---- 离线客户端优雅降级 ----
 const client = new ComfyClient('127.0.0.1', 59999)

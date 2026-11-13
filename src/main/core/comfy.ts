@@ -133,6 +133,29 @@ export class ComfyClient extends EventEmitter {
     return data.prompt_id
   }
 
+  /**
+   * 登记 H3 链式续接的工程名 + 当前段（BanZhang 存档节点要求）。
+   * 提交工作流前调用，否则「💾 H3 续拍存档」节点会报「先让导演台登记当前段」。
+   * 幂等：同一 shot 重复登记返回已有段 id，不会越堆越多。
+   */
+  async registerClip(name: string, opts: { shot?: string; frames?: number } = {}): Promise<string> {
+    const body: Record<string, unknown> = { name }
+    if (opts.shot) body.shot = opts.shot
+    if (opts.frames) body.frames = opts.frames
+    const res = await fetch(`${this.base}/cglide/chain/add_clip`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    })
+    if (!res.ok) {
+      const text = await res.text()
+      throw new Error(`登记段落失败：HTTP ${res.status} ${text.slice(0, 300)}`)
+    }
+    const data = (await res.json()) as { id?: string; error?: string }
+    if (!data.id) throw new Error(data.error ?? '登记段落未返回 id')
+    return data.id
+  }
+
   async connect(): Promise<void> {
     if (this.wsReady) return
     await new Promise<void>((resolve, reject) => {

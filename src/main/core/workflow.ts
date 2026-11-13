@@ -105,8 +105,9 @@ function injectH3Data(clone: Workflow, params: WorkflowParams): void {
     if (params.height) h3.height = params.height
     if (params.frames) h3.length = params.frames
     if (params.mode) h3.mode = params.mode
+    // 只清 cont（续拍存档路径残留，避免续到错误的上次 latent）。
+    // chain 必须保留：里面的 name/shot 是链式续接登记的关键身份。
     if (h3.cont) delete h3.cont
-    if (h3.chain) delete h3.chain
     node.inputs[field] = JSON.stringify(h3)
   }
 }
@@ -239,4 +240,22 @@ export function collectTextDefaults(workflow: unknown): { positive: string; nega
   const positive = textNodes[0] ? String(Object.values(textNodes[0])[0] ?? '') : ''
   const negative = textNodes[1] ? String(Object.values(textNodes[1])[0] ?? '') : ''
   return { positive, negative }
+}
+
+/**
+ * 从 H3 工作流（API 格式）提取链式续接的工程名和分段 id。
+ * 供提交前登记（registerClip）用。非 H3 模板返回 null。
+ */
+export function extractH3Chain(workflow: unknown): { name: string; shot: string } | null {
+  if (!isWorkflowObject(workflow)) return null
+  for (const node of Object.values(workflow)) {
+    if (String(node.class_type) !== 'CSGlideCastCS') continue
+    const field = h3DataField(node)
+    if (!field) continue
+    const h3 = tryParse<{ chain?: { name?: string; shot?: string } }>(node.inputs[field])
+    const name = h3?.chain?.name?.trim()
+    if (!name) continue
+    return { name, shot: h3?.chain?.shot?.trim() ?? '' }
+  }
+  return null
 }

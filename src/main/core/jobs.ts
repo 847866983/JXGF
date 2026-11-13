@@ -1,7 +1,7 @@
 import path from 'node:path'
 import type { ComfySettings, JobInfo, JobParams, JobStatus, ShotOutput, Template } from '@shared/types'
 import { ComfyClient, makeClient } from './comfy'
-import { buildWorkflow } from './workflow'
+import { buildWorkflow, extractH3Chain } from './workflow'
 import { uid, now, ProjectStore } from './store'
 
 interface QueuedJob {
@@ -101,6 +101,17 @@ export class JobManager {
         frames: params.frames,
         seed: params.seed
       })
+
+      // H3 链式续接：提交前登记工程名 + 当前段，否则存档节点会拒绝。
+      // 失败不阻断生成（登记失败时 CSGlideCastCS 自己会兜底登记，只是存档节点可能跳过）。
+      const chain = extractH3Chain(workflow)
+      if (chain) {
+        try {
+          await this.client.registerClip(chain.name, { shot: chain.shot, frames: params.frames })
+        } catch (err) {
+          console.warn('[jobs] 登记段落失败（不阻断生成）:', String((err as Error).message ?? err))
+        }
+      }
 
       const promptId = await this.client.submit(workflow)
       info.promptId = promptId
