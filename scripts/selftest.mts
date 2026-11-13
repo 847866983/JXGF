@@ -18,6 +18,7 @@ import { DownloadManager } from '../src/main/core/download.ts'
 import { CATALOG, MODEL_CATALOG, resolveCatalog } from '../src/main/core/catalog.ts'
 import { extractArchive } from '../src/main/core/extract.ts'
 import { ProjectStore, uid, now } from '../src/main/core/store.ts'
+import { ComfyRuntime } from '../src/main/core/comfy-runtime.ts'
 
 const execFileAsync = promisify(execFile)
 
@@ -331,6 +332,39 @@ ok('store：列表读取到资产与分镜计数', () => {
   assert.equal(listAfterSave[0].scriptCount, 1)
 })
 await fsp.rm(tmp4, { recursive: true, force: true })
+
+// ---- 内置 ComfyUI 运行管理 ----
+const tmp5 = await fsp.mkdtemp(path.join(os.tmpdir(), 'ff-rt-'))
+const rt = new ComfyRuntime(tmp5)
+const cfg0 = await rt.getConfig()
+ok('runtime：默认配置 root=null port=8188', () => {
+  assert.equal(cfg0.root, null)
+  assert.equal(cfg0.port, 8188)
+})
+await rt.setConfig({ root: 'X:\\FakeComfy', port: 8190, python: null })
+const cfg1 = await rt.getConfig()
+ok('runtime：配置读写 roundtrip', () => {
+  assert.equal(cfg1.root, 'X:\\FakeComfy')
+  assert.equal(cfg1.port, 8190)
+})
+
+// 伪造便携版目录树
+await fsp.mkdir(path.join(tmp5, 'ComfyUI_windows_portable', 'ComfyUI'), { recursive: true })
+await fsp.writeFile(path.join(tmp5, 'ComfyUI_windows_portable', 'ComfyUI', 'main.py'), '')
+await fsp.mkdir(path.join(tmp5, 'ComfyUI_windows_portable', 'python_embeded'), { recursive: true })
+await fsp.writeFile(path.join(tmp5, 'ComfyUI_windows_portable', 'python_embeded', 'python.exe'), '')
+
+const rt2 = new ComfyRuntime(tmp5)
+await rt2.setConfig({ root: null, port: 8190, python: null })
+ok('runtime：探测到便携版根目录', () => assert.equal(rt2.detectRoots().length, 1))
+const st2 = await rt2.status()
+ok('runtime：探测到安装时 status=installed', () => {
+  assert.equal(st2.status, 'installed')
+  assert.ok(st2.root && st2.root.includes('ComfyUI_windows_portable'))
+})
+const stEmpty = await new ComfyRuntime(path.join(tmp5, 'empty-dir')).status()
+ok('runtime：空目录 status=missing', () => assert.equal(stEmpty.status, 'missing'))
+await fsp.rm(tmp5, { recursive: true, force: true })
 
 console.log(`\nselftest: ${pass} passed, ${fail} failed`)
 if (fail > 0) process.exit(1)

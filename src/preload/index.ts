@@ -2,6 +2,8 @@ import { contextBridge, ipcRenderer } from 'electron'
 import { CH, type PushEvent } from '../shared/ipc'
 import type {
   CatalogItem,
+  ComfyRuntimeConfig,
+  ComfyRuntimeState,
   DownloadRequest,
   DownloadTask,
   EnvironmentReport,
@@ -24,6 +26,12 @@ const api = {
   envCatalog: (): Promise<CatalogItem[]> => ipcRenderer.invoke(CH.envCatalog),
   envExtract: (payload: { archive: string; dest: string }): Promise<{ dest: string }> =>
     ipcRenderer.invoke(CH.envExtract, payload),
+
+  comfyRuntimeStatus: (): Promise<ComfyRuntimeState> => ipcRenderer.invoke(CH.comfyRuntimeStatus),
+  comfyRuntimeStart: (): Promise<ComfyRuntimeState> => ipcRenderer.invoke(CH.comfyRuntimeStart),
+  comfyRuntimeStop: (): Promise<ComfyRuntimeState> => ipcRenderer.invoke(CH.comfyRuntimeStop),
+  comfyRuntimeSetConfig: (cfg: ComfyRuntimeConfig): Promise<ComfyRuntimeConfig> =>
+    ipcRenderer.invoke(CH.comfyRuntimeSetConfig, cfg),
 
   projectList: () => ipcRenderer.invoke(CH.projectList),
   projectOpen: (id: string): Promise<Project> => ipcRenderer.invoke(CH.projectOpen, id),

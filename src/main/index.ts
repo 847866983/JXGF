@@ -3,6 +3,7 @@ import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { CH, type PushEvent } from '../shared/ipc'
 import type {
+  ComfyRuntimeConfig,
   DownloadRequest,
   EnvironmentReport,
   FfmpegInfo,
@@ -20,6 +21,7 @@ import { JobManager } from './core/jobs'
 import { DownloadManager } from './core/download'
 import { resolveCatalog } from './core/catalog'
 import { extractArchive } from './core/extract'
+import { ComfyRuntime } from './core/comfy-runtime'
 import { Updater } from './core/updater'
 
 let mainWindow: BrowserWindow | null = null
@@ -28,6 +30,7 @@ let hardwarePending: Promise<HardwareReport> | null = null
 let store: ProjectStore
 let jobs: JobManager
 const downloads = new DownloadManager()
+let comfyRuntime: ComfyRuntime
 const updater = new Updater()
 
 const gotLock = app.requestSingleInstanceLock()
@@ -162,6 +165,11 @@ function registerIpc(): void {
     return extractArchive(archive, dest)
   })
 
+  ipcMain.handle(CH.comfyRuntimeStatus, () => comfyRuntime.status())
+  ipcMain.handle(CH.comfyRuntimeStart, () => comfyRuntime.start())
+  ipcMain.handle(CH.comfyRuntimeStop, () => comfyRuntime.stop())
+  ipcMain.handle(CH.comfyRuntimeSetConfig, (_e, cfg: ComfyRuntimeConfig) => comfyRuntime.setConfig(cfg))
+
   ipcMain.handle(CH.projectList, () => store.list())
   ipcMain.handle(CH.projectCreate, async (_e, name: string) => store.create(name))
   ipcMain.handle(CH.projectOpen, (_e, id: string) => store.open(id))
@@ -202,6 +210,9 @@ function registerIpc(): void {
 app.whenReady().then(() => {
   store = new ProjectStore(path.join(app.getPath('userData'), 'projects'))
   void store.init()
+
+  comfyRuntime = new ComfyRuntime(path.join(app.getPath('userData'), 'runtime'))
+  comfyRuntime.on('state', (state) => push({ type: 'comfy:runtime', state }))
 
   jobs = new JobManager(store, (type, payload) => {
     push({ type, ...(payload as Record<string, unknown>) } as PushEvent)

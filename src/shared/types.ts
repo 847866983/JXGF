@@ -313,3 +313,24 @@ export interface CatalogItem {
   extracted: boolean
   extract: boolean
 }
+
+// ---------- 内置 ComfyUI 运行管理 ----------
+
+export type ComfyRuntimeStatus = 'missing' | 'installed' | 'starting' | 'running' | 'stopped' | 'error'
+
+export interface ComfyRuntimeConfig {
+  /** ComfyUI 根目录（含 main.py；便携版则是含 ComfyUI/ 子目录的那层） */
+  root: string | null
+  port: number
+  /** 可选：显式指定 python.exe；缺省自动探测 */
+  python: string | null
+}
+
+export interface ComfyRuntimeState {
+  status: ComfyRuntimeStatus
+  root: string | null
+  port: number
+  pid: number | null
+  logTail: string
+  error?: string
+}

@@ -1,13 +1,22 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Activity, CheckCircle2, Cpu, Download, FolderOpen, PackagePlus, RefreshCw, ServerCog, TriangleAlert } from 'lucide-react'
-import type { CatalogItem, DownloadTask, EnvironmentReport } from '@shared/types'
+import { Activity, CheckCircle2, Cpu, Download, FolderOpen, PackagePlus, Play, RefreshCw, ServerCog, Square, TriangleAlert } from 'lucide-react'
+import type { CatalogItem, ComfyRuntimeState, DownloadTask, EnvironmentReport } from '@shared/types'
 import { PageHeader } from '../components/ui'
 
 const modeText: Record<string, { label: string; tone: string }> = {
   'local-full': { label: '本地全功能（视频+图片）', tone: 'text-emerald-400' },
   'local-image': { label: '本地仅图片', tone: 'text-amber-400' },
   remote: { label: '远程模式', tone: 'text-sky-400' }
+}
+
+const runtimeText: Record<string, { label: string; tone: string }> = {
+  missing: { label: '未安装', tone: 'text-slate-400' },
+  installed: { label: '已安装（未运行）', tone: 'text-amber-400' },
+  starting: { label: '启动中…', tone: 'text-accent-400' },
+  running: { label: '运行中', tone: 'text-emerald-400' },
+  stopped: { label: '已停止', tone: 'text-slate-400' },
+  error: { label: '出错', tone: 'text-rose-400' }
 }
 
 export default function Environment(): React.JSX.Element {
@@ -19,6 +28,10 @@ export default function Environment(): React.JSX.Element {
   const [catalog, setCatalog] = useState<CatalogItem[]>([])
   const [sourceIndex, setSourceIndex] = useState<Record<string, number>>({})
   const [extractingId, setExtractingId] = useState<string | null>(null)
+  const [runtime, setRuntime] = useState<ComfyRuntimeState | null>(null)
+  const [runtimeRoot, setRuntimeRoot] = useState('')
+  const [runtimePort, setRuntimePort] = useState('8188')
+  const [busy, setBusy] = useState(false)
 
   const scan = (): void => {
     setLoading(true)
@@ -46,9 +59,53 @@ export default function Environment(): React.JSX.Element {
     }
   }
 
+  const refreshRuntime = (): void => {
+    void window.api.comfyRuntimeStatus().then((st) => {
+      setRuntime(st)
+      setRuntimeRoot(st.root ?? '')
+      setRuntimePort(String(st.port ?? 8188))
+    })
+  }
+
+  const startRuntime = async (): Promise<void> => {
+    setBusy(true)
+    try {
+      setRuntime(await window.api.comfyRuntimeStart())
+    } catch (err) {
+      setError(String((err as Error).message ?? err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const stopRuntime = async (): Promise<void> => {
+    setBusy(true)
+    try {
+      setRuntime(await window.api.comfyRuntimeStop())
+    } catch (err) {
+      setError(String((err as Error).message ?? err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const saveRuntimeConfig = async (): Promise<void> => {
+    try {
+      await window.api.comfyRuntimeSetConfig({
+        root: runtimeRoot.trim() || null,
+        port: Number(runtimePort) || 8188,
+        python: null
+      })
+      refreshRuntime()
+    } catch (err) {
+      setError(String((err as Error).message ?? err))
+    }
+  }
+
   useEffect(() => {
     scan()
     refreshCatalog()
+    refreshRuntime()
   }, [])
 
   useEffect(() => {
@@ -58,6 +115,7 @@ export default function Environment(): React.JSX.Element {
         void window.api.downloadList().then(setTasks)
         refreshCatalog()
       }
+      if (e.type === 'comfy:runtime') setRuntime(e.state)
     })
   }, [])
 
@@ -398,6 +456,86 @@ export default function Environment(): React.JSX.Element {
               <div className="mt-3 text-[11px] text-slate-600">
                 下载使用断点续传，失败后可直接重新点击继续；大文件下载到「用户数据/runtime」目录，不随应用安装包走。
               </div>
+            </section>
+
+            {/* 7 内置 ComfyUI */}
+            <section className="panel p-5">
+              <div className="mb-3 flex items-center gap-2 text-sm font-medium text-white">
+                <ServerCog size={15} className="text-accent-400" />
+                7 · 内置 ComfyUI
+              </div>
+
+              <div className="flex items-center gap-3">
+                <span
+                  className={`rounded px-2 py-0.5 text-xs ${
+                    runtimeText[runtime?.status ?? 'missing']?.tone ?? 'text-slate-400'
+                  }`}
+                >
+                  {runtimeText[runtime?.status ?? 'missing']?.label ?? '未知'}
+                </span>
+                {runtime?.status === 'running' && (
+                  <span className="text-xs text-slate-500">
+                    pid {runtime.pid} · 端口 {runtime.port}
+                  </span>
+                )}
+                <div className="ml-auto flex gap-2">
+                  <button className="btn-ghost" disabled={busy} onClick={refreshRuntime}>
+                    <RefreshCw size={14} />
+                    刷新
+                  </button>
+                  {runtime?.status === 'running' ? (
+                    <button className="btn-ghost" disabled={busy} onClick={() => void stopRuntime()}>
+                      <Square size={14} />
+                      停止
+                    </button>
+                  ) : (
+                    <button
+                      className="btn-primary"
+                      disabled={busy || !runtime?.root}
+                      title={runtime?.root ? undefined : '请先填写 ComfyUI 根目录'}
+                      onClick={() => void startRuntime()}
+                    >
+                      <Play size={14} />
+                      启动
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <div className="mt-3 grid grid-cols-[1fr_110px_auto] gap-2">
+                <div>
+                  <label className="label">ComfyUI 根目录（含 main.py 或 ComfyUI\ 子目录）</label>
+                  <input
+                    className="field"
+                    placeholder="例如 E:\ComfyUI (1)"
+                    value={runtimeRoot}
+                    onChange={(e) => setRuntimeRoot(e.target.value)}
+                  />
+                </div>
+                <div>
+                  <label className="label">端口</label>
+                  <input className="field" value={runtimePort} onChange={(e) => setRuntimePort(e.target.value)} />
+                </div>
+                <div className="flex items-end">
+                  <button className="btn-ghost" onClick={() => void saveRuntimeConfig()}>
+                    保存
+                  </button>
+                </div>
+              </div>
+
+              {runtime?.error && <div className="mt-2 text-xs text-rose-400">{runtime.error}</div>}
+
+              {runtime?.status === 'missing' && (
+                <div className="mt-3 rounded-lg bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
+                  还没有可用的 ComfyUI：去上方「6 · 环境安装」下载便携版并解压，或填写本机已有的 ComfyUI 根目录后保存。
+                </div>
+              )}
+
+              {runtime?.logTail && (
+                <pre className="mt-3 max-h-40 overflow-auto rounded-lg bg-ink-950/70 p-3 font-mono text-[11px] leading-relaxed text-slate-400">
+                  {runtime.logTail}
+                </pre>
+              )}
             </section>
           </>
         )}

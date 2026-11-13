@@ -10,6 +10,10 @@ export const CH = {
   envScan: 'env:scan',
   envCatalog: 'env:catalog',
   envExtract: 'env:extract',
+  comfyRuntimeStatus: 'runtime:status',
+  comfyRuntimeStart: 'runtime:start',
+  comfyRuntimeStop: 'runtime:stop',
+  comfyRuntimeSetConfig: 'runtime:set-config',
   projectList: 'project:list',
   projectOpen: 'project:open',
   projectCreate: 'project:create',
@@ -38,3 +42,4 @@ export type PushEvent =
   | { type: 'comfy:status'; status: import('./types').ComfySystemStats }
   | { type: 'update:state'; info: import('./types').UpdateInfo }
   | { type: 'download:state'; task: import('./types').DownloadTask }
+  | { type: 'comfy:runtime'; state: import('./types').ComfyRuntimeState }
