@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import {
   Activity,
@@ -11,6 +11,7 @@ import {
   Settings,
   Sparkles
 } from 'lucide-react'
+import type { ProjectSummary } from '@shared/types'
 import { useApp } from '../store/app'
 
 const items = [
@@ -27,6 +28,10 @@ export function Sidebar(): React.JSX.Element {
   const project = useApp((s) => s.project)
   const comfy = useApp((s) => s.comfy)
   const refreshComfy = useApp((s) => s.refreshComfy)
+  const listProjects = useApp((s) => s.listProjects)
+  const openProject = useApp((s) => s.openProject)
+
+  const [projects, setProjects] = useState<ProjectSummary[]>([])
 
   // 每 5 秒刷新一次 ComfyUI 运行信息
   useEffect(() => {
@@ -34,6 +39,11 @@ export function Sidebar(): React.JSX.Element {
     const timer = setInterval(() => void refreshComfy(), 5000)
     return () => clearInterval(timer)
   }, [refreshComfy])
+
+  // 加载项目列表（用于切换）
+  useEffect(() => {
+    void listProjects().then(setProjects)
+  }, [listProjects, project?.id])
 
   // 字节 -> 人类可读
   const gb = (bytes?: number): string => (bytes !== undefined && bytes > 0 ? `${(bytes / 1024 / 1024 / 1024).toFixed(1)}GB` : '—')
@@ -156,9 +166,27 @@ export function Sidebar(): React.JSX.Element {
       <div className="border-t border-white/5 p-4">
         <div className="rounded-lg bg-ink-850 p-3">
           <div className="text-[10px] uppercase tracking-widest text-slate-500">当前项目</div>
-          <div className="mt-1 truncate text-sm font-medium text-slate-200">
-            {project ? project.name : '未打开'}
-          </div>
+          <select
+            className="field mt-1.5 w-full"
+            value={project?.id ?? ''}
+            onChange={(e) => {
+              const id = e.target.value
+              if (id) void openProject(id)
+            }}
+          >
+            {projects.length === 0 ? (
+              <option value="">未打开项目</option>
+            ) : (
+              <>
+                {!project && <option value="">选择项目…</option>}
+                {projects.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </>
+            )}
+          </select>
         </div>
       </div>
     </aside>

@@ -5,6 +5,7 @@ import type {
   HardwareReport,
   JobInfo,
   Project,
+  ProjectSummary,
   Template,
   UpdateInfo
 } from '@shared/types'
@@ -19,6 +20,7 @@ interface AppState {
   loadHardware: () => Promise<void>
   refreshComfy: (settings?: ComfySettings) => Promise<void>
   testComfy: (settings?: ComfySettings) => Promise<{ ok: boolean; version: string; error: string | null }>
+  listProjects: () => Promise<ProjectSummary[]>
   openProject: (id: string) => Promise<void>
   createProject: (name: string) => Promise<void>
   saveProject: (project: Project) => Promise<void>
@@ -52,6 +54,8 @@ export const useApp = create<AppState>((set, get) => ({
   },
 
   testComfy: async (settings) => window.api.comfyTest(settings ?? get().project?.settings.comfy),
+
+  listProjects: async () => window.api.projectList(),
 
   openProject: async (id) => {
     const project = await window.api.projectOpen(id)

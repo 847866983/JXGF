@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { Cpu, FolderPlus, Gauge, HardDrive, RefreshCw } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import { Cpu, FolderKanban, FolderPlus, Gauge, HardDrive, ListOrdered, RefreshCw } from 'lucide-react'
 import type { ProjectSummary } from '@shared/types'
 import { useApp } from '../store/app'
 import { EmptyState, PageHeader, StatCard } from '../components/ui'
@@ -11,6 +12,7 @@ export default function Dashboard(): React.JSX.Element {
   const refreshComfy = useApp((s) => s.refreshComfy)
   const openProject = useApp((s) => s.openProject)
   const createProject = useApp((s) => s.createProject)
+  const navigate = useNavigate()
 
   const [projects, setProjects] = useState<ProjectSummary[]>([])
   const [newName, setNewName] = useState('')
@@ -158,24 +160,41 @@ export default function Dashboard(): React.JSX.Element {
         ) : (
           <div className="grid grid-cols-3 gap-4">
             {projects.map((p) => (
-              <button
-                key={p.id}
-                className="panel p-4 text-left transition-colors hover:border-accent/40"
-                onClick={() => void openProject(p.id)}
-              >
-                <div className="flex items-center gap-2">
-                  <Cpu size={14} className="text-accent-400" />
-                  <span className="truncate font-medium text-white">{p.name}</span>
+              <div key={p.id} className="panel p-4 text-left transition-colors hover:border-accent/40">
+                <button
+                  className="w-full text-left"
+                  onClick={() => void openProject(p.id).then(() => navigate('/assets'))}
+                >
+                  <div className="flex items-center gap-2">
+                    <Cpu size={14} className="text-accent-400" />
+                    <span className="truncate font-medium text-white">{p.name}</span>
+                  </div>
+                  <div className="mt-3 flex gap-4 text-xs text-slate-500">
+                    <span>{p.scriptCount} 剧本</span>
+                    <span>{p.shotCount} 分镜</span>
+                    <span>{p.assetCount} 资产</span>
+                  </div>
+                  <div className="mt-2 text-[11px] text-slate-600">
+                    更新于 {new Date(p.updatedAt).toLocaleString()}
+                  </div>
+                </button>
+                <div className="mt-3 flex gap-2 border-t border-white/5 pt-3">
+                  <button
+                    className="btn-ghost flex-1 !px-2 !py-1.5 text-xs"
+                    onClick={() => void openProject(p.id).then(() => navigate('/assets'))}
+                  >
+                    <FolderKanban size={13} />
+                    资产管理
+                  </button>
+                  <button
+                    className="btn-ghost flex-1 !px-2 !py-1.5 text-xs"
+                    onClick={() => void openProject(p.id).then(() => navigate('/storyboard'))}
+                  >
+                    <ListOrdered size={13} />
+                    剧本分镜
+                  </button>
                 </div>
-                <div className="mt-3 flex gap-4 text-xs text-slate-500">
-                  <span>{p.scriptCount} 剧本</span>
-                  <span>{p.shotCount} 分镜</span>
-                  <span>{p.assetCount} 资产</span>
-                </div>
-                <div className="mt-2 text-[11px] text-slate-600">
-                  更新于 {new Date(p.updatedAt).toLocaleString()}
-                </div>
-              </button>
+              </div>
             ))}
           </div>
         )}
