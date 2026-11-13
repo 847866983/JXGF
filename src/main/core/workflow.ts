@@ -51,49 +51,63 @@ function tryParse<T>(v: unknown): T | null {
 }
 
 /**
+ * 找到节点里存放 h3_data 的字段名（不同版本叫法不同：h3_data 或 first_frame）。
+ */
+function h3DataField(node: WorkflowNode): string | null {
+  for (const key of ['h3_data', 'first_frame']) {
+    if (typeof node.inputs[key] === 'string') return key
+  }
+  return null
+}
+
+/**
+ * 找到节点里存放 desk_data 的字段名（desk_data 或「外接提示词」）。
+ */
+function deskDataField(node: WorkflowNode): string | null {
+  for (const key of ['desk_data', '外接提示词', '外接提示词 ']) {
+    if (typeof node.inputs[key] === 'string') return key
+  }
+  return null
+}
+
+/**
  * 把 MiniMax-H3 工作流的提示词写进 CSGlideDeskCS 的 desk_data.segs。
- * H3 的提示词不是普通文本节点，而是 desk_data 里的分段（clip_0001…）。
- * 我们只更新「当前 clip」那段，其余分段保留原样（多段链式续接的语义不破坏）。
  */
 function injectH3Prompt(clone: Workflow, positive: string): boolean {
   for (const node of Object.values(clone)) {
     if (String(node.class_type) !== 'CSGlideDeskCS') continue
-    const raw = node.inputs.desk_data
-    const desk = tryParse<DeskData>(raw)
+    const field = deskDataField(node)
+    if (!field) continue
+    const desk = tryParse<DeskData>(node.inputs[field])
     if (!desk) continue
 
     const clip = desk.chain?.clip ?? 'clip_0001'
-    // 用户镜头提示词替换到当前 clip 段；没有则新建该段
     desk.segs = desk.segs ?? {}
     desk.segs[clip] = positive
-    node.inputs.desk_data = JSON.stringify(desk)
-
-    // 同步 chain.shot，让下游 CSGlideCastCS 的 prompt_text 能取到
-    if (desk.chain) {
-      desk.chain.shot = clip
-    }
+    if (desk.chain) desk.chain.shot = clip
+    node.inputs[field] = JSON.stringify(desk)
     return true
   }
   return false
 }
 
 /**
- * 注入 H3 的尺寸 / 帧数 / 模式到 CSGlideCastCS 的 h3_data。
+ * 注入 H3 的尺寸 / 帧数 / 模式到 CSGlideCastCS 的 h3_data（或 first_frame）。
  */
 function injectH3Data(clone: Workflow, params: WorkflowParams): void {
   for (const node of Object.values(clone)) {
     if (String(node.class_type) !== 'CSGlideCastCS') continue
-    const raw = node.inputs.h3_data
-    const h3 = tryParse<H3Data>(raw)
+    const field = h3DataField(node)
+    if (!field) continue
+    const h3 = tryParse<H3Data>(node.inputs[field])
     if (!h3) continue
     if (params.width) h3.width = params.width
     if (params.height) h3.height = params.height
     if (params.frames) h3.length = params.frames
     if (params.mode) h3.mode = params.mode
-    // 清掉链式续接残留（上次会话的 cont 信息）
     if (h3.cont) delete h3.cont
     if (h3.chain) delete h3.chain
-    node.inputs.h3_data = JSON.stringify(h3)
+    node.inputs[field] = JSON.stringify(h3)
   }
 }
 
@@ -126,6 +140,34 @@ function clearH3Refs(clone: Workflow, mode?: string): void {
 }
 
 /**
+ * H3 参数一致性修正（实测必需，否则 SelfLift 报错）：
+ * 1. SelfLift「分段步数」合计必须等于 KSampler 的 steps，否则 ValueError。
+ * 2. 无效调度器名（如 bong_tangent）会导致 calculate_sigmas 报错，改成 simple。
+ */
+function fixH3Params(clone: Workflow): void {
+  let ksamplerSteps: number | null = null
+  for (const node of Object.values(clone)) {
+    if (String(node.class_type) === 'KSampler' && typeof node.inputs.steps === 'number') {
+      ksamplerSteps = node.inputs.steps
+      break
+    }
+  }
+  for (const node of Object.values(clone)) {
+    const inputs = node.inputs
+    // SelfLift 分段步数对齐 KSampler steps
+    if (typeof inputs['分段步数'] === 'string' && ksamplerSteps !== null) {
+      const total = ksamplerSteps
+      const half = Math.floor(total / 2)
+      inputs['分段步数'] = `${half},${total - half}`
+    }
+    // 无效调度器 -> simple
+    if (inputs['调度器'] === 'bong_tangent') {
+      inputs['调度器'] = 'simple'
+    }
+  }
+}
+
+/**
  * 把模板（API 格式）与镜头参数合成最终提交给 ComfyUI 的工作流。
  *
  * 采用「探测式注入」，节点 ID 永不写死：
@@ -146,6 +188,7 @@ export function buildWorkflow(template: Template, params: WorkflowParams): unkno
     }
     injectH3Data(clone, params)
     clearH3Refs(clone, params.mode)
+    fixH3Params(clone)
     // H3 的种子在 KSampler 节点
     if (params.seed !== undefined) {
       for (const node of Object.values(clone)) {
