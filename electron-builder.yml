@@ -7,6 +7,12 @@ files:
   - out/**/*
   - package.json
 asar: true
+# MCP 服务器单独放到 resources/mcp/ 下，供 AI 客户端以 node 子进程直接运行（asar 内无法直接执行）
+extraResources:
+  - from: out/mcp
+    to: mcp
+    filter:
+      - '**/*'
 win:
   target:
     - target: nsis

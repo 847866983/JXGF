@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ChangeEvent } from 'react'
-import { Download, FileUp, RefreshCw, RotateCw, Save, ShieldCheck, Workflow } from 'lucide-react'
+import { Copy, Download, FileUp, Plug, RefreshCw, RotateCw, Save, ShieldCheck, Workflow } from 'lucide-react'
 import type { ComfySettings } from '@shared/types'
 import { useApp } from '../store/app'
 import { PageHeader } from '../components/ui'
@@ -25,6 +25,17 @@ export default function Settings(): React.JSX.Element {
   const [checking, setChecking] = useState(false)
   const [importError, setImportError] = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
+  const [mcp, setMcp] = useState<{
+    script: string
+    projectsDir: string
+    command: string
+    args: string[]
+  } | null>(null)
+  const [copied, setCopied] = useState(false)
+
+  useEffect(() => {
+    void window.api.appInfo().then((info) => setMcp(info.mcp))
+  }, [])
 
   useEffect(() => {
     setHost(saved.host)
@@ -239,6 +250,88 @@ export default function Settings(): React.JSX.Element {
                   <span className="text-[11px] text-slate-500">{t.id.slice(0, 12)}</span>
                 </div>
               ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* MCP 接入 */}
+      <div className="px-8 pb-8">
+        <div className="panel mt-4 p-5">
+          <div className="mb-3 flex items-center justify-between">
+            <div className="flex items-center gap-2 text-sm font-medium text-white">
+              <Plug size={15} className="text-accent-400" />
+              MCP 接入（AI 助手调用）
+            </div>
+            {mcp && (
+              <button
+                className="btn-ghost"
+                onClick={() => {
+                  const cfg = {
+                    mcpServers: {
+                      'jingxu-studio': {
+                        command: mcp.command,
+                        args: mcp.args,
+                        env: { JXGF_PROJECTS: mcp.projectsDir }
+                      }
+                    }
+                  }
+                  void navigator.clipboard.writeText(JSON.stringify(cfg, null, 2)).then(() => {
+                    setCopied(true)
+                    setTimeout(() => setCopied(false), 2000)
+                  })
+                }}
+              >
+                <Copy size={14} />
+                {copied ? '已复制' : '复制配置 JSON'}
+              </button>
+            )}
+          </div>
+
+          <div className="mb-3 text-xs text-slate-500">
+            让豆包 / DeepSeek Harness / Claude 等 AI 助手直接读写剧本分镜与资产管理。把下面的配置粘贴到 AI 客户端的「MCP 服务器」设置里（stdio 类型）。
+          </div>
+
+          {!mcp ? (
+            <div className="text-sm text-slate-500">读取中…</div>
+          ) : (
+            <div className="space-y-3">
+              <div className="grid grid-cols-1 gap-2 text-sm">
+                <div className="flex items-center gap-2">
+                  <span className="w-24 shrink-0 text-xs text-slate-500">服务器脚本</span>
+                  <code className="min-w-0 flex-1 truncate rounded bg-ink-950/60 px-2 py-1 text-xs text-slate-300">
+                    {mcp.script}
+                  </code>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="w-24 shrink-0 text-xs text-slate-500">项目目录</span>
+                  <code className="min-w-0 flex-1 truncate rounded bg-ink-950/60 px-2 py-1 text-xs text-slate-300">
+                    {mcp.projectsDir}
+                  </code>
+                </div>
+              </div>
+
+              <pre className="max-h-56 overflow-auto rounded-lg bg-ink-950/70 p-3 font-mono text-[11px] leading-relaxed text-slate-300">
+{JSON.stringify(
+  {
+    mcpServers: {
+      'jingxu-studio': {
+        command: mcp.command,
+        args: mcp.args,
+        env: { JXGF_PROJECTS: mcp.projectsDir }
+      }
+    }
+  },
+  null,
+  2
+)}
+              </pre>
+
+              <div className="text-[11px] text-slate-600">
+                提供的工具：list_projects / create_asset / update_asset / create_script / create_episode /
+                create_scene / create_shot / add_shots（批量）/ list_shots / update_shot 等共 13 个。
+                详见 docs/MCP接入指南.md。
+              </div>
             </div>
           )}
         </div>

@@ -104,13 +104,29 @@ function detectFfmpeg(): FfmpegInfo {
 }
 
 function registerIpc(): void {
-  ipcMain.handle(CH.appInfo, () => ({
-    name: '镜序工坊',
-    version: app.getVersion(),
-    packaged: app.isPackaged,
-    userData: app.getPath('userData'),
-    platform: process.platform
-  }))
+  ipcMain.handle(CH.appInfo, () => {
+    const userData = app.getPath('userData')
+    const projectsDir = path.join(userData, 'projects')
+    // MCP server 脚本路径：打包后位于 resources/mcp/server.mjs，开发时在 src/mcp/server.ts
+    const mcpScript = app.isPackaged
+      ? path.join(process.resourcesPath, 'mcp', 'server.mjs')
+      : path.join(app.getAppPath(), 'src', 'mcp', 'server.ts')
+    return {
+      name: '镜序工坊',
+      version: app.getVersion(),
+      packaged: app.isPackaged,
+      userData,
+      platform: process.platform,
+      mcp: {
+        script: mcpScript,
+        projectsDir,
+        command: 'node',
+        args: app.isPackaged
+          ? [mcpScript]
+          : ['--disable-warning=MODULE_TYPELESS_PACKAGE_JSON', mcpScript]
+      }
+    }
+  })
 
   ipcMain.handle(CH.hardwareDetect, () => getHardware())
 

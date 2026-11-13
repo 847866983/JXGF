@@ -15,8 +15,14 @@ import type {
 } from '../shared/types'
 
 const api = {
-  appInfo: (): Promise<{ name: string; version: string; packaged: boolean; userData: string; platform: string }> =>
-    ipcRenderer.invoke(CH.appInfo),
+  appInfo: (): Promise<{
+    name: string
+    version: string
+    packaged: boolean
+    userData: string
+    platform: string
+    mcp: { script: string; projectsDir: string; command: string; args: string[] }
+  }> => ipcRenderer.invoke(CH.appInfo),
 
   hardwareDetect: (): Promise<HardwareReport> => ipcRenderer.invoke(CH.hardwareDetect),
 
