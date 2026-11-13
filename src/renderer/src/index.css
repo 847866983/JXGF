@@ -1,0 +1,54 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    @apply bg-ink-950 text-slate-200 font-sans antialiased;
+    overflow: hidden;
+  }
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #2b3147;
+    border-radius: 8px;
+    border: 2px solid #0a0b10;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #3a4260;
+  }
+  ::selection {
+    background: rgba(124, 92, 255, 0.35);
+  }
+}
+
+@layer components {
+  .panel {
+    @apply rounded-xl border border-white/5 bg-ink-900 shadow-panel;
+  }
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-3.5 py-2 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .btn-primary {
+    @apply btn bg-accent-600 text-white hover:bg-accent-500;
+  }
+  .btn-ghost {
+    @apply btn border border-white/10 bg-white/[0.03] text-slate-300 hover:bg-white/[0.07];
+  }
+  .field {
+    @apply w-full rounded-lg border border-white/10 bg-ink-950/60 px-3 py-2 text-sm text-slate-200 outline-none transition-colors placeholder:text-slate-500 focus:border-accent/60;
+  }
+  .label {
+    @apply mb-1.5 block text-xs font-medium uppercase tracking-wide text-slate-400;
+  }
+}

@@ -1,0 +1,248 @@
+import { EventEmitter } from 'node:events'
+import fs from 'node:fs'
+import fsp from 'node:fs/promises'
+import path from 'node:path'
+import crypto from 'node:crypto'
+import WebSocket from 'ws'
+import type { ComfySettings, ComfySystemStats, ModelInventory } from '@shared/types'
+
+export interface UploadedImage {
+  name: string
+  subfolder: string
+  type: string
+}
+
+interface WsExecutedPayload {
+  prompt_id: string
+  node: string
+  output?: {
+    images?: { filename: string; subfolder: string; type: string }[]
+    videos?: { filename: string; subfolder: string; type: string }[]
+    gifs?: { filename: string; subfolder: string; type: string }[]
+  }
+}
+
+/**
+ * ComfyUI 的薄客户端。业务层只跟它打交道，不直接拼 API。
+ * 通道：POST /upload/image、POST /prompt、WS /ws、GET /history、GET /view。
+ */
+export class ComfyClient extends EventEmitter {
+  readonly clientId = crypto.randomUUID()
+  private ws: WebSocket | null = null
+  private wsReady = false
+  private readonly host: string
+  private readonly port: number
+  private readonly protocol: 'http' | 'https'
+
+  constructor(host = '127.0.0.1', port = 8188, protocol: 'http' | 'https' = 'http') {
+    super()
+    this.host = host
+    this.port = port
+    this.protocol = protocol
+  }
+
+  get base(): string {
+    return `${this.protocol}://${this.host}:${this.port}`
+  }
+
+  async systemStats(): Promise<ComfySystemStats> {
+    try {
+      const res = await fetch(`${this.base}/system_stats`, { signal: AbortSignal.timeout(4000) })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const raw = (await res.json()) as Record<string, unknown>
+      const sys = (raw.system ?? {}) as Record<string, unknown>
+      const devices = Array.isArray(raw.devices) ? (raw.devices as Array<Record<string, unknown>>) : []
+      const gpu = devices[0]
+      return {
+        online: true,
+        version: String(sys.comfyui_version ?? sys.version ?? ''),
+        gpu: gpu
+          ? {
+              name: String(gpu.name ?? ''),
+              vramTotal: Number(gpu.vram_total ?? 0),
+              vramFree: Number(gpu.vram_free ?? 0)
+            }
+          : null,
+        cpuAvailable: true,
+        queueRemaining: 0,
+        queueRunning: 0,
+        raw
+      }
+    } catch {
+      return { online: false, version: '', gpu: null, cpuAvailable: false, queueRemaining: 0, queueRunning: 0 }
+    }
+  }
+
+  async queueStatus(): Promise<{ queueRemaining: number; queueRunning: number }> {
+    try {
+      const res = await fetch(`${this.base}/queue`, { signal: AbortSignal.timeout(4000) })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const data = (await res.json()) as { queue_running?: unknown[]; queue_pending?: unknown[] }
+      return {
+        queueRunning: data.queue_running?.length ?? 0,
+        queueRemaining: data.queue_pending?.length ?? 0
+      }
+    } catch {
+      return { queueRemaining: 0, queueRunning: 0 }
+    }
+  }
+
+  /**
+   * 读取 /object_info，提取常见加载节点能选到的模型清单。
+   * 不同自定义节点可能有不同的加载器，这里只列最通用的三类作为环境自检参考。
+   */
+  async modelInventory(): Promise<ModelInventory> {
+    const res = await fetch(`${this.base}/object_info`, { signal: AbortSignal.timeout(10000) })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const info = (await res.json()) as Record<string, unknown>
+    const pick = (node: string, key: string): string[] => {
+      const nodeInfo = info[node] as { input?: { required?: Record<string, unknown> } } | undefined
+      const arr = nodeInfo?.input?.required?.[key]
+      const list = Array.isArray(arr) ? (arr[0] as unknown[]) : []
+      return Array.isArray(list) ? list.map(String) : []
+    }
+    return {
+      checkpoints: pick('CheckpointLoaderSimple', 'ckpt_name'),
+      loras: pick('LoraLoader', 'lora_name'),
+      vaes: pick('VAELoader', 'vae_name')
+    }
+  }
+
+  async uploadImage(filePath: string): Promise<UploadedImage> {
+    const buf = await fsp.readFile(filePath)
+    const form = new FormData()
+    form.append('image', new Blob([buf]), path.basename(filePath))
+    form.append('overwrite', 'true')
+    const res = await fetch(`${this.base}/upload/image`, { method: 'POST', body: form })
+    if (!res.ok) throw new Error(`上传参考图失败：HTTP ${res.status} ${await res.text()}`)
+    return (await res.json()) as UploadedImage
+  }
+
+  async submit(workflow: unknown): Promise<string> {
+    const res = await fetch(`${this.base}/prompt`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: workflow, client_id: this.clientId })
+    })
+    if (!res.ok) {
+      const text = await res.text()
+      throw new Error(`提交工作流失败：HTTP ${res.status} ${text.slice(0, 400)}`)
+    }
+    const data = (await res.json()) as { prompt_id?: string; error?: string }
+    if (!data.prompt_id) throw new Error(data.error ?? 'ComfyUI 未返回 prompt_id')
+    return data.prompt_id
+  }
+
+  async connect(): Promise<void> {
+    if (this.wsReady) return
+    await new Promise<void>((resolve, reject) => {
+      const url = `${this.protocol === 'https' ? 'wss' : 'ws'}://${this.host}:${this.port}/ws?clientId=${this.clientId}`
+      const ws = new WebSocket(url)
+      this.ws = ws
+      const fail = (err: Error): void => {
+        this.wsReady = false
+        reject(err)
+      }
+      ws.on('open', () => {
+        this.wsReady = true
+        resolve()
+      })
+      ws.on('error', fail)
+      ws.on('close', () => {
+        this.wsReady = false
+      })
+      ws.on('message', (raw) => {
+        this.handleMessage(raw.toString())
+      })
+    })
+  }
+
+  private handleMessage(text: string): void {
+    try {
+      const msg = JSON.parse(text) as Record<string, unknown>
+      const type = String(msg.type ?? '')
+      if (type === 'progress') {
+        const data = (msg.data ?? {}) as { value?: number; max?: number; prompt_id?: string; node?: string }
+        const value = Number(data.value ?? 0)
+        const max = Number(data.max ?? 1)
+        this.emit('progress', {
+          promptId: data.prompt_id,
+          node: data.node,
+          value,
+          max,
+          percent: max > 0 ? Math.min(100, Math.round((value / max) * 100)) : 0
+        })
+      } else if (type === 'executing') {
+        const data = (msg.data ?? {}) as { node?: unknown; prompt_id?: string }
+        this.emit('executing', { promptId: data.prompt_id, node: data.node ? String(data.node) : null })
+      } else if (type === 'executed') {
+        const data = (msg.data ?? {}) as WsExecutedPayload
+        this.emit('executed', { promptId: data.prompt_id, output: data.output ?? {} })
+      } else if (type === 'execution_error') {
+        const data = (msg.data ?? {}) as { prompt_id?: string; exception_message?: string }
+        this.emit('execution_error', { promptId: data.prompt_id, message: data.exception_message ?? '执行失败' })
+      }
+    } catch {
+      // 忽略无法解析的消息
+    }
+  }
+
+  async history(promptId: string): Promise<Record<string, unknown>> {
+    const res = await fetch(`${this.base}/history/${promptId}`, { signal: AbortSignal.timeout(10000) })
+    if (!res.ok) throw new Error(`读取历史失败：HTTP ${res.status}`)
+    return (await res.json()) as Record<string, unknown>
+  }
+
+  async download(filename: string, subfolder: string, type: string, destPath: string): Promise<string> {
+    const url = new URL(`${this.base}/view`)
+    url.searchParams.set('filename', filename)
+    url.searchParams.set('subfolder', subfolder)
+    url.searchParams.set('type', type)
+    const res = await fetch(url.toString())
+    if (!res.ok) throw new Error(`下载产物失败：HTTP ${res.status}`)
+    await fsp.mkdir(path.dirname(destPath), { recursive: true })
+    const ws = fs.createWriteStream(destPath)
+    // Node fetch body 是 web stream，转成 Node 可写流
+    const reader = (res.body as unknown as ReadableStream<Uint8Array>).getReader()
+    await new Promise<void>((resolve, reject) => {
+      const pump = async (): Promise<void> => {
+        try {
+          for (;;) {
+            const { done, value } = await reader.read()
+            if (done) break
+            if (!ws.write(Buffer.from(value))) {
+              await new Promise<void>((r) => ws.once('drain', r))
+            }
+          }
+          ws.end()
+          resolve()
+        } catch (err) {
+          ws.destroy()
+          reject(err)
+        }
+      }
+      ws.on('error', reject)
+      pump()
+    })
+    await new Promise<void>((resolve) => ws.once('finish', resolve))
+    return destPath
+  }
+
+  async interrupt(): Promise<void> {
+    await fetch(`${this.base}/interrupt`, { method: 'POST' }).catch(() => undefined)
+  }
+
+  close(): void {
+    try {
+      this.ws?.close()
+    } catch {
+      // ignore
+    }
+    this.ws = null
+    this.wsReady = false
+  }
+}
+
+export function makeClient(settings: ComfySettings): ComfyClient {
+  return new ComfyClient(settings.host, settings.port, settings.protocol)
+}

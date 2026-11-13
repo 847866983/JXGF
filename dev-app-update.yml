@@ -1,0 +1,22 @@
+# electron-updater 开发态更新配置
+#
+# 当应用以「未打包」方式运行（app.isPackaged === false）时，
+# electron-updater 会优先读取与本文件同级的 dev-app-update.yml，
+# 而不是 electron-builder.yml 的 publish 段，从而避免开发调试时
+# 误连生产发布渠道。
+#
+# 注意：src/main/core/updater.ts 在未打包时直接返回「开发模式未启用」。
+# 要真正走通开发态验证，请先临时放开该保护（删除 check() 开头的
+# app.isPackaged 判断），并可在 check() 里设置
+# autoUpdater.forceDevUpdateConfig = true。
+#
+# 用法：
+#   1) 本地任意目录起静态服务，例如：
+#        npx serve ./fake-update-server
+#     或  python -m http.server 8080
+#   2) 把某次打包产物里的 latest.yml 与 Setup exe 放进该目录
+#   3) 下面 url 指向该服务地址
+provider: generic
+url: http://127.0.0.1:8080/
+channel: latest
+updaterCacheDirName: frameforge-updater

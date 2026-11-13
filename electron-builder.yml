@@ -1,0 +1,31 @@
+appId: com.frameforge.studio
+productName: FrameForge Studio
+directories:
+  buildResources: build
+  output: release
+files:
+  - out/**/*
+  - package.json
+asar: true
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  icon: build/icon.ico
+  # 本开发环境无符号链接权限（winCodeSign 解压需要），临时关闭 exe 元数据编辑。
+  # 正式发布在开启开发者模式/管理员权限的机器上打包时，可删掉这一行恢复图标与版本信息嵌入。
+  signAndEditExecutable: false
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: FrameForge Studio
+  artifactName: ${productName}-Setup-${version}.${ext}
+publish:
+  provider: github
+  owner: frameforge-studio
+  repo: frameforge
+  releaseType: release
