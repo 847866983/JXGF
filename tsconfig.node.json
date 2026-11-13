@@ -10,6 +10,7 @@
     "skipLibCheck": true,
     "esModuleInterop": true,
     "resolveJsonModule": true,
+    "allowImportingTsExtensions": true,
     "forceConsistentCasingInFileNames": true,
     "types": ["node"],
     "baseUrl": ".",
@@ -21,6 +22,7 @@
     "electron.vite.config.ts",
     "src/main/**/*",
     "src/preload/**/*",
-    "src/shared/**/*"
+    "src/shared/**/*",
+    "src/mcp/**/*"
   ]
 }
