@@ -80,6 +80,47 @@ ok('高度注入 EmptyLatentImage', () => assert.equal(wf['3'].inputs.height, 36
 ok('种子注入 KSampler', () => assert.equal(wf['4'].inputs.seed, 42))
 ok('原始节点不被增删', () => assert.equal(Object.keys(wf).length, 5))
 
+// ---- H3 工作流映射 ----
+const h3Template = {
+  id: 'tpl_h3',
+  name: 'h3',
+  kind: 'video' as const,
+  description: '',
+  apiJson: {
+    '261': {
+      class_type: 'CSGlideCastCS',
+      inputs: { h3_data: '{"mode":"ref2va","width":576,"height":320,"length":311}', prompt_text: ['265', 1] }
+    },
+    '265': {
+      class_type: 'CSGlideDeskCS',
+      inputs: {
+        desk_data: JSON.stringify({ chain: { name: '工程', clip: 'clip_0001', shot: 'clip_0001' }, global: '', segs: { clip_0001: '旧提示词' } })
+      }
+    },
+    '277': { class_type: 'KSampler', inputs: { seed: 12, steps: 4 } }
+  },
+  mapping: { version: 1 },
+  createdAt: new Date().toISOString()
+}
+
+const h3wf = buildWorkflow(h3Template, {
+  positive: '新镜头提示词：雨夜古巷',
+  width: 640,
+  height: 360,
+  frames: 49,
+  seed: 999,
+  mode: 't2v'
+}) as Record<string, { class_type: string; inputs: Record<string, unknown> }>
+
+const deskOut = JSON.parse(String(h3wf['265'].inputs.desk_data)) as { segs: Record<string, string> }
+ok('H3：提示词写入 desk_data.segs 当前 clip', () => assert.equal(deskOut.segs.clip_0001, '新镜头提示词：雨夜古巷'))
+const h3Out = JSON.parse(String(h3wf['261'].inputs.h3_data)) as Record<string, unknown>
+ok('H3：h3_data 宽度注入', () => assert.equal(h3Out.width, 640))
+ok('H3：h3_data 高度注入', () => assert.equal(h3Out.height, 360))
+ok('H3：h3_data 帧数注入', () => assert.equal(h3Out.length, 49))
+ok('H3：h3_data 模式注入', () => assert.equal(h3Out.mode, 't2v'))
+ok('H3：KSampler 种子注入', () => assert.equal(h3wf['277'].inputs.seed, 999))
+
 // ---- 离线客户端优雅降级 ----
 const client = new ComfyClient('127.0.0.1', 59999)
 const stats = await client.systemStats()
