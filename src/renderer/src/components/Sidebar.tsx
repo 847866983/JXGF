@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { NavLink } from 'react-router-dom'
 import {
   Activity,
@@ -6,6 +7,7 @@ import {
   FolderKanban,
   LayoutDashboard,
   ListOrdered,
+  Server,
   Settings,
   Sparkles
 } from 'lucide-react'
@@ -23,6 +25,19 @@ const items = [
 
 export function Sidebar(): React.JSX.Element {
   const project = useApp((s) => s.project)
+  const comfy = useApp((s) => s.comfy)
+  const refreshComfy = useApp((s) => s.refreshComfy)
+
+  // 每 5 秒刷新一次 ComfyUI 运行信息
+  useEffect(() => {
+    void refreshComfy()
+    const timer = setInterval(() => void refreshComfy(), 5000)
+    return () => clearInterval(timer)
+  }, [refreshComfy])
+
+  const vramText = comfy?.gpu?.vramTotal
+    ? `${(comfy.gpu.vramTotal / 1024 / 1024 / 1024).toFixed(1)}GB`
+    : ''
 
   return (
     <aside className="flex w-60 shrink-0 flex-col border-r border-white/5 bg-ink-900">
@@ -54,6 +69,46 @@ export function Sidebar(): React.JSX.Element {
           </NavLink>
         ))}
       </nav>
+
+      {/* ComfyUI 运行信息 */}
+      <div className="border-t border-white/5 px-4 py-3">
+        <div className="rounded-lg bg-ink-850 p-3">
+          <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-widest text-slate-500">
+            <Server size={11} />
+            ComfyUI
+          </div>
+          <div className="mt-1.5 flex items-center gap-2">
+            <span
+              className={`h-2 w-2 shrink-0 rounded-full ${
+                comfy?.online ? 'bg-emerald-400' : 'bg-rose-500'
+              }`}
+            />
+            <span className={`text-sm font-medium ${comfy?.online ? 'text-emerald-300' : 'text-rose-400'}`}>
+              {comfy?.online ? '运行中' : '未连接'}
+            </span>
+          </div>
+          {comfy?.online && (
+            <div className="mt-1.5 space-y-0.5 text-[11px] text-slate-400">
+              <div className="flex justify-between">
+                <span>版本</span>
+                <span className="text-slate-300">v{comfy.version}</span>
+              </div>
+              {comfy.gpu?.name && (
+                <div className="flex justify-between">
+                  <span>显卡</span>
+                  <span className="truncate text-slate-300">{comfy.gpu.name}{vramText ? ` ${vramText}` : ''}</span>
+                </div>
+              )}
+              <div className="flex justify-between">
+                <span>队列</span>
+                <span className="text-slate-300">
+                  {comfy.queueRunning} 运行 / {comfy.queueRemaining} 等待
+                </span>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
 
       <div className="border-t border-white/5 p-4">
         <div className="rounded-lg bg-ink-850 p-3">
