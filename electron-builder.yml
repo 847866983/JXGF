@@ -1,5 +1,5 @@
-appId: com.frameforge.studio
-productName: FrameForge Studio
+appId: com.jingxu.studio
+productName: 镜序工坊
 directories:
   buildResources: build
   output: release
@@ -22,7 +22,7 @@ nsis:
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
   createStartMenuShortcut: true
-  shortcutName: FrameForge Studio
+  shortcutName: 镜序工坊
   artifactName: ${productName}-Setup-${version}.${ext}
 publish:
   provider: github

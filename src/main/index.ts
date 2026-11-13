@@ -105,7 +105,7 @@ function detectFfmpeg(): FfmpegInfo {
 
 function registerIpc(): void {
   ipcMain.handle(CH.appInfo, () => ({
-    name: 'FrameForge Studio',
+    name: '镜序工坊',
     version: app.getVersion(),
     packaged: app.isPackaged,
     userData: app.getPath('userData'),

@@ -1,4 +1,4 @@
-# FrameForge Studio
+# 镜序工坊
 
 本地 AI 视频生成工作台 —— 资产库 / 剧本分镜 / 导演台，后端对接 ComfyUI。
 
@@ -150,7 +150,7 @@ pnpm package
 
 等价于 `electron-vite build && electron-builder --win`，产物输出到 **`release/`**：
 
-- `FrameForge Studio-Setup-<版本>.exe`（NSIS 安装包）
+- `镜序工坊-Setup-<版本>.exe`（NSIS 安装包）
 - 配置了 `publish` 后还会生成 `latest.yml`（供自动更新读取）
 
 打包配置在 [electron-builder.yml](electron-builder.yml)：安装器为 `oneClick: false`、可选安装目录、创建桌面与开始菜单快捷方式。
@@ -198,7 +198,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\preflight.ps1 -Packa
 - 落盘采用「写临时文件 → 备份旧文件 → 原子 rename」，异常断电最多丢最近一次改动，不会损坏已有数据。
 - 用户数据目录的实际路径：
   - 开发态：`%APPDATA%\frameforge\projects`
-  - 打包态：`%APPDATA%\FrameForge Studio\projects`
+  - 打包态：`%APPDATA%\镜序工坊\projects`
   - 具体以 `src/main/index.ts` 中 `app.getPath('userData')` 的返回值为准。
 
 ---

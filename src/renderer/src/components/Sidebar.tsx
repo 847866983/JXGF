@@ -31,8 +31,8 @@ export function Sidebar(): React.JSX.Element {
           <Sparkles size={18} />
         </div>
         <div>
-          <div className="text-sm font-semibold tracking-wide text-white">FrameForge</div>
-          <div className="text-[10px] uppercase tracking-widest text-slate-500">Studio</div>
+          <div className="text-sm font-semibold tracking-wide text-white">镜序工坊</div>
+          <div className="text-[10px] uppercase tracking-widest text-slate-500">JingXu Studio</div>
         </div>
       </div>
 

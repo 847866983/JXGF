@@ -1,5 +1,5 @@
 /**
- * FrameForge 共享领域模型。
+ * 镜序工坊 共享领域模型。
  * 主进程与渲染进程共用同一套类型，保证「逻辑清楚」：
  * Project -> Script -> Episode -> Scene -> Shot，资产全局共享。
  */
