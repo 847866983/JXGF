@@ -4,6 +4,12 @@ import path from 'node:path'
 import crypto from 'node:crypto'
 import type { Project, ProjectSummary } from '@shared/types'
 
+/** 容错 UTF-8 BOM 的 JSON 解析（用户可能用记事本编辑过 project.json） */
+function parseJsonLoose(raw: string): unknown {
+  const text = raw.charCodeAt(0) === 0xfeff ? raw.slice(1) : raw
+  return JSON.parse(text)
+}
+
 export const uid = (prefix = ''): string => prefix + crypto.randomBytes(6).toString('hex')
 export const now = (): string => new Date().toISOString()
 
@@ -76,7 +82,7 @@ export class ProjectStore {
       const file = path.join(this.projectsDir, entry.name, PROJECT_FILE)
       try {
         const raw = await fsp.readFile(file, 'utf8')
-        const p = JSON.parse(raw) as Project
+        const p = parseJsonLoose(raw) as Project
         out.push({
           id: p.id,
           name: p.name,
@@ -104,7 +110,7 @@ export class ProjectStore {
   async open(id: string): Promise<Project> {
     const file = path.join(this.projectsDir, id, PROJECT_FILE)
     const raw = await fsp.readFile(file, 'utf8')
-    this.current = migrate(JSON.parse(raw) as Project)
+    this.current = migrate(parseJsonLoose(raw) as Project)
     return this.current
   }
 

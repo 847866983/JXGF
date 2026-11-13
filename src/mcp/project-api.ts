@@ -28,6 +28,12 @@ export function resolveProjectsDir(): string {
   return candidates[1] // 默认 frameforge
 }
 
+/** 读取 JSON 文本并容错 UTF-8 BOM（用户可能用记事本编辑过 project.json） */
+function parseJsonLoose(raw: string): unknown {
+  const text = raw.charCodeAt(0) === 0xfeff ? raw.slice(1) : raw
+  return JSON.parse(text)
+}
+
 const PROJECT_FILE = 'project.json'
 
 export async function listProjects(projectsDir: string): Promise<
@@ -46,7 +52,7 @@ export async function listProjects(projectsDir: string): Promise<
     if (!ent.isDirectory()) continue
     try {
       const raw = await fsp.readFile(path.join(projectsDir, ent.name, PROJECT_FILE), 'utf8')
-      const p = JSON.parse(raw) as Project
+      const p = parseJsonLoose(raw) as Project
       out.push({
         id: p.id,
         name: p.name,
@@ -65,7 +71,7 @@ export async function listProjects(projectsDir: string): Promise<
 export async function openProject(projectsDir: string, projectId: string): Promise<Project> {
   const file = path.join(projectsDir, projectId, PROJECT_FILE)
   const raw = await fsp.readFile(file, 'utf8')
-  return JSON.parse(raw) as Project
+  return parseJsonLoose(raw) as Project
 }
 
 export async function saveProject(projectsDir: string, project: Project): Promise<void> {

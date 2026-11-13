@@ -26,10 +26,12 @@ export default function Settings(): React.JSX.Element {
   const [importError, setImportError] = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const [mcp, setMcp] = useState<{
-    script: string
-    projectsDir: string
     command: string
     args: string[]
+    env: Record<string, string>
+    script: string
+    projectsDir: string
+    note: string
   } | null>(null)
   const [copied, setCopied] = useState(false)
 
@@ -296,7 +298,16 @@ export default function Settings(): React.JSX.Element {
             <div className="text-sm text-slate-500">读取中…</div>
           ) : (
             <div className="space-y-3">
+              <div className="flex items-center gap-2 rounded-lg bg-emerald-500/10 px-3 py-2 text-xs text-emerald-300">
+                ✅ {mcp.note}——换电脑安装本软件后，此处配置自动适配，无需手动改路径。
+              </div>
               <div className="grid grid-cols-1 gap-2 text-sm">
+                <div className="flex items-center gap-2">
+                  <span className="w-24 shrink-0 text-xs text-slate-500">启动命令</span>
+                  <code className="min-w-0 flex-1 truncate rounded bg-ink-950/60 px-2 py-1 text-xs text-slate-300">
+                    {mcp.command}
+                  </code>
+                </div>
                 <div className="flex items-center gap-2">
                   <span className="w-24 shrink-0 text-xs text-slate-500">服务器脚本</span>
                   <code className="min-w-0 flex-1 truncate rounded bg-ink-950/60 px-2 py-1 text-xs text-slate-300">
@@ -318,7 +329,7 @@ export default function Settings(): React.JSX.Element {
       'jingxu-studio': {
         command: mcp.command,
         args: mcp.args,
-        env: { JXGF_PROJECTS: mcp.projectsDir }
+        env: mcp.env
       }
     }
   },

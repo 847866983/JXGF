@@ -111,20 +111,37 @@ function registerIpc(): void {
     const mcpScript = app.isPackaged
       ? path.join(process.resourcesPath, 'mcp', 'server.mjs')
       : path.join(app.getAppPath(), 'src', 'mcp', 'server.ts')
+
+    // 打包版：用软件自带的 Electron 作为 Node 运行时（用户无需安装 Node）。
+    //   command = 本软件 exe；env.ELECTRON_RUN_AS_NODE=1 让它以纯 Node 模式运行；
+    //   args = MCP server 脚本。路径均由运行时推导，换电脑自动适配。
+    // 开发版：直接调系统 node 跑 .ts。
+    const mcp =
+      app.isPackaged
+        ? {
+            command: process.execPath,
+            args: [mcpScript],
+            env: { ELECTRON_RUN_AS_NODE: '1', JXGF_PROJECTS: projectsDir },
+            script: mcpScript,
+            projectsDir,
+            note: '无需安装 Node：使用软件自带的运行时'
+          }
+        : {
+            command: 'node',
+            args: ['--disable-warning=MODULE_TYPELESS_PACKAGE_JSON', mcpScript],
+            env: { JXGF_PROJECTS: projectsDir },
+            script: mcpScript,
+            projectsDir,
+            note: '开发模式：使用系统 Node 运行 TypeScript 源码'
+          }
+
     return {
       name: '镜序工坊',
       version: app.getVersion(),
       packaged: app.isPackaged,
       userData,
       platform: process.platform,
-      mcp: {
-        script: mcpScript,
-        projectsDir,
-        command: 'node',
-        args: app.isPackaged
-          ? [mcpScript]
-          : ['--disable-warning=MODULE_TYPELESS_PACKAGE_JSON', mcpScript]
-      }
+      mcp
     }
   })
 

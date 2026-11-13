@@ -33,18 +33,18 @@ MCP 服务器按以下顺序自动探测项目目录：
 
 ## 在 MCP 客户端里配置
 
-多数客户端的配置格式类似下面这样（以**DeepSeek Harness / Claude Desktop / Cursor** 为例）：
+**最简单的方式：打开软件 → 设置 → 最下方「MCP 接入」面板 → 点「复制配置 JSON」**，粘贴到 AI 客户端的 MCP 设置即可。路径由软件自动计算，无需手动改。
+
+配置形如（打包版）：
 
 ```json
 {
   "mcpServers": {
     "jingxu-studio": {
-      "command": "node",
-      "args": [
-        "--disable-warning=MODULE_TYPELESS_PACKAGE_JSON",
-        "E:\\剧本\\frameforge\\src\\mcp\\server.ts"
-      ],
+      "command": "C:\\Program Files\\镜序工坊\\镜序工坊.exe",
+      "args": ["C:\\Program Files\\镜序工坊\\resources\\mcp\\server.mjs"],
       "env": {
+        "ELECTRON_RUN_AS_NODE": "1",
         "JXGF_PROJECTS": "C:\\Users\\你的用户名\\AppData\\Roaming\\frameforge\\projects"
       }
     }
@@ -52,7 +52,11 @@ MCP 服务器按以下顺序自动探测项目目录：
 }
 ```
 
-**豆包 / 其他客户端**：在其「MCP 服务器」设置里添加一个 **stdio 类型**的服务器即可，`command` 填 `node`，`args` 填上面的数组（或直接填服务器脚本绝对路径）。
+**关键点：不需要单独安装 Node.js。** `command` 就是软件自身的 exe，`env.ELECTRON_RUN_AS_NODE=1` 让它以纯 Node 模式运行 MCP 服务器。
+
+> 如果你的 MCP 客户端不支持配置 `env`，可改用 `pnpm mcp`（开发环境）或自行用 `cmd` 包装（Windows 中文路径需注意编码）。
+
+**豆包 / 其他客户端**：在其「MCP 服务器」设置里添加一个 **stdio 类型**的服务器，填入上面三个字段（command / args / env）即可。
 
 ## 提供的工具（13 个）
 

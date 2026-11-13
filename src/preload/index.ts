@@ -21,7 +21,14 @@ const api = {
     packaged: boolean
     userData: string
     platform: string
-    mcp: { script: string; projectsDir: string; command: string; args: string[] }
+    mcp: {
+      command: string
+      args: string[]
+      env: Record<string, string>
+      script: string
+      projectsDir: string
+      note: string
+    }
   }> => ipcRenderer.invoke(CH.appInfo),
 
   hardwareDetect: (): Promise<HardwareReport> => ipcRenderer.invoke(CH.hardwareDetect),
