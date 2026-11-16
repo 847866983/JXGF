@@ -128,6 +128,29 @@ function deskDataField(node: WorkflowNode): string | null {
  * 把 MiniMax-H3 工作流的提示词写进 CSGlideDeskCS 的 desk_data.segs。
  */
 function injectH3Prompt(clone: Workflow, positive: string): boolean {
+  // ① 关键：写进 CSGlideCastCS.h3_data.prompt —— 这是真正驱动画面的提示词字段。
+  //    之前只写 desk_data.segs 导致 h3_data.prompt 一直为空，模型用了模板残留内容。
+  let wroteCast = false
+  for (const node of Object.values(clone)) {
+    if (String(node.class_type) !== 'CSGlideCastCS') continue
+    const field = h3DataField(node)
+    if (!field) continue
+    const h3 = tryParse<H3Data>(node.inputs[field])
+    if (!h3) continue
+    h3.prompt = positive
+    node.inputs[field] = JSON.stringify(h3)
+    // 关键：断开 prompt_text 的连线（模板里接 DeskCS 输出[1]，其内容为空/残留），
+    // 改为直接字符串提示词，确保模型真正收到本次提示词。
+    if ('prompt_text' in node.inputs) {
+      node.inputs.prompt_text = positive
+    }
+    // h3_override 若存在也写，避免旧覆盖值干扰
+    if (typeof node.inputs.h3_override === 'string') {
+      node.inputs.h3_override = positive
+    }
+    wroteCast = true
+  }
+  // ② 同时写进 CSGlideDeskCS.desk_data.segs（导演台分段提示词，供界面显示/续接）
   for (const node of Object.values(clone)) {
     if (String(node.class_type) !== 'CSGlideDeskCS') continue
     const field = deskDataField(node)
@@ -138,11 +161,12 @@ function injectH3Prompt(clone: Workflow, positive: string): boolean {
     const clip = desk.chain?.clip ?? 'clip_0001'
     desk.segs = desk.segs ?? {}
     desk.segs[clip] = positive
+    // global 是整片提示词（无分段时生效），segs 是按段提示词 —— 两处都写确保生效
+    desk.global = positive
     if (desk.chain) desk.chain.shot = clip
     node.inputs[field] = JSON.stringify(desk)
-    return true
   }
-  return false
+  return wroteCast
 }
 
 /**

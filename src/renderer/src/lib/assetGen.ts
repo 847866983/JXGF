@@ -17,8 +17,8 @@ export const STYLES: StyleDef[] = [
     id: 'cg_real',
     label: '游戏CG写实（推荐·接近真人）',
     positive:
-      'AAA game CG character, semi-realistic photorealistic human, lifelike realistic skin texture with pores, detailed skin shading, anatomically realistic proportions, volumetric cinematic lighting, physically based rendering (PBR), Unreal Engine 5 quality, 8k ultra detailed, sharp focus',
-    negative: 'anime, cartoon, cel shading, 2d illustration, doll-like, plastic skin, flat shading'
+      'AAA game CG character, semi-realistic photorealistic adult human, lifelike realistic skin texture with pores, detailed skin shading, anatomically correct adult proportions, realistic 7-to-8 heads tall body ratio, natural human anatomy, volumetric cinematic lighting, physically based rendering (PBR), Unreal Engine 5 quality, 8k ultra detailed, sharp focus',
+    negative: 'anime, cartoon, cel shading, 2d illustration, doll-like, plastic skin, flat shading, chibi, chibi style, kawaii, super deformed, SD character, big head, oversized head, small body, short legs, stubby limbs, childlike proportions, baby face, toy, figurine, bobblehead'
   },
   {
     id: 'real_photo',
@@ -65,14 +65,15 @@ export function getStyle(id: string | undefined): StyleDef {
 
 /** 四视图构图（不含画风，画风单独拼在最前） */
 const FOUR_VIEW_BODY =
-  'character design reference sheet, the same single character shown in four views arranged in one horizontal row, gender and outfit consistent across all views; ' +
-  'leftmost: upper-body close-up portrait of the front view, face clearly visible with detailed facial features, sharp focus on the face; ' +
+  'character design reference sheet, the same single adult character shown in four views arranged in one horizontal row, gender and outfit consistent across all views; ' +
+  'leftmost: upper-body close-up portrait of the front view, face clearly visible with detailed realistic facial features, sharp focus on the face; ' +
   'then three full-body standing views: front view full body, side view full body, back view full body; ' +
+  'all full-body views show the complete figure from head to feet with realistic adult proportions (7 to 8 heads tall, normal head size, long natural legs); ' +
   'same hairstyle, outfit and colors in every view; neutral standing pose; plain light gray studio background; '
 const FOUR_VIEW_TAIL = ' ; clean character turnaround sheet, high detail, sharp focus, consistent design across views'
 
 const FOUR_VIEW_STRUCT_NEG =
-  'multiple different characters, inconsistent design, different outfit between views, different face, extra heads, extra limbs, deformed, bad anatomy, blurry face, text, watermark, logo, signature, cropped, out of frame, low quality'
+  'multiple different characters, inconsistent design, different outfit between views, different face, extra heads, extra limbs, deformed, bad anatomy, blurry face, text, watermark, logo, signature, cropped, out of frame, low quality, chibi, super deformed, big head, oversized head, tiny body, short legs, childlike, doll, figurine'
 
 /** 角色四视图正向提示词（含画风） */
 export function buildFourViewPositive(desc: string, styleId?: string): string {

@@ -670,6 +670,15 @@ ok('分段：chain 身份写入', () => {
   assert.equal(segH3Out.chain?.name, 'E1')
   assert.equal(segH3Out.chain?.clip, 'clip_0002')
 })
+ok('H3：提示词写入 h3_data.prompt（驱动画面的关键字段）', () => {
+  const pWf = buildWorkflow(h3Template, { positive: '一段暴风雪中的星港调度场景' }) as Record<string, { inputs: Record<string, unknown> }>
+  const pData = JSON.parse(String(pWf['261'].inputs.h3_data))
+  assert.equal(pData.prompt, '一段暴风雪中的星港调度场景')
+})
+ok('H3：prompt_text 断线改为直接字符串（确保提示词真正生效）', () => {
+  const pWf = buildWorkflow(h3Template, { positive: '星港暴风雪场景' }) as Record<string, { inputs: Record<string, unknown> }>
+  assert.equal(pWf['261'].inputs.prompt_text, '星港暴风雪场景')
+})
 ok('分段：放大重绘步数/去噪注入', () => {
   assert.equal(segWf['2'].inputs['步数'], 6)
   assert.equal(segWf['2'].inputs['去噪强度'], 0.5)
