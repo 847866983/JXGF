@@ -3,6 +3,7 @@ import { Plus, Pencil } from 'lucide-react'
 import type { Episode, Scene, Script, Shot } from '@shared/types'
 import { useApp } from '../store/app'
 import { EmptyState, PageHeader } from '../components/ui'
+import { NoProject } from '../components/NoProject'
 import { ShotStatusBadge } from '../components/badges'
 import { ShotEditor, type ShotPatch } from '../components/ShotEditor'
 import { Modal } from '../components/Modal'
@@ -24,7 +25,7 @@ export default function Storyboard(): React.JSX.Element {
       <div>
         <PageHeader title="剧本分镜" desc="剧本 → 剧集 → 场次 → 分镜" />
         <div className="px-8 pb-8">
-          <EmptyState title="请先在仪表盘打开一个项目" />
+          <NoProject />
         </div>
       </div>
     )
@@ -202,7 +203,16 @@ export default function Storyboard(): React.JSX.Element {
 
   return (
     <div>
-      <PageHeader title="剧本分镜" desc="剧本 → 剧集 → 场次 → 分镜" />
+      <PageHeader
+        title="剧本分镜"
+        desc="剧本 → 剧集 → 场次 → 分镜"
+        crumbs={[
+          project.name,
+          activeScript?.name ?? '剧本',
+          selectedEpisode?.title ?? '',
+          selectedScene?.title ?? ''
+        ].filter(Boolean)}
+      />
 
       <div className="px-8 pb-8">
         {/* 顶部：剧本切换条 */}

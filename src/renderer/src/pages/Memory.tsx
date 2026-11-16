@@ -3,6 +3,7 @@ import { BookOpen, Check, Plus, RefreshCw, Save } from 'lucide-react'
 import type { MemoryEntry } from '@shared/memory'
 import { useApp } from '../store/app'
 import { EmptyState, PageHeader } from '../components/ui'
+import { NoProject } from '../components/NoProject'
 
 export default function Memory(): React.JSX.Element {
   const project = useApp((s) => s.project)
@@ -42,7 +43,7 @@ export default function Memory(): React.JSX.Element {
       <div>
         <PageHeader title="记忆库" desc="项目的长期记忆：世界观、角色、风格、连续性、决策日志" />
         <div className="px-8 pb-8">
-          <EmptyState title="请先在仪表盘打开一个项目" />
+          <NoProject />
         </div>
       </div>
     )

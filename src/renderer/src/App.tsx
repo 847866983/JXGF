@@ -16,11 +16,18 @@ export default function App(): React.JSX.Element {
   const loadHardware = useApp((s) => s.loadHardware)
   const refreshJobs = useApp((s) => s.refreshJobs)
   const loadUpdate = useApp((s) => s.loadUpdate)
+  const openProject = useApp((s) => s.openProject)
 
   useEffect(() => {
     void loadHardware()
     void refreshJobs()
     void loadUpdate()
+
+    // 启动时自动打开上次的项目
+    if (!useApp.getState().project) {
+      const last = localStorage.getItem('jxgf:lastProject')
+      if (last) void openProject(last).catch(() => undefined)
+    }
 
     const off = window.api.onEvent((event) => {
       if (event.type === 'job:updated' || event.type === 'job:progress') {
@@ -31,7 +38,7 @@ export default function App(): React.JSX.Element {
       }
     })
     return off
-  }, [loadHardware, refreshJobs, loadUpdate])
+  }, [loadHardware, refreshJobs, loadUpdate, openProject])
 
   const location = useLocation()
   if (location.pathname === '/') return <Navigate to="/dashboard" replace />

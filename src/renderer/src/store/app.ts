@@ -60,11 +60,21 @@ export const useApp = create<AppState>((set, get) => ({
   openProject: async (id) => {
     const project = await window.api.projectOpen(id)
     set({ project })
+    try {
+      localStorage.setItem('jxgf:lastProject', id)
+    } catch {
+      // ignore
+    }
   },
 
   createProject: async (name) => {
     const project = await window.api.projectCreate(name)
     set({ project })
+    try {
+      localStorage.setItem('jxgf:lastProject', project.id)
+    } catch {
+      // ignore
+    }
   },
 
   saveProject: async (project) => {

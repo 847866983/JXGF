@@ -6,6 +6,7 @@ import { EmptyState, PageHeader } from '../components/ui'
 import { AssetCard } from '../components/AssetCard'
 import { AssetForm, type AssetFormData } from '../components/AssetForm'
 import { AssetGenerateDialog } from '../components/AssetGenerateDialog'
+import { NoProject } from '../components/NoProject'
 import { Modal } from '../components/Modal'
 import { persistProject } from '../components/mutate'
 
@@ -30,7 +31,7 @@ export default function Assets(): React.JSX.Element {
       <div>
         <PageHeader title="资产管理" desc="角色 / 场景 / 道具的统一资产库，供所有剧本共享" />
         <div className="px-8 pb-8">
-          <EmptyState title="请先在仪表盘打开一个项目" />
+          <NoProject />
         </div>
       </div>
     )
@@ -93,6 +94,7 @@ export default function Assets(): React.JSX.Element {
       <PageHeader
         title="资产管理"
         desc="角色 / 场景 / 道具的统一资产库，供所有剧本共享"
+        crumbs={[project.name, '资产管理']}
         actions={
           <button className="btn-primary" onClick={openCreate}>
             <Plus size={15} />

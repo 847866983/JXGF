@@ -49,14 +49,16 @@ export default function Dashboard(): React.JSX.Element {
         <StatCard
           label="显卡"
           value={gpu?.name ?? '检测中…'}
-          hint={gpu ? `${gpu.driver || '驱动未知'}` : '正在读取硬件信息'}
+          hint={gpu ? (gpu.driver ? `驱动 ${gpu.driver}` : '驱动未知') : '正在读取硬件信息'}
           tone={gpu?.vendor === 'nvidia' ? 'ok' : 'warn'}
+          icon={<Cpu size={16} />}
         />
         <StatCard
           label="显存"
           value={vram}
           hint={hardware ? hardware.preset.label : undefined}
           tone={gpu?.vendor === 'nvidia' && gpu.vramMB >= 6144 ? 'ok' : 'warn'}
+          icon={<HardDrive size={16} />}
         />
         <StatCard
           label="生成档位"
@@ -66,6 +68,7 @@ export default function Dashboard(): React.JSX.Element {
               ? `${hardware.preset.video.width}×${hardware.preset.video.height} @ ${hardware.preset.video.frames} 帧`
               : undefined
           }
+          icon={<Gauge size={16} />}
         />
         <StatCard
           label="ComfyUI"
@@ -160,25 +163,44 @@ export default function Dashboard(): React.JSX.Element {
         ) : (
           <div className="grid grid-cols-3 gap-4">
             {projects.map((p) => (
-              <div key={p.id} className="panel p-4 text-left transition-colors hover:border-accent/40">
+              <div key={p.id} className="panel group overflow-hidden transition-colors hover:border-accent/40">
                 <button
-                  className="w-full text-left"
+                  className="block w-full text-left"
                   onClick={() => void openProject(p.id).then(() => navigate('/assets'))}
                 >
-                  <div className="flex items-center gap-2">
-                    <Cpu size={14} className="text-accent-400" />
-                    <span className="truncate font-medium text-white">{p.name}</span>
+                  <div className="relative h-[76px] w-full overflow-hidden bg-gradient-to-br from-accent-600/25 via-indigo-600/15 to-ink-900">
+                    <div className="absolute inset-0 flex items-center gap-3 px-4">
+                      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-white/10 text-lg font-semibold text-white/90">
+                        {(p.name || '?').trim().charAt(0).toUpperCase()}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className="truncate font-semibold text-white">{p.name}</span>
+                          {p.id === localStorage.getItem('jxgf:lastProject') && (
+                            <span className="shrink-0 rounded bg-emerald-500/20 px-1.5 py-0.5 text-[10px] text-emerald-300">
+                              最近
+                            </span>
+                          )}
+                        </div>
+                        <div className="mt-0.5 text-[11px] text-white/50">
+                          更新于 {new Date(p.updatedAt).toLocaleString()}
+                        </div>
+                      </div>
+                    </div>
                   </div>
-                  <div className="mt-3 flex gap-4 text-xs text-slate-500">
-                    <span>{p.scriptCount} 剧本</span>
-                    <span>{p.shotCount} 分镜</span>
-                    <span>{p.assetCount} 资产</span>
-                  </div>
-                  <div className="mt-2 text-[11px] text-slate-600">
-                    更新于 {new Date(p.updatedAt).toLocaleString()}
+                  <div className="flex flex-wrap gap-2 px-4 pt-3">
+                    <span className="rounded-md bg-white/[0.06] px-2 py-1 text-[11px] text-slate-400">
+                      <b className="text-slate-200">{p.scriptCount}</b> 剧本
+                    </span>
+                    <span className="rounded-md bg-white/[0.06] px-2 py-1 text-[11px] text-slate-400">
+                      <b className="text-slate-200">{p.shotCount}</b> 分镜
+                    </span>
+                    <span className="rounded-md bg-white/[0.06] px-2 py-1 text-[11px] text-slate-400">
+                      <b className="text-slate-200">{p.assetCount}</b> 资产
+                    </span>
                   </div>
                 </button>
-                <div className="mt-3 flex gap-2 border-t border-white/5 pt-3">
+                <div className="mt-3 flex gap-2 border-t border-white/5 px-4 py-3">
                   <button
                     className="btn-ghost flex-1 !px-2 !py-1.5 text-xs"
                     onClick={() => void openProject(p.id).then(() => navigate('/assets'))}

@@ -4,6 +4,7 @@ import { Bot, Send, Settings2, Sparkles, User, Wrench } from 'lucide-react'
 import type { AiConfig } from '@shared/ai'
 import { useApp } from '../store/app'
 import { EmptyState, PageHeader } from '../components/ui'
+import { NoProject } from '../components/NoProject'
 
 interface Msg {
   role: 'user' | 'assistant'
@@ -76,7 +77,7 @@ export default function AiAssistant(): React.JSX.Element {
       <div>
         <PageHeader title="AI 助手" desc="内置 H3 短剧导演助手（漫剧老李）" />
         <div className="px-8 pb-8">
-          <EmptyState title="请先在仪表盘打开一个项目" />
+          <NoProject />
         </div>
       </div>
     )

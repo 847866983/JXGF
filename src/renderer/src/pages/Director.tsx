@@ -4,6 +4,7 @@ import { Film, Play, Wand2 } from 'lucide-react'
 import type { Shot } from '@shared/types'
 import { useApp } from '../store/app'
 import { EmptyState, PageHeader } from '../components/ui'
+import { NoProject } from '../components/NoProject'
 import { ShotStatusBadge } from '../components/badges'
 
 const byIndex = (a: { index: number }, b: { index: number }): number => a.index - b.index
@@ -27,7 +28,7 @@ export default function Director(): React.JSX.Element {
       <div>
         <PageHeader title="导演台" desc="按集编排镜头时间线，引用角色资产并提交生成" />
         <div className="px-8 pb-8">
-          <EmptyState title="请先在仪表盘打开一个项目" />
+          <NoProject />
         </div>
       </div>
     )
@@ -118,7 +119,11 @@ export default function Director(): React.JSX.Element {
 
   return (
     <div>
-      <PageHeader title="导演台" desc="按集编排镜头时间线，引用角色资产并提交生成" />
+      <PageHeader
+        title="导演台"
+        desc="按集编排镜头时间线，引用角色资产并提交生成"
+        crumbs={[project.name, '导演台']}
+      />
 
       <div className="px-8 pb-8">
         <div className="mb-4 flex items-center gap-3">
