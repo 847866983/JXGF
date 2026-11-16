@@ -34,6 +34,11 @@ nsis:
   createDesktopShortcut: true
   createStartMenuShortcut: true
   shortcutName: 镜序工坊
+  # 强制简体中文安装向导（不跟随系统语言），在任何电脑上都显示中文
+  installerLanguages:
+    - zh_CN
+  language: '2052'
+  runAfterFinish: true
   artifactName: ${productName}-Setup-${version}.${ext}
 publish:
   provider: github
