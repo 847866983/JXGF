@@ -1,5 +1,6 @@
 import { app, BrowserWindow, ipcMain, shell } from 'electron'
 import path from 'node:path'
+import fs from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { CH, type PushEvent } from '../shared/ipc'
 import type {
@@ -24,6 +25,8 @@ import { extractArchive } from './core/extract'
 import { ComfyRuntime } from './core/comfy-runtime'
 import { isUiWorkflow, convertUiToApi, detectWorkflowKind } from './core/workflow-convert'
 import { listMemory, readMemory, writeMemory, appendMemory } from './core/memory'
+import { AiAssistant } from './core/ai-assistant'
+import { defaultAiConfig, normalizeAiConfig, type AiConfig } from '../shared/ai'
 import { Updater } from './core/updater'
 
 let mainWindow: BrowserWindow | null = null
@@ -34,6 +37,9 @@ let jobs: JobManager
 const downloads = new DownloadManager()
 let comfyRuntime: ComfyRuntime
 const updater = new Updater()
+let aiAssistant: AiAssistant
+let skillsRoot = ''
+let aiConfigFile = ''
 
 const gotLock = app.requestSingleInstanceLock()
 if (!gotLock) {
@@ -122,7 +128,7 @@ function registerIpc(): void {
         ? {
             command: process.execPath,
             args: [mcpScript],
-            env: { ELECTRON_RUN_AS_NODE: '1', JXGF_PROJECTS: projectsDir },
+            env: { ELECTRON_RUN_AS_NODE: '1', JXGF_PROJECTS: projectsDir, JXGF_SKILLS: path.join(process.resourcesPath, 'skills') },
             script: mcpScript,
             projectsDir,
             note: '无需安装 Node：使用软件自带的运行时'
@@ -130,7 +136,7 @@ function registerIpc(): void {
         : {
             command: 'node',
             args: ['--disable-warning=MODULE_TYPELESS_PACKAGE_JSON', mcpScript],
-            env: { JXGF_PROJECTS: projectsDir },
+            env: { JXGF_PROJECTS: projectsDir, JXGF_SKILLS: path.join(app.getAppPath(), 'skills') },
             script: mcpScript,
             projectsDir,
             note: '开发模式：使用系统 Node 运行 TypeScript 源码'
@@ -253,6 +259,47 @@ function registerIpc(): void {
     return appendMemory(store.memoryDir(), key, text)
   })
 
+  // ---- AI 助手 ----
+  const loadAiConfig = (): AiConfig => {
+    try {
+      return normalizeAiConfig(JSON.parse(fs.readFileSync(aiConfigFile, 'utf8')))
+    } catch {
+      return defaultAiConfig()
+    }
+  }
+  ipcMain.handle(CH.aiGetConfig, () => loadAiConfig())
+  ipcMain.handle(CH.aiSetConfig, (_e, cfg: AiConfig) => {
+    const normalized = normalizeAiConfig(cfg)
+    try {
+      fs.writeFileSync(aiConfigFile, JSON.stringify(normalized, null, 2), 'utf8')
+    } catch {
+      // ignore
+    }
+    return normalized
+  })
+  ipcMain.handle(CH.aiChat, async (_e, payload: { messages: { role: 'user' | 'assistant'; content: string }[] }) => {
+    const cfg = loadAiConfig()
+    const provider = cfg.providers.find((p) => p.id === cfg.activeProviderId) ?? cfg.providers[0]
+    try {
+      const res = await aiAssistant.chat(provider, payload.messages ?? [], (e) => {
+        if (e.type === 'status') push({ type: 'ai:status', text: String(e.text ?? '') })
+        else if (e.type === 'tool')
+          push({
+            type: 'ai:tool',
+            name: String(e.name),
+            args: (e.args as Record<string, unknown>) ?? {},
+            summary: e.summary ? String(e.summary) : undefined
+          })
+      })
+      if (res.changed) await store.flush()
+      push({ type: 'ai:done', changed: res.changed })
+      return res
+    } catch (err) {
+      push({ type: 'ai:error', message: String((err as Error).message ?? err) })
+      throw err
+    }
+  })
+
   ipcMain.handle(CH.jobGenerate, (_e, params: JobParams) => jobs.enqueue(params))
   ipcMain.handle(CH.jobList, () => jobs.list())
   ipcMain.handle(CH.jobCancel, (_e, jobId: string) => jobs.cancel(jobId))
@@ -275,6 +322,11 @@ app.whenReady().then(() => {
 
   comfyRuntime = new ComfyRuntime(path.join(app.getPath('userData'), 'runtime'))
   comfyRuntime.on('state', (state) => push({ type: 'comfy:runtime', state }))
+
+  // AI 助手：内置技能目录 + 全局 AI 配置
+  skillsRoot = app.isPackaged ? path.join(process.resourcesPath, 'skills') : path.join(app.getAppPath(), 'skills')
+  aiConfigFile = path.join(app.getPath('userData'), 'ai-config.json')
+  aiAssistant = new AiAssistant(store, skillsRoot)
 
   jobs = new JobManager(store, (type, payload) => {
     push({ type, ...(payload as Record<string, unknown>) } as PushEvent)

@@ -58,6 +58,13 @@ const api = {
   memoryWrite: (key: string, content: string): Promise<void> => ipcRenderer.invoke(CH.memoryWrite, key, content),
   memoryAppend: (key: string, text: string): Promise<void> => ipcRenderer.invoke(CH.memoryAppend, key, text),
 
+  aiGetConfig: (): Promise<import('../shared/ai').AiConfig> => ipcRenderer.invoke(CH.aiGetConfig),
+  aiSetConfig: (cfg: import('../shared/ai').AiConfig): Promise<import('../shared/ai').AiConfig> =>
+    ipcRenderer.invoke(CH.aiSetConfig, cfg),
+  aiChat: (payload: {
+    messages: { role: 'user' | 'assistant'; content: string }[]
+  }): Promise<{ content: string; changed: boolean }> => ipcRenderer.invoke(CH.aiChat, payload),
+
   jobGenerate: (params: JobParams) => ipcRenderer.invoke(CH.jobGenerate, params),
   jobList: () => ipcRenderer.invoke(CH.jobList),
   jobCancel: (jobId: string) => ipcRenderer.invoke(CH.jobCancel, jobId),

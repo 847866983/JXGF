@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState, type ChangeEvent } from 'react'
-import { Copy, Download, FileUp, Plug, RefreshCw, RotateCw, Save, ShieldCheck, Workflow } from 'lucide-react'
+import { Copy, Download, FileUp, Plug, RefreshCw, RotateCw, Save, ShieldCheck, Sparkles, Workflow } from 'lucide-react'
 import type { ComfySettings } from '@shared/types'
 import { useApp } from '../store/app'
 import { PageHeader } from '../components/ui'
+import { AiSettings } from '../components/AiSettings'
 
 const DEFAULT_COMFY: ComfySettings = { host: '127.0.0.1', port: 8188, protocol: 'http' }
 
@@ -345,6 +346,19 @@ export default function Settings(): React.JSX.Element {
               </div>
             </div>
           )}
+        </div>
+
+        {/* AI 助手（内置大模型） */}
+        <div className="panel mt-4 p-5">
+          <div className="mb-3 flex items-center gap-2 text-sm font-medium text-white">
+            <Sparkles size={15} className="text-accent-400" />
+            AI 助手（内置大模型）
+          </div>
+          <div className="mb-3 text-xs text-slate-500">
+            给软件内置的「AI 助手」配置大模型接口（OpenAI 兼容）。配好后到左侧「AI 助手」页即可对话；
+            它会自动读取记忆库、按 H3 规则写分镜并可调机检。
+          </div>
+          <AiSettings />
         </div>
       </div>
     </div>

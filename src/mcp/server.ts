@@ -11,6 +11,8 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod'
 import path from 'node:path'
+import fs from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import {
   resolveProjectsDir,
   listProjects,
@@ -25,9 +27,32 @@ import {
 } from './project-api.ts'
 import { listMemory, readMemory, writeMemory, appendMemory } from '../main/core/memory.ts'
 import { memoryFileOf } from '../shared/memory.ts'
+import { readSkillMain, listSkillRefs, readSkillRef } from '../main/core/skill.ts'
 
 const projectsDir = resolveProjectsDir()
 const memoryDirOf = (projectId: string): string => path.join(projectsDir, projectId, 'memory')
+
+// 解析内置技能目录（打包 resources/skills，开发 repo/skills）
+function resolveSkillsRoot(): string {
+  const cands: string[] = []
+  if (process.env.JXGF_SKILLS) cands.push(process.env.JXGF_SKILLS)
+  try {
+    const here = path.dirname(fileURLToPath(import.meta.url))
+    cands.push(path.join(here, '..', '..', 'skills')) // dev: src/mcp -> repo/skills
+    cands.push(path.join(here, '..', 'skills')) // packaged: resources/mcp -> resources/skills
+  } catch {
+    // ignore
+  }
+  for (const c of cands) {
+    try {
+      if (fs.existsSync(path.join(c, 'forest-laoli-h3', 'SKILL.md'))) return c
+    } catch {
+      // next
+    }
+  }
+  return cands[0] ?? ''
+}
+const skillsRoot = resolveSkillsRoot()
 
 const server = new McpServer({ name: 'jingxu-studio', version: '0.1.0' })
 
@@ -360,6 +385,38 @@ server.tool(
   async ({ projectId, text }) => {
     await appendMemory(memoryDirOf(projectId), 'decisions', text)
     return ok(`已追加决策：${text.slice(0, 60)}`)
+  }
+)
+
+// ---------- H3 技能（forest-laoli-h3）----------
+
+server.tool(
+  'get_h3_skill',
+  '读取内置 H3 短剧技能主规则（SKILL.md 全文）。AI 写 H3 分镜/提示词前应先读它。',
+  {},
+  async () => {
+    const md = await readSkillMain(skillsRoot)
+    return ok(md || '（未找到内置 H3 技能）')
+  }
+)
+
+server.tool(
+  'list_h3_references',
+  '列出 H3 技能可用的参考规则（配合 read_h3_reference 读取）',
+  {},
+  async () => {
+    const refs = await listSkillRefs(skillsRoot)
+    return ok(refs.map((r) => r.name))
+  }
+)
+
+server.tool(
+  'read_h3_reference',
+  '读取一条 H3 技能参考规则全文（如 h3-format / h3-lexicon-cleanup / camera-movement / spatial-anchor-and-hold）',
+  { name: z.string() },
+  async ({ name }) => {
+    const content = await readSkillRef(skillsRoot, name)
+    return ok(content || `（未找到规则 ${name}）`)
   }
 )
 

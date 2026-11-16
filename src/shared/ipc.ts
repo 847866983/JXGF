@@ -23,6 +23,10 @@ export const CH = {
   memoryRead: 'memory:read',
   memoryWrite: 'memory:write',
   memoryAppend: 'memory:append',
+  aiGetConfig: 'ai:get-config',
+  aiSetConfig: 'ai:set-config',
+  aiChat: 'ai:chat',
+  aiCancel: 'ai:cancel',
   jobGenerate: 'job:generate',
   jobList: 'job:list',
   jobCancel: 'job:cancel',
@@ -47,3 +51,7 @@ export type PushEvent =
   | { type: 'update:state'; info: import('./types').UpdateInfo }
   | { type: 'download:state'; task: import('./types').DownloadTask }
   | { type: 'comfy:runtime'; state: import('./types').ComfyRuntimeState }
+  | { type: 'ai:status'; text: string }
+  | { type: 'ai:tool'; name: string; args: Record<string, unknown>; summary?: string }
+  | { type: 'ai:done'; changed: boolean }
+  | { type: 'ai:error'; message: string }

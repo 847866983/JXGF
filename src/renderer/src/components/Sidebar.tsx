@@ -3,6 +3,7 @@ import { NavLink } from 'react-router-dom'
 import {
   Activity,
   BookOpen,
+  Bot,
   Clapperboard,
   Film,
   FolderKanban,
@@ -20,8 +21,9 @@ const items = [
   { to: '/environment', label: '环境检测', icon: Activity },
   { to: '/assets', label: '资产管理', icon: FolderKanban },
   { to: '/storyboard', label: '剧本分镜', icon: ListOrdered },
-  { to: '/director', label: '导演台', icon: Clapperboard },
   { to: '/memory', label: '记忆库', icon: BookOpen },
+  { to: '/ai', label: 'AI 助手', icon: Bot },
+  { to: '/director', label: '导演台', icon: Clapperboard },
   { to: '/queue', label: '生成队列', icon: Film },
   { to: '/settings', label: '设置', icon: Settings }
 ]

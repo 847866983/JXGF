@@ -19,6 +19,7 @@ import { CATALOG, MODEL_CATALOG, resolveCatalog } from '../src/main/core/catalog
 import { extractArchive } from '../src/main/core/extract.ts'
 import { ProjectStore, uid, now } from '../src/main/core/store.ts'
 import { listMemory, readMemory, writeMemory, appendMemory } from '../src/main/core/memory.ts'
+import { AiAssistant } from '../src/main/core/ai-assistant.ts'
 import { ComfyRuntime } from '../src/main/core/comfy-runtime.ts'
 import { detectWorkflowKind, isUiWorkflow } from '../src/main/core/workflow-convert.ts'
 
@@ -520,6 +521,59 @@ try {
 }
 ok('memory：未知 key 报错', () => assert.equal(memThrew, true))
 await fsp.rm(memDir, { recursive: true, force: true })
+
+// ---- AI 助手（用假 LLM 服务验证工具调用循环）----
+const aiTmp = await fsp.mkdtemp(path.join(os.tmpdir(), 'jxgf-ai-'))
+const aiStore = new ProjectStore(aiTmp)
+await aiStore.init()
+await aiStore.create('AI测试项目')
+let aiReqs = 0
+const aiSrv = http.createServer((req, res) => {
+  let body = ''
+  req.on('data', (c) => (body += c))
+  req.on('end', () => {
+    aiReqs += 1
+    res.setHeader('Content-Type', 'application/json')
+    if (aiReqs === 1) {
+      res.end(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                role: 'assistant',
+                content: '',
+                tool_calls: [
+                  {
+                    id: 'c1',
+                    type: 'function',
+                    function: { name: 'create_asset', arguments: JSON.stringify({ kind: 'character', name: '测试角色', prompt: 'a man' }) }
+                  }
+                ]
+              }
+            }
+          ]
+        })
+      )
+    } else {
+      res.end(JSON.stringify({ choices: [{ message: { role: 'assistant', content: '已完成，创建了角色。' } }] }))
+    }
+  })
+})
+await new Promise<void>((r) => aiSrv.listen(0, '127.0.0.1', () => r()))
+const aiPort = (aiSrv.address() as { port: number }).port
+const aiAsst = new AiAssistant(aiStore, path.join(process.cwd(), 'skills'))
+const aiEvents: string[] = []
+const aiRes = await aiAsst.chat(
+  { id: 't', name: 't', kind: 'openai', baseUrl: `http://127.0.0.1:${aiPort}/v1`, model: 'm', apiKey: 'x' },
+  [{ role: 'user', content: '创建一个角色' }],
+  (e) => aiEvents.push(e.type)
+)
+aiSrv.close()
+ok('AI：工具循环返回最终内容', () => assert.ok(aiRes.content.includes('已完成')))
+ok('AI：create_asset 工具真的写入了资产', () => assert.equal(aiStore.getCurrent()!.assets.length, 1))
+ok('AI：changed 标记为 true', () => assert.equal(aiRes.changed, true))
+ok('AI：发出 tool 事件', () => assert.ok(aiEvents.includes('tool')))
+await fsp.rm(aiTmp, { recursive: true, force: true })
 
 console.log(`\nselftest: ${pass} passed, ${fail} failed`)
 if (fail > 0) process.exit(1)

@@ -13,6 +13,11 @@ extraResources:
     to: mcp
     filter:
       - '**/*'
+  # 内置 H3 技能（forest-laoli-h3），供内置 AI 助手与 MCP 读取
+  - from: skills
+    to: skills
+    filter:
+      - '**/*'
 win:
   target:
     - target: nsis
