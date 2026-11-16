@@ -304,6 +304,24 @@ function registerIpc(): void {
     }
     return normalized
   })
+  ipcMain.handle(CH.aiListModels, async (_e, providerId?: string) => {
+    const cfg = loadAiConfig()
+    const provider = providerId
+      ? cfg.providers.find((p) => p.id === providerId)
+      : cfg.providers.find((p) => p.id === cfg.activeProviderId) ?? cfg.providers[0]
+    if (!provider) return { ok: false, models: [], message: '没有可用的接口配置' }
+    return aiAssistant.listModels(provider)
+  })
+
+  ipcMain.handle(CH.aiTest, async (_e, providerId?: string) => {
+    const cfg = loadAiConfig()
+    const provider = providerId
+      ? cfg.providers.find((p) => p.id === providerId)
+      : cfg.providers.find((p) => p.id === cfg.activeProviderId) ?? cfg.providers[0]
+    if (!provider) return { ok: false, message: '没有可测试的接口配置' }
+    return aiAssistant.testProvider(provider)
+  })
+
   ipcMain.handle(CH.aiChat, async (_e, payload: { messages: { role: 'user' | 'assistant'; content: string }[] }) => {
     const cfg = loadAiConfig()
     const provider = cfg.providers.find((p) => p.id === cfg.activeProviderId) ?? cfg.providers[0]

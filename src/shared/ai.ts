@@ -46,8 +46,24 @@ export function defaultAiConfig(): AiConfig {
   }
 }
 
-export function normalizeAiConfig(raw: unknown): AiConfig {
-  const base = defaultAiConfig()
+/**
+ * 把用户填的接口地址解析成真正的 /chat/completions 端点。
+ * 兼容三种常见填法（网关/中转站常给完整地址）：
+ *   1. https://api.deepseek.com/v1                  → .../v1/chat/completions
+ *   2. https://gw.example.com/v1/chat/completions   → 原样使用（避免重复拼接）
+ *   3. https://gw.example.com                       → .../chat/completions
+ */
+export function buildChatUrl(baseUrl: string): string {
+  const raw = (baseUrl || '').trim().replace(/\/+$/, '')
+  if (!raw) throw new Error('AI 接口地址为空')
+  // 已经是完整端点（含 chat/completions 或 completions）
+  if (/\/chat\/completions$/i.test(raw)) return raw
+  if (/\/completions$/i.test(raw)) return raw
+  // 以 /v1、/v1beta、/openai 等结尾 → 直接拼
+  return `${raw}/chat/completions`
+}
+
+export function normalizeAiConfig(raw: unknown): AiConfig {  const base = defaultAiConfig()
   const obj = (raw ?? {}) as Partial<AiConfig>
   const providers = Array.isArray(obj.providers) && obj.providers.length > 0 ? obj.providers : base.providers
   const mapped: AiProvider[] = providers.map((p, i) => ({

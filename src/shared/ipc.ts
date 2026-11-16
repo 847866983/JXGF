@@ -29,6 +29,8 @@ export const CH = {
   aiGetConfig: 'ai:get-config',
   aiSetConfig: 'ai:set-config',
   aiChat: 'ai:chat',
+  aiTest: 'ai:test',
+  aiListModels: 'ai:list-models',
   aiCancel: 'ai:cancel',
   mediaDataUrl: 'media:data-url',
   mediaDeleteFile: 'media:delete-file',

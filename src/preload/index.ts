@@ -67,6 +67,10 @@ const api = {
   aiChat: (payload: {
     messages: { role: 'user' | 'assistant'; content: string }[]
   }): Promise<{ content: string; changed: boolean }> => ipcRenderer.invoke(CH.aiChat, payload),
+  aiTest: (providerId?: string): Promise<{ ok: boolean; message: string; url?: string; latencyMs?: number; reply?: string }> =>
+    ipcRenderer.invoke(CH.aiTest, providerId),
+  aiListModels: (providerId?: string): Promise<{ ok: boolean; models: string[]; message?: string }> =>
+    ipcRenderer.invoke(CH.aiListModels, providerId),
 
   mediaDataUrl: (p: string): Promise<string | null> => ipcRenderer.invoke(CH.mediaDataUrl, p),
   mediaDeleteFile: (p: string): Promise<{ deleted: boolean; reason?: string }> =>

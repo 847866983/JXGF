@@ -5,7 +5,7 @@ import path from 'node:path'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import type { Project } from '../../shared/types'
-import type { AiProvider } from '../../shared/ai'
+import { buildChatUrl, type AiProvider } from '../../shared/ai.ts'
 import type { ProjectStore } from './store.ts'
 import { now, uid } from './store.ts'
 import { readSkillMain, listSkillRefs, readSkillRef, lintScriptPath } from './skill.ts'
@@ -15,6 +15,8 @@ const execFileP = promisify(execFile)
 interface ChatMsg {
   role: 'system' | 'user' | 'assistant' | 'tool'
   content: string | null
+  /** 推理模型（GLM/DeepSeek-R 等）把思考写在 reasoning_content，content 可能为 null */
+  reasoning_content?: string
   tool_calls?: unknown[]
   tool_call_id?: string
   name?: string
@@ -217,22 +219,112 @@ export class AiAssistant {
   }
 
   private async callLLM(provider: AiProvider, messages: ChatMsg[]): Promise<ChatMsg> {
-    if (!provider.baseUrl || !provider.model) throw new Error('AI 接口未配置完整（baseUrl / model）')
-    if (!provider.apiKey) throw new Error('还没有填写 API Key，请到「设置 → AI 助手」填写')
-    const url = provider.baseUrl.replace(/\/+$/, '') + '/chat/completions'
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${provider.apiKey}` },
-      body: JSON.stringify({ model: provider.model, messages, tools: TOOLS, tool_choice: 'auto', temperature: 0.3 })
-    })
+    if (!provider.baseUrl) throw new Error('AI 接口地址未填写')
+    if (!provider.model) throw new Error('模型名未填写（点「拉取模型」可从网关自动获取）')
+    const url = buildChatUrl(provider.baseUrl)
+    // 本地网关常免鉴权：有 Key 才带 Authorization
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+    if (provider.apiKey) headers.Authorization = `Bearer ${provider.apiKey}`
+    let res: Response
+    try {
+      res = await fetch(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ model: provider.model, messages, tools: TOOLS, tool_choice: 'auto', temperature: 0.3 }),
+        signal: AbortSignal.timeout(180_000)
+      })
+    } catch (err) {
+      throw new Error(`无法连接 AI 接口（${url}）：${String((err as Error).message ?? err)}`)
+    }
     if (!res.ok) {
       const t = await res.text().catch(() => '')
-      throw new Error(`AI 接口 ${res.status}：${t.slice(0, 400)}`)
+      throw new Error(`AI 接口 ${res.status}（${url}）：${t.slice(0, 400)}`)
     }
     const data = (await res.json()) as { choices?: { message?: ChatMsg }[] }
     const msg = data.choices?.[0]?.message
-    if (!msg) throw new Error('AI 接口未返回内容')
+    if (!msg) throw new Error('AI 接口未返回内容（请检查该地址是否为 OpenAI 兼容接口）')
+    // 推理模型可能只返回 reasoning_content，content 为 null；兜底取可读文本
+    if (!msg.content && msg.reasoning_content) msg.content = msg.reasoning_content
     return msg
+  }
+
+  /** 测试接口连通性：发一条最小请求（不带 tools），返回耗时与模型回显 */
+  async testProvider(provider: AiProvider): Promise<{ ok: boolean; message: string; url?: string; latencyMs?: number; reply?: string }> {
+    const started = Date.now()
+    let url = ''
+    try {
+      if (!provider.baseUrl) return { ok: false, message: '请先填写接口地址' }
+      if (!provider.model) return { ok: false, message: '请先填写模型名（可点「拉取模型」自动获取）' }
+      url = buildChatUrl(provider.baseUrl)
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+      if (provider.apiKey) headers.Authorization = `Bearer ${provider.apiKey}`
+      const res = await fetch(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          model: provider.model,
+          messages: [{ role: 'user', content: 'ping' }],
+          max_tokens: 64,
+          temperature: 0
+        }),
+        signal: AbortSignal.timeout(60_000)
+      })
+      const latencyMs = Date.now() - started
+      if (!res.ok) {
+        const t = await res.text().catch(() => '')
+        return { ok: false, message: `接口返回 ${res.status}：${t.slice(0, 300) || '（无内容）'}`, url, latencyMs }
+      }
+      const data = (await res.json()) as {
+        choices?: { message?: { content?: string | null; reasoning_content?: string } }[]
+        model?: string
+      }
+      const m = data.choices?.[0]?.message
+      const reply = String(m?.content ?? m?.reasoning_content ?? '').trim()
+      return {
+        ok: true,
+        message: `连接成功${data.model ? `（模型 ${data.model}）` : ''}`,
+        url,
+        latencyMs,
+        reply: reply.slice(0, 80)
+      }
+    } catch (err) {
+      const msg = String((err as Error).message ?? err)
+      const hint = /timeout|abort/i.test(msg)
+        ? '连接超时，请检查地址/网络或代理'
+        : /ENOTFOUND|EAI_AGAIN|getaddrinfo/i.test(msg)
+          ? '域名解析失败，请检查接口地址拼写'
+          : /ECONNREFUSED/i.test(msg)
+            ? '连接被拒绝，请确认网关已启动、端口正确'
+            : ''
+      return {
+        ok: false,
+        message: `${hint || '连接失败'}：${msg}`,
+        url: url || undefined,
+        latencyMs: Date.now() - started
+      }
+    }
+  }
+
+  /** 从网关拉取可用模型列表（GET {base}/models，兼容 OpenAI 格式） */
+  async listModels(provider: AiProvider): Promise<{ ok: boolean; models: string[]; message?: string }> {
+    try {
+      if (!provider.baseUrl) return { ok: false, models: [], message: '请先填写接口地址' }
+      const base = provider.baseUrl.trim().replace(/\/+$/, '').replace(/\/chat\/completions$/i, '')
+      const url = `${base}/models`
+      const headers: Record<string, string> = {}
+      if (provider.apiKey) headers.Authorization = `Bearer ${provider.apiKey}`
+      const res = await fetch(url, { headers, signal: AbortSignal.timeout(30_000) })
+      if (!res.ok) return { ok: false, models: [], message: `拉取模型失败：HTTP ${res.status}` }
+      const data = (await res.json()) as { data?: { id?: string }[]; models?: { id?: string }[] }
+      const arr = data.data ?? data.models ?? []
+      const models = arr
+        .map((m) => String(m?.id ?? ''))
+        .filter(Boolean)
+        .sort((a, b) => a.localeCompare(b))
+      return { ok: true, models, message: models.length ? undefined : '网关未返回模型列表' }
+    } catch (err) {
+      return { ok: false, models: [], message: `拉取模型失败：${String((err as Error).message ?? err)}` }
+    }
   }
 
   async chat(provider: AiProvider, history: { role: 'user' | 'assistant'; content: string }[], emit: Emit): Promise<{ content: string; changed: boolean }> {

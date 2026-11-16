@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
 import { Bot, Send, Settings2, Sparkles, User, Wrench } from 'lucide-react'
 import type { AiConfig } from '@shared/ai'
 import { useApp } from '../store/app'
 import { EmptyState, PageHeader } from '../components/ui'
 import { NoProject } from '../components/NoProject'
+import { Modal } from '../components/Modal'
+import { AiSettings } from '../components/AiSettings'
 
 interface Msg {
   role: 'user' | 'assistant'
@@ -14,7 +15,6 @@ interface Msg {
 export default function AiAssistant(): React.JSX.Element {
   const project = useApp((s) => s.project)
   const openProject = useApp((s) => s.openProject)
-  const navigate = useNavigate()
 
   const [messages, setMessages] = useState<Msg[]>([])
   const [input, setInput] = useState('')
@@ -22,6 +22,7 @@ export default function AiAssistant(): React.JSX.Element {
   const [statusText, setStatusText] = useState('')
   const [liveTools, setLiveTools] = useState<string[]>([])
   const [config, setConfig] = useState<AiConfig | null>(null)
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -46,7 +47,8 @@ export default function AiAssistant(): React.JSX.Element {
   }, [messages, liveTools, statusText])
 
   const activeProvider = config?.providers.find((p) => p.id === config.activeProviderId) ?? null
-  const keyMissing = !activeProvider?.apiKey || !activeProvider?.baseUrl || !activeProvider?.model
+  // 本地网关常免鉴权，所以只要求地址 + 模型；API Key 可选
+  const keyMissing = !activeProvider?.baseUrl || !activeProvider?.model
 
   const send = async (): Promise<void> => {
     const text = input.trim()
@@ -89,7 +91,7 @@ export default function AiAssistant(): React.JSX.Element {
         title="AI 助手"
         desc="H3AI 导演助理 · 会读记忆、按 H3 规则写分镜、可做机检"
         actions={
-          <button className="btn-ghost" onClick={() => navigate('/settings')}>
+          <button className="btn-ghost" onClick={() => setSettingsOpen(true)}>
             <Settings2 size={15} />
             AI 接口设置
           </button>
@@ -98,9 +100,9 @@ export default function AiAssistant(): React.JSX.Element {
 
       {keyMissing && (
         <div className="mx-8 mb-2 flex items-center justify-between rounded-lg bg-amber-500/10 px-4 py-2.5 text-sm text-amber-300">
-          <span>还没有配置 AI 接口的 API Key，无法对话。</span>
-          <button className="btn-primary py-1 text-xs" onClick={() => navigate('/settings')}>
-            去设置
+          <span>还没有配置 AI 接口（接口地址 / 模型名），无法对话。</span>
+          <button className="btn-primary py-1 text-xs" onClick={() => setSettingsOpen(true)}>
+            配置接口
           </button>
         </div>
       )}
@@ -179,7 +181,7 @@ export default function AiAssistant(): React.JSX.Element {
               <textarea
                 className="field min-h-[44px] flex-1 resize-none py-2.5"
                 rows={1}
-                placeholder={keyMissing ? '请先在设置里配置 AI 接口' : '输入指令，Enter 发送，Shift+Enter 换行'}
+                placeholder={keyMissing ? '请先配置 AI 接口（地址 + 模型）' : '输入指令，Enter 发送，Shift+Enter 换行'}
                 value={input}
                 disabled={keyMissing || sending}
                 onChange={(e) => setInput(e.target.value)}
@@ -198,6 +200,20 @@ export default function AiAssistant(): React.JSX.Element {
           </div>
         </div>
       </div>
+
+      {settingsOpen && (
+        <Modal
+          title="AI 接口设置"
+          onClose={() => setSettingsOpen(false)}
+          footer={
+            <button className="btn-ghost" onClick={() => setSettingsOpen(false)}>
+              关闭
+            </button>
+          }
+        >
+          <AiSettings onSaved={(cfg) => setConfig(cfg)} />
+        </Modal>
+      )}
     </div>
   )
 }

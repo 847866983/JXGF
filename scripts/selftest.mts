@@ -15,6 +15,7 @@ import { PRESETS, presetFor } from '../src/main/core/presets.ts'
 import { buildWorkflow, extractH3Chain, injectH3RefImages, injectH3RefVideos } from '../src/main/core/workflow.ts'
 import { ComfyClient } from '../src/main/core/comfy.ts'
 import { collectMediaFiles, collectHistoryFiles } from '../src/main/core/output-files.ts'
+import { buildChatUrl, normalizeAiConfig, defaultAiConfig } from '../src/shared/ai.ts'
 import { DownloadManager } from '../src/main/core/download.ts'
 import { CATALOG, MODEL_CATALOG, resolveCatalog } from '../src/main/core/catalog.ts'
 import { extractArchive } from '../src/main/core/extract.ts'
@@ -781,6 +782,42 @@ ok('产物：识别 BanZhang painter_output（H3 三采视频，之前一直生�
   assert.equal(files.length, 1)
   assert.equal(files[0].filename, '三采_N471_0003.mp4')
   assert.ok(files[0].src_path)
+})
+
+// ---- AI 接口地址解析（网关配了却用不了的根因） ----
+ok('AI：base 地址自动拼 /chat/completions', () => {
+  assert.equal(buildChatUrl('https://api.deepseek.com/v1'), 'https://api.deepseek.com/v1/chat/completions')
+  assert.equal(buildChatUrl('https://api.deepseek.com/v1/'), 'https://api.deepseek.com/v1/chat/completions')
+})
+ok('AI：完整端点原样使用不重复拼接', () => {
+  assert.equal(buildChatUrl('https://gw.example.com/v1/chat/completions'), 'https://gw.example.com/v1/chat/completions')
+  assert.equal(buildChatUrl('https://gw.example.com/v1/chat/completions/'), 'https://gw.example.com/v1/chat/completions')
+})
+ok('AI：裸域名也能拼出端点', () => {
+  assert.equal(buildChatUrl('https://gw.example.com'), 'https://gw.example.com/chat/completions')
+})
+ok('AI：空地址抛错', () => {
+  let threw = false
+  try {
+    buildChatUrl('')
+  } catch {
+    threw = true
+  }
+  assert.ok(threw)
+})
+ok('AI：配置归一化保留自定义 provider', () => {
+  const cfg = normalizeAiConfig({
+    providers: [{ id: 'gw', name: '我的网关', kind: 'openai', baseUrl: 'https://gw/v1', model: 'm', apiKey: 'k' }],
+    activeProviderId: 'gw'
+  })
+  assert.equal(cfg.providers.length, 1)
+  assert.equal(cfg.activeProviderId, 'gw')
+  assert.equal(cfg.providers[0].model, 'm')
+})
+ok('AI：默认配置可用', () => {
+  const d = defaultAiConfig()
+  assert.ok(d.providers.length > 0)
+  assert.ok(d.providers.some((p) => p.id === d.activeProviderId))
 })
 
 console.log(`\nselftest: ${pass} passed, ${fail} failed`)
