@@ -1,8 +1,10 @@
 import path from 'node:path'
+import fsp from 'node:fs/promises'
 import type { ComfySettings, JobInfo, JobParams, JobStatus, ShotOutput, Template } from '@shared/types'
 import { ComfyClient, makeClient } from './comfy'
 import { buildWorkflow, extractH3Chain, injectH3RefImages, injectH3RefVideos } from './workflow'
 import { uid, now, ProjectStore } from './store'
+import { collectMediaFiles, collectHistoryFiles, type MediaFile } from './output-files'
 
 interface QueuedJob {
   info: JobInfo
@@ -18,6 +20,8 @@ type Emit = (type: 'job:updated' | 'job:progress', payload: Record<string, unkno
  * 任务队列：单一真相所在。UI 只发命令，这里负责
  * 排队 -> 提交 ComfyUI -> WS 进度 -> 取历史 -> 下载归档 -> 回写分镜产物。
  */
+type RetryableError = Error & { noRetry?: boolean }
+
 export class JobManager {
   private jobs = new Map<string, JobInfo>()
   private queue: QueuedJob[] = []
@@ -182,7 +186,9 @@ export class JobManager {
     } catch (err) {
       const project2 = this.store.getCurrent()
       const autoRetry = project2?.settings.autoRetry ?? 1
-      if (q.attempt < autoRetry) {
+      // 超时不自动重试：视频往往只是慢/产物在 history 里，重试会重复生成浪费几小时
+      const noRetry = (err as RetryableError).noRetry === true
+      if (!noRetry && q.attempt < autoRetry) {
         q.attempt += 1
         this.queue.unshift(q)
         info.status = 'queued'
@@ -218,88 +224,126 @@ export class JobManager {
   ): Promise<ShotOutput[]> {
     const client = this.client
     if (!client) throw new Error('ComfyUI 客户端未初始化')
-    const clientId = client.clientId
+    // H3/长视频在 6GB 显存上很慢；视频给 40 分钟，图片 10 分钟
+    const timeoutMs = kind === 'video' ? 40 * 60 * 1000 : 10 * 60 * 1000
+
     return await new Promise<ShotOutput[]>((resolve, reject) => {
       let settled = false
-      const done = (fn: () => void): void => {
+      const timerHandles: ReturnType<typeof setInterval>[] = []
+      const timeoutHandles: ReturnType<typeof setTimeout>[] = []
+      const finish = (): void => {
         if (settled) return
         settled = true
         client.off('executed', onExecuted)
         client.off('execution_error', onError)
-        fn()
+        for (const t of timerHandles) clearInterval(t)
+        for (const t of timeoutHandles) clearTimeout(t)
+      }
+      const deliverFiles = async (files: MediaFile[]): Promise<void> => {
+        if (settled || files.length === 0) return
+        finish()
+        try {
+          const media = this.store.mediaDir()
+          const outputs: ShotOutput[] = []
+          // H3 三采工作流会输出 一采/二采/三采 三个视频，只要最终"三采"清晰版
+          let finalFiles = files
+          if (kind === 'video' && files.length > 1) {
+            const third = files.filter((f) => /三采|final|_N471|3rd/i.test(f.filename))
+            finalFiles = third.length > 0 ? third : files.slice(-1)
+          }
+          for (const f of finalFiles.slice(0, 12)) {
+            const ext = path.extname(f.filename).slice(1).toLowerCase()
+            const outKind: ShotOutput['kind'] = ['mp4', 'webm', 'mov'].includes(ext) || f.type === 'output' ? 'video' : 'image'
+            const dest = path.join(media, f.filename)
+            // BanZhang 节点给的是本地绝对路径(src_path)，优先直接复制；中文文件名也可靠
+            if (f.src_path) {
+              try {
+                await fsp.copyFile(f.src_path, dest)
+              } catch {
+                await client.download(f.filename, f.subfolder, f.type, dest)
+              }
+            } else {
+              await client.download(f.filename, f.subfolder, f.type, dest)
+            }
+            outputs.push({
+              id: uid('out_'),
+              file: dest,
+              kind: kind === 'video' ? outKind : 'image',
+              kept: true,
+              promptId,
+              status: 'done',
+              progress: 100,
+              createdAt: now()
+            })
+          }
+          resolve(outputs)
+        } catch (err) {
+          reject(err as Error)
+        }
       }
 
       const onExecuted = (e: { promptId?: string; output?: Record<string, unknown> }): void => {
-        if (e.promptId !== promptId) return
-        const output = e.output ?? {}
-        const images = (output.images ?? []) as { filename: string; subfolder: string; type: string }[]
-        const videos = (output.videos ?? []) as { filename: string; subfolder: string; type: string }[]
-        const gifs = (output.gifs ?? []) as { filename: string; subfolder: string; type: string }[]
-        const files = [...videos, ...images, ...gifs]
-        if (files.length === 0) {
-          // 有些节点把产物放在别的 output 字段里，稍后轮询 history 兜底
-          return
-        }
-        done(() => {
-          void (async () => {
-            try {
-              const media = this.store.mediaDir()
-              const outputs: ShotOutput[] = []
-              for (const f of files.slice(0, 12)) {
-                const ext = path.extname(f.filename).slice(1).toLowerCase()
-                const outKind: ShotOutput['kind'] = ['mp4', 'webm', 'mov'].includes(ext) || f.type === 'output' ? 'video' : 'image'
-                const dest = path.join(media, f.filename)
-                await client.download(f.filename, f.subfolder, f.type, dest)
-                outputs.push({
-                  id: uid('out_'),
-                  file: dest,
-                  kind: kind === 'video' ? outKind : 'image',
-                  promptId,
-                  status: 'done',
-                  progress: 100,
-                  createdAt: now()
-                })
-              }
-              resolve(outputs)
-            } catch (err) {
-              reject(err as Error)
-            }
-          })()
-        })
+        if (e.promptId !== promptId || settled) return
+        const files = collectMediaFiles(e.output ?? {})
+        if (files.length === 0) return // 有些节点把产物放别的字段，交给 history 兜底
+        void deliverFiles(files)
       }
 
       const onError = (e: { promptId?: string; message?: string }): void => {
-        if (e.promptId !== promptId) return
-        done(() => reject(new Error(e.message ?? 'ComfyUI 执行失败')))
+        if (e.promptId !== promptId || settled) return
+        finish()
+        reject(new Error(e.message ?? 'ComfyUI 执行失败'))
+      }
+
+      /** 查 history：error 判失败，success/completed 时从 outputs 提产物 */
+      const pollHistory = async (): Promise<boolean> => {
+        if (settled) return true
+        try {
+          const history = await client.history(promptId)
+          const entry = history[promptId] as
+            | { status?: { completed?: boolean; status_str?: string }; outputs?: Record<string, unknown> }
+            | undefined
+          if (!entry) return false
+          const status = entry.status?.status_str
+          if (status === 'error') {
+            finish()
+            reject(new Error('ComfyUI 执行出错'))
+            return true
+          }
+          const completed = entry.status?.completed === true || status === 'success'
+          if (completed) {
+            const files = collectHistoryFiles(entry.outputs)
+            if (files.length > 0) {
+              await deliverFiles(files)
+            }
+            return true // 已完成，无论是否拿到文件都停止轮询
+          }
+        } catch {
+          // 网络抖动，下次再查
+        }
+        return false
       }
 
       client.on('executed', onExecuted)
       client.on('execution_error', onError)
 
-      // 兜底：executed 事件没带来文件时，轮询 history
-      const timer = setInterval(() => {
-        if (settled) {
-          clearInterval(timer)
-          return
-        }
-        void client.history(promptId).then((history) => {
+      // 兜底轮询：executed 没带文件时，从 history 提取（H3 产物常在 history.outputs）
+      const poll = setInterval(() => { void pollHistory() }, 3000)
+      timerHandles.push(poll)
+
+      // 超时：先抢救一次 history（可能已完成但事件丢了），确认无产物才 fail 且不重试
+      const to = setTimeout(() => {
+        void (async () => {
           if (settled) return
-          const entry = history[promptId] as { status?: { completed?: boolean; status_str?: string } } | undefined
-          if (entry?.status?.status_str === 'error') {
-            clearInterval(timer)
-            done(() => reject(new Error('ComfyUI 执行出错')))
-          }
-        }).catch(() => undefined)
-      }, 3000)
-      setTimeout(() => clearInterval(timer), 10 * 60 * 1000).unref()
-
-      // 超时保护
-      const timeout = setTimeout(() => {
-        done(() => reject(new Error('生成超时（10 分钟）')))
-      }, 10 * 60 * 1000)
-      timeout.unref()
-
-      void clientId
+          const doneBefore = await pollHistory()
+          if (settled || doneBefore) return
+          finish()
+          const e = new Error(`生成超时（${Math.round(timeoutMs / 60000)} 分钟），可能仍在生成或产物未就绪，请到生成队列查看/手动重试`) as RetryableError
+          e.noRetry = true
+          reject(e)
+        })()
+      }, timeoutMs)
+      timeoutHandles.push(to)
     })
   }
 

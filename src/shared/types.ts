@@ -64,6 +64,8 @@ export interface ShotOutput {
   id: string
   file: string
   kind: OutputKind
+  /** 是否保留（false=弃用；多版本里只保留一个"角色/成片"版本） */
+  kept?: boolean
   promptId?: string
   status: 'queued' | 'running' | 'done' | 'failed'
   progress: number

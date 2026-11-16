@@ -7,6 +7,7 @@ import { EmptyState, PageHeader } from '../components/ui'
 import { NoProject } from '../components/NoProject'
 import { ShotStatusBadge } from '../components/badges'
 import { MediaImage } from '../components/MediaImage'
+import { VideoThumb } from '../components/VideoThumb'
 import { Modal } from '../components/Modal'
 import { persistProject } from '../components/mutate'
 import { defaultSegment, framesFor, getSegment, ratioOf } from '../lib/segment'
@@ -191,7 +192,9 @@ export default function Director(): React.JSX.Element {
     let refVideos: string[] = []
     if (s.genMode === 'video') {
       const prev = shots[index - 1]
-      const prevVideos = (prev?.outputs ?? []).filter((o) => o.kind === 'video').map((o) => o.file)
+      const prevVideos = (prev?.outputs ?? [])
+        .filter((o) => o.kind === 'video' && o.kept !== false)
+        .map((o) => o.file)
       if (prevVideos.length > 0) refVideos = [prevVideos[prevVideos.length - 1]]
     }
     // 角色位置/动作拼进提示词
@@ -268,6 +271,26 @@ export default function Director(): React.JSX.Element {
   /** 快捷改单段参数（续接方式 / 生成方式按钮用），立即保存 */
   const patchSegment = async (shot: Shot, patch: Partial<SegmentSettings>): Promise<void> => {
     await saveSegment(shot.id, { ...segOf(shot), ...patch })
+  }
+
+  /** 选定某个产物为保留版本（其余标记弃用） */
+  const keepOutput = async (shotId: string, outputId: string): Promise<void> => {
+    await persistProject((draft) => {
+      const sh = draft.shots.find((x) => x.id === shotId)
+      if (!sh) return
+      for (const o of sh.outputs) o.kept = o.id === outputId
+      sh.updatedAt = new Date().toISOString()
+    })
+  }
+
+  /** 删除某个产物（不删磁盘文件，仅从分镜移除） */
+  const removeOutput = async (shotId: string, outputId: string): Promise<void> => {
+    await persistProject((draft) => {
+      const sh = draft.shots.find((x) => x.id === shotId)
+      if (!sh) return
+      sh.outputs = sh.outputs.filter((o) => o.id !== outputId)
+      sh.updatedAt = new Date().toISOString()
+    })
   }
 
   const hint = (): string | undefined => {
@@ -476,6 +499,57 @@ export default function Director(): React.JSX.Element {
                         </button>
                       </div>
                     </div>
+
+                    {/* 本段生成结果：多版本视频/图片预览，可选保留哪一个、删多余的 */}
+                    {shot.outputs.length > 0 && (
+                      <div className="mt-3 border-t border-white/5 pt-3">
+                        <div className="mb-2 flex items-center gap-2 text-xs text-slate-400">
+                          本段成片（{shot.outputs.length} 个版本，点「保留」选定，其余可删）
+                          {shot.outputs.some((o) => o.kept) && (
+                            <span className="rounded bg-emerald-500/10 px-1.5 py-0.5 text-[10px] text-emerald-400">
+                              已选版本将作为下一段视频参考
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex gap-3 overflow-x-auto pb-1">
+                          {shot.outputs.map((o) => {
+                            const kept = o.kept !== false
+                            const isVideo = o.kind === 'video'
+                            return (
+                              <div
+                                key={o.id}
+                                className={`shrink-0 rounded-lg border p-2 ${kept ? 'border-accent-500 bg-accent-600/10' : 'border-white/10 bg-white/[0.02]'}`}
+                              >
+                                <div className="h-28 w-48 overflow-hidden rounded bg-black">
+                                  {isVideo ? (
+                                    <VideoThumb src={o.file} className="h-full w-full object-contain" />
+                                  ) : (
+                                    <MediaImage src={o.file} alt="" className="h-full w-full object-cover" fallback={<div className="h-full w-full bg-ink-800" />} />
+                                  )}
+                                </div>
+                                <div className="mt-1.5 truncate text-[11px] text-slate-400" title={o.file}>
+                                  {o.file.split(/[\\/]/).pop()}
+                                </div>
+                                <div className="mt-1.5 flex gap-1.5">
+                                  <button
+                                    className={`rounded px-2 py-0.5 text-[11px] ${kept ? 'bg-emerald-500/20 text-emerald-300' : 'bg-white/5 text-slate-400 hover:bg-white/10'}`}
+                                    onClick={(e) => { e.stopPropagation(); void keepOutput(shot.id, o.id) }}
+                                  >
+                                    {kept ? '✓ 保留中' : '设为保留'}
+                                  </button>
+                                  <button
+                                    className="rounded bg-rose-500/10 px-2 py-0.5 text-[11px] text-rose-300 hover:bg-rose-500/20"
+                                    onClick={(e) => { e.stopPropagation(); void removeOutput(shot.id, o.id) }}
+                                  >
+                                    删除
+                                  </button>
+                                </div>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )
               })}

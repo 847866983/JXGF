@@ -44,6 +44,13 @@ export function explainError(raw: string | null | undefined): ErrorHelp | null {
       suggestion: '把调度器改成 simple、采样器改成 euler（或在工作流参数里调整）后重试。'
     }
   }
+  // 除零（放大重绘参数非法）
+  if (/division by zero|zero division|除以零|denoise.*0/i.test(m)) {
+    return {
+      reason: '放大重绘参数非法（去噪强度/步数为 0，导致除零）',
+      suggestion: '在「导演台 → 段参数 → 放大重绘」里把「去噪强度」设为 0.05 以上、「重绘步数」≥1 后重试；这是已知问题，新版已自动修正。'
+    }
+  }
   // SelfLift 分段步数
   if (/分段步数|selflift|超过本次调度/.test(raw)) {
     return {

@@ -26,6 +26,25 @@ function toLocalPath(src: string): string {
   return src
 }
 
+/** 把本地绝对路径转成 appmedia:// URL（用于 <video> 流式播放，避免大文件转 base64） */
+export function appmediaSrc(src: string | null | undefined): string | null {
+  if (!src) return null
+  if (/^(https?:|data:|blob:|appmedia:)/i.test(src)) return src
+  let p = src
+  if (/^file:/i.test(p)) {
+    try {
+      p = decodeURIComponent(new URL(p).pathname)
+      if (/^\/[a-zA-Z]:/.test(p)) p = p.slice(1)
+    } catch {
+      // ignore
+    }
+  }
+  p = p.replace(/\\/g, '/')
+  if (/^[a-zA-Z]:\//.test(p)) return `appmedia:///${p}`
+  if (p.startsWith('//')) return `appmedia:${p}` // UNC
+  return `appmedia://${p}`
+}
+
 /** 把任意图片来源解析成 <img>/<video> 可用的 src；本地文件通过 IPC 读成 data URL */
 export function useMediaSrc(src: string | null | undefined): string | null {
   const [out, setOut] = useState<string | null>(null)

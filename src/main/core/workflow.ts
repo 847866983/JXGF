@@ -288,14 +288,19 @@ function applyUpscaleParams(clone: Workflow, up: UpscaleSettings): void {
     const ct = String(node.class_type)
     const i = node.inputs
     if (ct === 'BanZhang_MMH3_Upscale') {
-      if ('步数' in i) i['步数'] = up.enabled ? up.steps : 0
-      if ('去噪强度' in i) i['去噪强度'] = up.enabled ? up.denoise : 0
-      if ('音频重绘强度' in i) i['音频重绘强度'] = up.enabled ? up.audioDenoise : 0
+      // 关键：这些节点即使"关闭放大"仍在链路中执行，去噪强度=0 会导致 steps/denoise 除零。
+      // 关闭时保留安全默认值，绝不写 0。
+      const steps = Math.max(1, Number(up.steps) || 2)
+      const denoise = Math.max(0.05, Number(up.denoise) || 0.45)
+      const audioDenoise = Math.max(0.05, Number(up.audioDenoise) || 0.3)
+      if ('步数' in i) i['步数'] = steps
+      if ('去噪强度' in i) i['去噪强度'] = denoise
+      if ('音频重绘强度' in i) i['音频重绘强度'] = audioDenoise
       if ('采样器' in i && up.sampler) i['采样器'] = up.sampler
       if ('调度器' in i && up.scheduler) i['调度器'] = up.scheduler
     } else if (ct === 'BanZhang_MMH3_UpscaleParams') {
       if ('放大模式' in i) i['放大模式'] = up.enabled ? up.mode : '按倍数'
-      if ('放大倍数' in i) i['放大倍数'] = up.enabled ? up.scale : 1
+      if ('放大倍数' in i) i['放大倍数'] = up.enabled ? Math.max(1, up.scale) : 1
       if ('目标宽度' in i) i['目标宽度'] = up.targetWidth
       if ('目标高度' in i) i['目标高度'] = up.targetHeight
       if ('每块帧数' in i) i['每块帧数'] = up.tileFrames

@@ -14,6 +14,7 @@ import { promisify } from 'node:util'
 import { PRESETS, presetFor } from '../src/main/core/presets.ts'
 import { buildWorkflow, extractH3Chain, injectH3RefImages, injectH3RefVideos } from '../src/main/core/workflow.ts'
 import { ComfyClient } from '../src/main/core/comfy.ts'
+import { collectMediaFiles, collectHistoryFiles } from '../src/main/core/output-files.ts'
 import { DownloadManager } from '../src/main/core/download.ts'
 import { CATALOG, MODEL_CATALOG, resolveCatalog } from '../src/main/core/catalog.ts'
 import { extractArchive } from '../src/main/core/extract.ts'
@@ -665,6 +666,28 @@ ok('分段：放大参数倍数/块帧注入', () => {
   assert.equal(segWf['3'].inputs['放大倍数'], 2)
   assert.equal(segWf['3'].inputs['每块帧数'], 64)
 })
+ok('分段：关闭放大时去噪/步数仍为安全值（避免除零崩溃）', () => {
+  const off = buildWorkflow(segH3Template, {
+    upscale: {
+      enabled: false,
+      mode: '倍数',
+      scale: 1,
+      targetWidth: 1280,
+      targetHeight: 704,
+      steps: 0,
+      denoise: 0,
+      audioDenoise: 0,
+      sampler: 'euler',
+      scheduler: 'simple',
+      tileFrames: 107,
+      overlapFrames: 22
+    }
+  }) as Record<string, { inputs: Record<string, unknown> }>
+  assert.ok(Number(off['2'].inputs['步数']) >= 1)
+  assert.ok(Number(off['2'].inputs['去噪强度']) > 0)
+  assert.ok(Number(off['2'].inputs['音频重绘强度']) > 0)
+  assert.equal(off['3'].inputs['放大倍数'], 1)
+})
 ok('分段：抽帧/插帧注入', () => {
   assert.equal(segWf['4'].inputs['插帧倍数'], 3)
   assert.equal(segWf['4'].inputs['序列源帧率'], 12)
@@ -698,6 +721,32 @@ ok('错误诊断：未知错误给通用建议', () => {
   assert.ok(h && h.suggestion.length > 0)
 })
 ok('错误诊断：空错误返回 null', () => assert.equal(explainError(''), null))
+
+// ---- 产物提取：history success 时从 outputs 提文件（H3 超时重生成 bug 的根因） ----
+ok('产物：collectMediaFiles 从单节点 output 提取视频', () => {
+  const files = collectMediaFiles({ videos: [{ filename: 'a.mp4', subfolder: '', type: 'output' }] })
+  assert.equal(files.length, 1)
+  assert.equal(files[0].filename, 'a.mp4')
+})
+ok('产物：collectHistoryFiles 从 history 多节点 outputs 提取产物', () => {
+  const files = collectHistoryFiles({
+    '3': { images: [{ filename: 'x.png', subfolder: '', type: 'output' }] },
+    '471': { videos: [{ filename: 'seg.mp4', subfolder: 'videos', type: 'output' }] },
+    '999': { something_else: 1 }
+  })
+  assert.equal(files.length, 2)
+  assert.ok(files.some((f) => f.filename === 'seg.mp4'))
+  assert.ok(files.some((f) => f.filename === 'x.png'))
+})
+ok('产物：空 outputs 不误判', () => assert.equal(collectHistoryFiles({}).length, 0))
+ok('产物：识别 BanZhang painter_output（H3 三采视频，之前一直生成中的根因）', () => {
+  const files = collectHistoryFiles({
+    '471': { painter_output: [{ filename: '三采_N471_0003.mp4', subfolder: '', type: 'output', src_path: 'D:/comfyui/output/三采_N471_0003.mp4', metadata: { kind: 'video', width: 896, height: 480 } }] }
+  })
+  assert.equal(files.length, 1)
+  assert.equal(files[0].filename, '三采_N471_0003.mp4')
+  assert.ok(files[0].src_path)
+})
 
 console.log(`\nselftest: ${pass} passed, ${fail} failed`)
 if (fail > 0) process.exit(1)
