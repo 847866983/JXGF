@@ -4,6 +4,7 @@ import type { ComfySettings } from '@shared/types'
 import { useApp } from '../store/app'
 import { PageHeader } from '../components/ui'
 import { AiSettings } from '../components/AiSettings'
+import Environment from './Environment'
 
 const DEFAULT_COMFY: ComfySettings = { host: '127.0.0.1', port: 8188, protocol: 'http' }
 
@@ -35,6 +36,7 @@ export default function Settings(): React.JSX.Element {
     note: string
   } | null>(null)
   const [copied, setCopied] = useState(false)
+  const [tab, setTab] = useState<'general' | 'env'>('general')
 
   useEffect(() => {
     void window.api.appInfo().then((info) => setMcp(info.mcp))
@@ -101,9 +103,41 @@ export default function Settings(): React.JSX.Element {
 
   const templates = project?.templates ?? []
 
+  const tabsBar = (
+    <div className="mx-8 mb-4 flex w-fit items-center gap-1 rounded-lg border border-white/5 bg-ink-900 p-1">
+      <button
+        onClick={() => setTab('general')}
+        className={`rounded-md px-4 py-1.5 text-sm transition-colors ${
+          tab === 'general' ? 'bg-accent-600/20 text-accent-400' : 'text-slate-400 hover:text-slate-200'
+        }`}
+      >
+        常规设置
+      </button>
+      <button
+        onClick={() => setTab('env')}
+        className={`rounded-md px-4 py-1.5 text-sm transition-colors ${
+          tab === 'env' ? 'bg-accent-600/20 text-accent-400' : 'text-slate-400 hover:text-slate-200'
+        }`}
+      >
+        环境检测
+      </button>
+    </div>
+  )
+
+  if (tab === 'env') {
+    return (
+      <div>
+        <PageHeader title="设置" desc="运行环境、ComfyUI 连接、工作流模板与在线更新" />
+        {tabsBar}
+        <Environment embedded />
+      </div>
+    )
+  }
+
   return (
     <div>
       <PageHeader title="设置" desc="运行环境、ComfyUI 连接、工作流模板与在线更新" />
+      {tabsBar}
 
       <div className="grid grid-cols-2 gap-4 px-8">
         <div className="panel p-5">
@@ -203,7 +237,11 @@ export default function Settings(): React.JSX.Element {
               </button>
             )}
           </div>
-          {update?.error && <div className="mt-3 text-xs text-rose-400">{update.error}</div>}
+          {update?.error && (
+            <div className="mt-3 text-xs text-slate-500">
+              自动更新暂不可用（需正式发布到 GitHub Release 后生效）
+            </div>
+          )}
         </div>
       </div>
 

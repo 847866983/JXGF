@@ -19,7 +19,7 @@ const runtimeText: Record<string, { label: string; tone: string }> = {
   error: { label: '出错', tone: 'text-rose-400' }
 }
 
-export default function Environment(): React.JSX.Element {
+export default function Environment({ embedded = false }: { embedded?: boolean }): React.JSX.Element {
   const navigate = useNavigate()
   const [report, setReport] = useState<EnvironmentReport | null>(null)
   const [loading, setLoading] = useState(false)
@@ -126,16 +126,26 @@ export default function Environment(): React.JSX.Element {
 
   return (
     <div>
-      <PageHeader
-        title="环境检测"
-        desc="面向不同配置的机器，给出本机能做什么、缺什么、怎么补"
-        actions={
+      {embedded ? (
+        <div className="flex items-center justify-between px-8 pb-4">
+          <div className="text-xs text-slate-500">面向本机配置的检测与安装：能做什么、缺什么、怎么补</div>
           <button className="btn-ghost" onClick={scan} disabled={loading}>
             <RefreshCw size={15} className={loading ? 'animate-spin' : ''} />
             {loading ? '检测中…' : '重新检测'}
           </button>
-        }
-      />
+        </div>
+      ) : (
+        <PageHeader
+          title="环境检测"
+          desc="面向不同配置的机器，给出本机能做什么、缺什么、怎么补"
+          actions={
+            <button className="btn-ghost" onClick={scan} disabled={loading}>
+              <RefreshCw size={15} className={loading ? 'animate-spin' : ''} />
+              {loading ? '检测中…' : '重新检测'}
+            </button>
+          }
+        />
+      )}
 
       <div className="space-y-4 px-8 pb-8">
         {error && (

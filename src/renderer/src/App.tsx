@@ -3,7 +3,6 @@ import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { Sidebar } from './components/Sidebar'
 import { useApp } from './store/app'
 import Dashboard from './pages/Dashboard'
-import Environment from './pages/Environment'
 import Assets from './pages/Assets'
 import Storyboard from './pages/Storyboard'
 import Director from './pages/Director'
@@ -49,7 +48,7 @@ export default function App(): React.JSX.Element {
       <main className="flex-1 overflow-y-auto">
         <Routes>
           <Route path="/dashboard" element={<Dashboard />} />
-          <Route path="/environment" element={<Environment />} />
+          <Route path="/environment" element={<Navigate to="/settings" replace />} />
           <Route path="/assets" element={<Assets />} />
           <Route path="/storyboard" element={<Storyboard />} />
           <Route path="/director" element={<Director />} />

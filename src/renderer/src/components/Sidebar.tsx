@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import {
-  Activity,
   BookOpen,
   Bot,
   Clapperboard,
@@ -18,7 +17,6 @@ import { useApp } from '../store/app'
 
 const items = [
   { to: '/dashboard', label: '仪表盘', icon: LayoutDashboard },
-  { to: '/environment', label: '环境检测', icon: Activity },
   { to: '/assets', label: '资产管理', icon: FolderKanban },
   { to: '/storyboard', label: '剧本分镜', icon: ListOrdered },
   { to: '/memory', label: '记忆库', icon: BookOpen },

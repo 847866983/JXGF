@@ -11,6 +11,7 @@ type Emit = (payload: { type: 'update:state'; info: UpdateInfo }) => void
 export class Updater {
   private current: UpdateInfo = { available: false }
   private emit: Emit | null = null
+  private listenersBound = false
 
   constructor() {
     this.current = {
@@ -39,18 +40,31 @@ export class Updater {
       return this.current
     }
     try {
-      const { autoUpdater } = await import('electron-updater')
-      autoUpdater.autoDownload = false
-      autoUpdater.autoInstallOnAppQuit = true
-      autoUpdater.on('update-available', (info) => {
-        this.set({ available: true, version: info.version, releaseName: info.releaseName ?? undefined })
-      })
-      autoUpdater.on('update-not-available', () => this.set({ available: false }))
-      autoUpdater.on('download-progress', (p) => this.set({ percent: Math.round(p.percent) }))
-      autoUpdater.on('update-downloaded', (info) =>
-        this.set({ available: true, version: info.version, downloaded: true })
-      )
-      autoUpdater.on('error', (err) => this.set({ error: err.message }))
+      const mod = (await import('electron-updater')) as unknown as {
+        autoUpdater?: unknown
+        default?: { autoUpdater?: unknown }
+      }
+      // electron-updater 是 CJS：动态 import 后可能挂在 default 上，做兼容解构。
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const autoUpdater = (mod.autoUpdater ?? mod.default?.autoUpdater) as any
+      if (!autoUpdater) {
+        this.set({ available: false, error: '自动更新组件未加载（electron-updater 未正确打包）' })
+        return this.current
+      }
+      if (!this.listenersBound) {
+        this.listenersBound = true
+        autoUpdater.autoDownload = false
+        autoUpdater.autoInstallOnAppQuit = true
+        autoUpdater.on('update-available', (info: { version: string; releaseName?: string }) => {
+          this.set({ available: true, version: info.version, releaseName: info.releaseName ?? undefined })
+        })
+        autoUpdater.on('update-not-available', () => this.set({ available: false }))
+        autoUpdater.on('download-progress', (p: { percent: number }) => this.set({ percent: Math.round(p.percent) }))
+        autoUpdater.on('update-downloaded', (info: { version: string }) =>
+          this.set({ available: true, version: info.version, downloaded: true })
+        )
+        autoUpdater.on('error', (err: { message?: string }) => this.set({ error: String(err?.message ?? err) }))
+      }
       const result = await autoUpdater.checkForUpdates()
       if (!result) this.set({ available: false })
       return this.current
