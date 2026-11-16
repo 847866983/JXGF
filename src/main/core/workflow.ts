@@ -22,6 +22,8 @@ export interface WorkflowParams {
   upscale?: UpscaleSettings
   /** 抽帧 / 插帧参数 */
   rife?: RifeSettings
+  /** 参考图（图片编辑/图生图用；视频的参考图走媒体架） */
+  refImages?: string[]
 }
 
 type WorkflowNode = { id: string; class_type: string; inputs: Record<string, unknown> }
@@ -60,6 +62,45 @@ function tryParse<T>(v: unknown): T | null {
     return JSON.parse(v) as T
   } catch {
     return null
+  }
+}
+
+/**
+ * 千问图片编辑（CSGlideQwenCastCS）：把提示词/负面/画布写进 qwen_data。
+ * 参考图走同一工作流的 CSGlideH3MediaRackCS（rack_data.slots.images）。
+ */
+interface QwenData {
+  prompt?: string
+  negative_prompt?: string
+  canvas?: { w?: number; h?: number }
+  canvas_from_ref?: boolean
+  [k: string]: unknown
+}
+
+/** 千问图片编辑节点名（不同版本叫法不同）：CSGlideImageCastCS 是当前版本，CSGlideQwenCastCS 是旧版 */
+const QWEN_EDIT_NODES = ['CSGlideImageCastCS', 'CSGlideQwenCastCS']
+
+function isQwenEditNode(classType: string): boolean {
+  return QWEN_EDIT_NODES.includes(classType)
+}
+
+function injectQwenEdit(clone: Workflow, params: WorkflowParams): void {
+  const hasRefs = Array.isArray(params.refImages) && params.refImages.length > 0
+  for (const node of Object.values(clone)) {
+    if (!isQwenEditNode(String(node.class_type))) continue
+    const raw = node.inputs.qwen_data
+    const data = tryParse<QwenData>(typeof raw === 'string' ? raw : '')
+    if (!data) continue
+    if (params.positive) data.prompt = params.positive
+    if (params.negative) data.negative_prompt = params.negative
+    // 有参考图时画布跟随参考图（编辑模式最自然）；显式给了宽高才用它
+    if (hasRefs && !(params.width && params.height)) {
+      data.canvas_from_ref = true
+    } else if (params.width && params.height) {
+      data.canvas_from_ref = false
+      data.canvas = { ...(data.canvas ?? {}), w: params.width, h: params.height }
+    }
+    node.inputs.qwen_data = JSON.stringify(data)
   }
 }
 
@@ -338,7 +379,21 @@ export function buildWorkflow(template: Template, params: WorkflowParams): unkno
   // 先注入采样器细参（steps/cfg/sampler/scheduler），H3 的 SelfLift 会据此对齐
   applySamplerParams(clone, params)
 
+  const hasQwenEdit = Object.values(clone).some((n) => isQwenEditNode(String(n.class_type)))
   const isH3 = Object.values(clone).some((n) => String(n.class_type).includes('CSGlide'))
+
+  // 千问图片编辑：提示词/负面/画布写进 qwen_data（参考图由 jobs 上传后注入媒体架）
+  if (hasQwenEdit) {
+    injectQwenEdit(clone, params)
+    if (params.seed !== undefined) {
+      for (const node of Object.values(clone)) {
+        if (/^KSampler(Advanced)?$/.test(String(node.class_type)) && 'seed' in node.inputs) {
+          node.inputs.seed = params.seed
+        }
+      }
+    }
+    return clone
+  }
 
   if (isH3) {
     if (params.positive !== undefined) {

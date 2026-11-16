@@ -820,5 +820,55 @@ ok('AI：默认配置可用', () => {
   assert.ok(d.providers.some((p) => p.id === d.activeProviderId))
 })
 
+// ---- 千问图片编辑（CSGlideQwenCastCS） ----
+const qwenTpl = {
+  id: 'tpl_qwen_edit',
+  name: 'qwen-edit',
+  kind: 'image' as const,
+  description: '',
+  apiJson: {
+    '245': {
+      class_type: 'CSGlideQwenCastCS',
+      inputs: {
+        qwen_data: JSON.stringify({
+          prompt: 'old prompt',
+          negative_prompt: 'old neg',
+          canvas: { w: 2048, h: 1152 },
+          canvas_from_ref: false
+        })
+      }
+    },
+    '246': { class_type: 'CSGlideH3MediaRackCS', inputs: { rack_data: JSON.stringify({ slots: { images: [], videos: [], audios: [] } }) } },
+    '243': { class_type: 'KSampler', inputs: { seed: 1, steps: 4, cfg: 1.1, sampler_name: 'euler', scheduler: 'normal' } }
+  },
+  mapping: { version: 1 },
+  createdAt: new Date().toISOString()
+}
+const qwWf = buildWorkflow(qwenTpl, { positive: '新提示词', negative: '新负面', width: 1024, height: 768 }) as Record<string, { inputs: Record<string, unknown> }>
+const qwData = JSON.parse(String(qwWf['245'].inputs.qwen_data)) as Record<string, any>
+ok('千问编辑：提示词写入 qwen_data.prompt', () => assert.equal(qwData.prompt, '新提示词'))
+ok('千问编辑：负面写入 negative_prompt', () => assert.equal(qwData.negative_prompt, '新负面'))
+ok('千问编辑：画布尺寸写入', () => assert.equal(qwData.canvas.w, 1024) && assert.equal(qwData.canvas.h, 768))
+ok('千问编辑：采样器参数注入', () => assert.equal(qwWf['243'].inputs.steps, 4))
+
+const qwRefWf = buildWorkflow(qwenTpl, { positive: 'p', refImages: ['ref.png'] }) as Record<string, { inputs: Record<string, unknown> }>
+const qwRefData = JSON.parse(String(qwRefWf['245'].inputs.qwen_data)) as Record<string, any>
+ok('千问编辑：仅传参考图时画布跟随参考图', () => assert.equal(qwRefData.canvas_from_ref, true))
+
+ok('千问编辑：含 QwenCast 的模板判为图片而非视频', () => {
+  const kind = detectWorkflowKind({
+    a: { class_type: 'CSGlideQwenCastCS' },
+    b: { class_type: 'h3VideoCombine' }
+  })
+  assert.equal(kind, 'image')
+})
+ok('H3 三采仍判为视频', () => {
+  const kind = detectWorkflowKind({
+    a: { class_type: 'CSGlideCastCS' },
+    b: { class_type: 'h3VideoCombine' }
+  })
+  assert.equal(kind, 'video')
+})
+
 console.log(`\nselftest: ${pass} passed, ${fail} failed`)
 if (fail > 0) process.exit(1)

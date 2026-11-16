@@ -133,9 +133,17 @@ export async function convertUiToApi(
 
 /** 判断工作流是视频还是图片类（用于模板 kind） */
 export function detectWorkflowKind(api: Record<string, { class_type: string }>): 'image' | 'video' {
-  for (const node of Object.values(api)) {
-    const ct = String(node.class_type)
-    if (/video|h3|wan|csglide|mochi|ltx|animatediff|vhs/i.test(ct)) return 'video'
+  const types = Object.values(api).map((n) => String(n.class_type))
+  // 千问图片编辑/文生图以 CSGlideQwenCastCS 为核心 → 图片工作流。
+  // 注意：该工作流末尾常带 h3VideoCombine 做输出封装，不能据此判成视频。
+  const hasQwenImage = types.some((t) => /CSGlideQwenCastCS|CSGlideImageCastCS|QwenImage|TextEncodeQwenImage/i.test(t))
+  const hasH3Video = types.some((t) => /CSGlideCastCS|CSGlideDeskCS/i.test(t))
+  if (hasQwenImage && !hasH3Video) return 'image'
+  // 明确的视频核心节点才算视频（h3VideoCombine 只是输出器，不算）
+  for (const ct of types) {
+    if (/CSGlideCastCS|CSGlideDeskCS|SaveVideo|VHS_VideoCombine|WanVideo|Mochi|LTXV|AnimateDiff/i.test(ct)) {
+      return 'video'
+    }
   }
   return 'image'
 }

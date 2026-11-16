@@ -3,6 +3,7 @@ import { Image, ScanFace, Wand2 } from 'lucide-react'
 import type { Asset } from '@shared/types'
 import { useApp } from '../store/app'
 import { Modal } from './Modal'
+import { MediaImage } from './MediaImage'
 import {
   DEFAULT_STYLE_ID,
   STYLES,
@@ -15,7 +16,7 @@ import {
 /**
  * 资产生图对话框：选 画风 + 模板 + 提示词，生成图片作为资产封面。
  * 角色资产：默认用「Z-Image-Turbo」并套「四视图」提示词（上半身特写 + 全身正/侧/背）。
- * 生成完成后图片自动写入 asset.images + coverFile，可在剧本分镜中引用。
+ * 支持「参考图」：选中图片后传给它 = 图片编辑 / 图生图（千问全能编辑等模板专用）。
  */
 
 export function AssetGenerateDialog({
@@ -37,11 +38,32 @@ export function AssetGenerateDialog({
   const [positive, setPositive] = useState(asset.prompt || asset.description || '')
   const [negative, setNegative] = useState(asset.negative || '')
   const [fourView, setFourView] = useState(isCharacter)
-  const [width, setWidth] = useState(isCharacter ? '1536' : '1024')
-  const [height, setHeight] = useState(isCharacter ? '640' : '1024')
+  const [width, setWidth] = useState(isCharacter ? '1536' : '640')
+  const [height, setHeight] = useState(isCharacter ? '640' : '640')
   const [batch, setBatch] = useState('1')
+  const [refImages, setRefImages] = useState<string[]>([])
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // 可选参考图：本资产已有图 + 项目内其它资产图
+  const otherAssets = (project?.assets ?? []).filter((a) => a.id !== asset.id)
+  const refPool: { file: string; label: string }[] = [
+    ...asset.images.map((f) => ({ file: f, label: '本资产' })),
+    ...otherAssets.flatMap((a) =>
+      [a.coverFile, ...a.images].filter((f): f is string => Boolean(f)).map((f) => ({ file: f, label: a.name }))
+    )
+  ]
+  // 去重
+  const seen = new Set<string>()
+  const refCandidates = refPool.filter((r) => {
+    if (seen.has(r.file)) return false
+    seen.add(r.file)
+    return true
+  })
+
+  const toggleRef = (file: string): void => {
+    setRefImages((prev) => (prev.includes(file) ? prev.filter((x) => x !== file) : [...prev, file]))
+  }
 
   const generate = async (): Promise<void> => {
     if (!project) return
@@ -49,16 +71,18 @@ export function AssetGenerateDialog({
       setError('请先选择一个图片工作流模板')
       return
     }
-    if (!positive.trim() && !fourView) {
-      setError('请填写提示词')
+    if (!positive.trim() && !fourView && refImages.length === 0) {
+      setError('请填写提示词（或至少选一张参考图）')
       return
     }
     setSubmitting(true)
     setError(null)
     try {
       const style = STYLES.find((s) => s.id === styleId)
-      const finalPositive = fourView ? buildFourViewPositive(positive, styleId) : styledPositive(positive, styleId)
-      const finalNegative = fourView
+      // 有参考图时不做四视图套模板（编辑模式应当尊重用户提示词）
+      const useFourView = fourView && refImages.length === 0
+      const finalPositive = useFourView ? buildFourViewPositive(positive, styleId) : styledPositive(positive, styleId)
+      const finalNegative = useFourView
         ? fourViewNegative(styleId)
         : [style?.negative, negative.trim()].filter(Boolean).join(', ') || undefined
       await window.api.jobGenerate({
@@ -69,7 +93,8 @@ export function AssetGenerateDialog({
         negative: finalNegative,
         width: Number(width) || undefined,
         height: Number(height) || undefined,
-        batch: Number(batch) || 1
+        batch: Number(batch) || 1,
+        refImages: refImages.length > 0 ? refImages : undefined
       })
       onClose()
     } catch (err) {
@@ -164,6 +189,50 @@ export function AssetGenerateDialog({
             />
           </div>
         )}
+
+        {/* 参考图：选中后即「图片编辑 / 图生图」，配合千问全能编辑等模板 */}
+        <div>
+          <label className="label">
+            参考图（可多选）{refImages.length > 0 && <span className="ml-1 text-accent-400">已选 {refImages.length} 张 · 图片编辑模式</span>}
+          </label>
+          {refCandidates.length === 0 ? (
+            <div className="rounded-lg bg-white/[0.03] px-3 py-2 text-[11px] text-slate-500">
+              暂无可选图片。先生成一张，或在其它资产里生成图后再来选。
+            </div>
+          ) : (
+            <div className="grid max-h-[132px] grid-cols-6 gap-1.5 overflow-y-auto rounded-lg border border-white/5 bg-white/[0.02] p-2">
+              {refCandidates.map((r) => {
+                const picked = refImages.includes(r.file)
+                return (
+                  <button
+                    key={r.file}
+                    type="button"
+                    title={r.label}
+                    onClick={() => toggleRef(r.file)}
+                    className={`relative aspect-square overflow-hidden rounded border ${
+                      picked ? 'border-accent-500 ring-1 ring-accent-500' : 'border-white/10 hover:border-white/30'
+                    }`}
+                  >
+                    <MediaImage
+                      src={r.file}
+                      alt=""
+                      className="h-full w-full object-cover"
+                      fallback={<div className="h-full w-full bg-ink-800" />}
+                    />
+                    {picked && (
+                      <span className="absolute right-0.5 top-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-accent-600 text-[10px] text-white">
+                        ✓
+                      </span>
+                    )}
+                  </button>
+                )
+              })}
+            </div>
+          )}
+          <div className="mt-1 text-[11px] text-slate-600">
+            选参考图后走「图片编辑/图生图」：保留参考图内容按提示词改写。千问「全能编辑」等模板需要此项。
+          </div>
+        </div>
 
         <div className="grid grid-cols-3 gap-2">
           <div>
