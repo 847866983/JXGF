@@ -348,7 +348,9 @@ export function buildWorkflow(template: Template, params: WorkflowParams): unkno
     syncH3DeskChain(clone)
     if (params.upscale) applyUpscaleParams(clone, params.upscale)
     if (params.rife) applyRifeParams(clone, params.rife)
-    clearH3Refs(clone, params.mode)
+    // 生成模式可能只通过 h3.mode 传入（导演台），t2v 时必须清空参考图残留
+    const effMode = (params.h3?.mode as string | undefined) ?? params.mode
+    clearH3Refs(clone, effMode)
     fixH3Params(clone)
     // H3 的种子在 KSampler 节点
     if (params.seed !== undefined) {

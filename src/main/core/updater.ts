@@ -40,13 +40,7 @@ export class Updater {
       return this.current
     }
     try {
-      const mod = (await import('electron-updater')) as unknown as {
-        autoUpdater?: unknown
-        default?: { autoUpdater?: unknown }
-      }
-      // electron-updater 是 CJS：动态 import 后可能挂在 default 上，做兼容解构。
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const autoUpdater = (mod.autoUpdater ?? mod.default?.autoUpdater) as any
+      const autoUpdater = (await this.loadAutoUpdater()) as any
       if (!autoUpdater) {
         this.set({ available: false, error: '自动更新组件未加载（electron-updater 未正确打包）' })
         return this.current
@@ -74,9 +68,22 @@ export class Updater {
     }
   }
 
+  /** 与 check() 相同的兼容解构：electron-updater 是 CJS，可能挂在 default 下 */
+  private async loadAutoUpdater(): Promise<unknown> {
+    const mod = (await import('electron-updater')) as unknown as {
+      autoUpdater?: unknown
+      default?: { autoUpdater?: unknown }
+    }
+    return mod.autoUpdater ?? mod.default?.autoUpdater ?? null
+  }
+
   async download(): Promise<UpdateInfo> {
     try {
-      const { autoUpdater } = await import('electron-updater')
+      const autoUpdater = (await this.loadAutoUpdater()) as any
+      if (!autoUpdater) {
+        this.set({ error: '自动更新组件未加载（electron-updater 未正确打包）' })
+        return this.current
+      }
       await autoUpdater.downloadUpdate()
       return this.current
     } catch (err) {
@@ -87,7 +94,8 @@ export class Updater {
 
   quitAndInstall(): void {
     void (async () => {
-      const { autoUpdater } = await import('electron-updater')
+      const autoUpdater = (await this.loadAutoUpdater()) as any
+      if (!autoUpdater) return
       autoUpdater.quitAndInstall(false, true)
     })()
   }

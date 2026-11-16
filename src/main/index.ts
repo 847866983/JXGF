@@ -201,9 +201,15 @@ function registerIpc(): void {
 
   ipcMain.handle(CH.envCatalog, async () => {
     const report = await getHardware()
-    // 若已配置 ComfyUI 根目录，模型直接下到它的 models/，这样 ComfyUI 能直接加载
+    // 若已配置 ComfyUI 根目录，模型直接下到它的 models/，这样 ComfyUI 能直接加载。
+    // 根目录可能是「含 ComfyUI 子目录的上级」或「ComfyUI 目录本身」，按实际结构判断。
     const st = await comfyRuntime.status()
-    const modelsRoot = st.root ? path.join(st.root, 'ComfyUI', 'models') : st.root ? path.join(st.root, 'models') : null
+    let modelsRoot: string | null = null
+    if (st.root) {
+      modelsRoot = fs.existsSync(path.join(st.root, 'ComfyUI', 'models'))
+        ? path.join(st.root, 'ComfyUI', 'models')
+        : path.join(st.root, 'models')
+    }
     return resolveCatalog(path.join(app.getPath('userData'), 'runtime'), report.gpu, modelsRoot)
   })
 
@@ -315,9 +321,12 @@ function registerIpc(): void {
     }
   })
 
-  // 本地图片读取成 data URL（供渲染进程预览，避开 file:// 安全限制与自定义协议坑）
+  // 本地图片/视频读取成 data URL（供渲染进程预览，避开 file:// 安全限制）。
+  // 视频走 base64 会放大 1.33 倍，限制 200MB 防止内存爆炸（更大文件请走 appmedia:// 流式）。
   ipcMain.handle(CH.mediaDataUrl, async (_e, p: string) => {
     try {
+      const stat = await fsp.stat(p)
+      if (stat.size > 200 * 1024 * 1024) return null
       const buf = await fsp.readFile(p)
       const ext = path.extname(p).toLowerCase()
       const mime =

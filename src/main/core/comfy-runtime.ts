@@ -212,7 +212,7 @@ export class ComfyRuntime extends EventEmitter {
       await this.setConfig({ ...cfg, root: inRuntime[0] })
       return inRuntime[0]
     }
-    // 扫常见位置
+    // 扫常见位置 + 每个盘符一层子目录（覆盖 D:\ManjuStudio\comfyui、D:\AI\xxx 等自定义路径）
     const candidates: string[] = []
     const drives = ['C', 'D', 'E', 'F', 'G']
     const names = ['ComfyUI', 'ComfyUI_windows_portable', 'comfyui', 'ComfyUI-Installs']
@@ -222,8 +222,17 @@ export class ComfyRuntime extends EventEmitter {
         candidates.push(`${d}:\\${n}\\ComfyUI`)
       }
       candidates.push(`${d}:\\AI\\ComfyUI`, `${d}:\\Program Files\\ComfyUI`)
+      // 一层子目录扫描：找 <盘>:\<任意目录>\ComfyUI\main.py 或 <盘>:\<任意目录>\main.py
+      try {
+        for (const e of fs.readdirSync(`${d}:\\`, { withFileTypes: true })) {
+          if (!e.isDirectory()) continue
+          candidates.push(`${d}:\\${e.name}\\ComfyUI`, `${d}:\\${e.name}`)
+        }
+      } catch {
+        // 盘符不存在或不可读，跳过
+      }
     }
-    for (const c of candidates) {
+    for (const c of [...new Set(candidates)]) {
       if (exists(path.join(c, 'main.py'))) {
         // 找到 ComfyUI 本体目录；根 = 其父（含 venv/python_embeded）
         const root = exists(path.join(c, '..', 'python_embeded')) || exists(path.join(c, '..', 'venv')) ? path.dirname(c) : c

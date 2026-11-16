@@ -61,6 +61,8 @@ export class ProjectStore {
   private current: Project | null = null
   private timer: ReturnType<typeof setTimeout> | null = null
   private readonly projectsDir: string
+  /** 串行化 flush：多个调用方（jobs 回写 / 防抖保存 / 窗口关闭）可能并发，排队依次写盘 */
+  private flushChain: Promise<void> = Promise.resolve()
 
   constructor(projectsDir: string) {
     this.projectsDir = projectsDir
@@ -134,12 +136,18 @@ export class ProjectStore {
   }
 
   async flush(): Promise<void> {
+    // 串行排队：避免并发 flush 写同一个 tmp 文件导致覆盖/丢数据
+    this.flushChain = this.flushChain.then(() => this.doFlush())
+    return this.flushChain
+  }
+
+  private async doFlush(): Promise<void> {
     if (!this.current) return
     const root = this.projectRoot(this.current.id)
     await fsp.mkdir(root, { recursive: true })
     await fsp.mkdir(path.join(root, 'media'), { recursive: true })
     const file = path.join(root, PROJECT_FILE)
-    const tmp = `${file}.${process.pid}.tmp`
+    const tmp = `${file}.${process.pid}.${Date.now()}.tmp`
     const body = JSON.stringify(this.current, null, 2)
     await fsp.writeFile(tmp, body, 'utf8')
     if (fs.existsSync(file)) {

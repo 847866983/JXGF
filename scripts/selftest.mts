@@ -422,6 +422,17 @@ await store.save(created)
 await store.flush()
 const reopened = await store.open(created.id)
 ok('store：保存并重开后资产持久化', () => assert.equal(reopened.assets.length, 1))
+
+// 并发 flush 串行化：两个并发的 flush 不应互相覆盖（tmp 文件带时间戳 + 串行队列）
+const concStore = new ProjectStore(path.join(tmp4, 'conc'))
+await concStore.init()
+await concStore.create('并发项目')
+const cur = concStore.getCurrent()!
+const p1 = (async () => { cur.assets.push({ id: uid('a1_'), kind: 'character', name: 'A', tags: [], description: '', prompt: '', negative: '', coverFile: null, images: [], versions: [], createdAt: now(), updatedAt: now() }); await concStore.flush() })()
+const p2 = (async () => { cur.assets.push({ id: uid('a2_'), kind: 'scene', name: 'B', tags: [], description: '', prompt: '', negative: '', coverFile: null, images: [], versions: [], createdAt: now(), updatedAt: now() }); await concStore.flush() })()
+await Promise.all([p1, p2])
+const reopened2 = await concStore.open(cur.id)
+ok('store：并发 flush 串行化不丢数据', () => assert.equal(reopened2.assets.length, 2))
 ok('store：重开后项目名一致', () => assert.equal(reopened.name, '测试项目'))
 ok('store：重开后 ComfyUI 默认地址 127.0.0.1:8188', () => {
   assert.equal(reopened.settings.comfy.host, '127.0.0.1')
@@ -706,6 +717,30 @@ ok('分段：desk_data 链与 segs 迁移到新 clip', () => {
   const desk = JSON.parse(String(segWf['5'].inputs.desk_data))
   assert.equal(desk.chain?.clip, 'clip_0002')
   assert.equal(desk.segs?.clip_0002, '新的提示词')
+})
+ok('分段：t2v 模式清空媒体架参考图残留（h3.mode 传入）', () => {
+  const rackTpl = {
+    id: 'tpl_t2v',
+    name: 't2v',
+    kind: 'video' as const,
+    description: '',
+    apiJson: {
+      '1': {
+        class_type: 'CSGlideCastCS',
+        inputs: { h3_data: JSON.stringify({ mode: 'ref2va', chain: { name: 'E', clip: 'clip_0001', shot: 's' } }) }
+      },
+      '2': {
+        class_type: 'CSGlideH3MediaRackCS',
+        inputs: { rack_data: JSON.stringify({ slots: { images: [{ file: 'old.png' }], videos: [], audios: [] }, segs: { clip_0001: { slots: { images: [{ file: 'old.png' }], videos: [], audios: [] } } } }) }
+      }
+    },
+    mapping: { version: 1 },
+    createdAt: new Date().toISOString()
+  }
+  const wf = buildWorkflow(rackTpl, { h3: { mode: 't2v' } }) as Record<string, { inputs: Record<string, unknown> }>
+  const rack = JSON.parse(String(wf['2'].inputs.rack_data))
+  assert.equal(rack.slots?.images?.length, 0)
+  assert.equal(rack.segs?.clip_0001?.slots?.images?.length, 0)
 })
 
 ok('错误诊断：显存不足识别', () => {
