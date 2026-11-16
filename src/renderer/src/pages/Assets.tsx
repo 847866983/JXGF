@@ -179,7 +179,13 @@ export default function Assets(): React.JSX.Element {
                 </button>
               )}
               {editingLive && (
-                <button className="btn-ghost" onClick={() => setGenerating(editingLive)}>
+                <button
+                  className="btn-ghost"
+                  onClick={() => {
+                    setGenerating(editingLive)
+                    setFormOpen(false) // 关掉编辑弹窗，避免被生成弹窗遮挡
+                  }}
+                >
                   <Image size={15} />
                   生成 / 再生成图
                 </button>
@@ -243,7 +249,16 @@ export default function Assets(): React.JSX.Element {
       )}
 
       {generating && (
-        <AssetGenerateDialog asset={generating} onClose={() => setGenerating(null)} />
+        <AssetGenerateDialog
+          asset={generating}
+          onClose={() => {
+            // 生成弹窗关闭后，重新打开该资产的编辑弹窗，方便看新生成的图
+            const a = generating
+            setGenerating(null)
+            setEditing(a)
+            setFormOpen(true)
+          }}
+        />
       )}
 
       {batchOpen && <AssetBatchGenerateDialog onClose={() => setBatchOpen(false)} />}

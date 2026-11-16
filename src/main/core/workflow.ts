@@ -1,4 +1,4 @@
-import type { Template } from '@shared/types'
+import type { Template, UpscaleSettings, RifeSettings } from '@shared/types'
 
 export interface WorkflowParams {
   positive?: string
@@ -16,6 +16,12 @@ export interface WorkflowParams {
   scheduler?: string
   /** 生成模式：t2v（文生视频）/ fl2va（首尾帧）/ ref2va（参考图生视频） */
   mode?: 't2v' | 'fl2va' | 'ref2va'
+  /** 分段导演台：覆盖 h3_data 的字段（ratio、pin_head、ref_* 、bridge_* 、cont、push_whole、chain） */
+  h3?: Record<string, unknown>
+  /** 放大重绘参数 */
+  upscale?: UpscaleSettings
+  /** 抽帧 / 插帧参数 */
+  rife?: RifeSettings
 }
 
 type WorkflowNode = { id: string; class_type: string; inputs: Record<string, unknown> }
@@ -112,9 +118,16 @@ function injectH3Data(clone: Workflow, params: WorkflowParams): void {
     if (params.height) h3.height = params.height
     if (params.frames) h3.length = params.frames
     if (params.mode) h3.mode = params.mode
+    // 分段导演台覆盖字段（画布比例/保留头尾/参考/语义桥/续接/整片潜空间/链身份）
+    if (params.h3) {
+      for (const [k, v] of Object.entries(params.h3)) {
+        if (v !== undefined) h3[k] = v
+      }
+    }
     // 只清 cont（续拍存档路径残留，避免续到错误的上次 latent）。
-    // chain 必须保留：里面的 name/shot 是链式续接登记的关键身份。
-    if (h3.cont) delete h3.cont
+    // 但分段导演台显式传入 cont（续接）时必须保留。
+    const contExplicit = params.h3 ? Object.prototype.hasOwnProperty.call(params.h3, 'cont') : false
+    if (h3.cont && !contExplicit) delete h3.cont
     node.inputs[field] = JSON.stringify(h3)
   }
 }
@@ -215,6 +228,96 @@ function applySamplerParams(clone: Workflow, params: WorkflowParams): void {
 }
 
 /**
+ * 视频参考：把上传后的参考视频写入 H3 媒体架（slots.videos）。
+ */
+export function injectH3RefVideos(clone: unknown, refVideos: string[]): void {
+  if (refVideos.length === 0) return
+  if (!isWorkflowObject(clone)) return
+  for (const node of Object.values(clone)) {
+    const ct = String(node.class_type)
+    if (ct !== 'CSGlideH3MediaRackCS') continue
+    const raw = node.inputs.rack_data
+    if (typeof raw !== 'string') continue
+    const rack = tryParse<Record<string, unknown>>(raw)
+    if (!rack) continue
+    const slots = (rack.slots as { videos?: { file?: string; alias?: string[] }[] } | undefined) ?? {}
+    slots.videos = refVideos.map((f) => ({ file: f, alias: [f] }))
+    rack.slots = slots
+    node.inputs.rack_data = JSON.stringify(rack)
+  }
+}
+
+/**
+ * 同步 CSGlideDeskCS 的 chain/clip 与 CSGlideCastCS.h3_data.chain 一致，
+ * 并把 desk_data.segs 里旧 clip 的提示词迁到新 clip，保证提示词挂到正确的段。
+ */
+function syncH3DeskChain(clone: Workflow): void {
+  let h3chain: { name?: string; clip?: string; shot?: string } | null = null
+  for (const node of Object.values(clone)) {
+    if (String(node.class_type) !== 'CSGlideCastCS') continue
+    const field = h3DataField(node)
+    if (!field) continue
+    const h3 = tryParse<{ chain?: { name?: string; clip?: string; shot?: string } }>(node.inputs[field])
+    if (h3?.chain?.name) h3chain = h3.chain
+  }
+  if (!h3chain?.name) return
+
+  for (const node of Object.values(clone)) {
+    if (String(node.class_type) !== 'CSGlideDeskCS') continue
+    const field = deskDataField(node)
+    if (!field) continue
+    const desk = tryParse<DeskData>(node.inputs[field])
+    if (!desk) continue
+    const oldClip = desk.chain?.clip
+    const newClip = h3chain.clip || oldClip
+    desk.segs = desk.segs ?? {}
+    if (oldClip && newClip && oldClip !== newClip && desk.segs[oldClip] !== undefined) {
+      desk.segs[newClip] = desk.segs[oldClip]
+      delete desk.segs[oldClip]
+    }
+    desk.chain = { name: h3chain.name, clip: newClip, shot: h3chain.shot }
+    node.inputs[field] = JSON.stringify(desk)
+  }
+}
+
+/**
+ * 放大重绘参数注入（BanZhang_MMH3_Upscale / UpscaleParams）。
+ */
+function applyUpscaleParams(clone: Workflow, up: UpscaleSettings): void {
+  for (const node of Object.values(clone)) {
+    const ct = String(node.class_type)
+    const i = node.inputs
+    if (ct === 'BanZhang_MMH3_Upscale') {
+      if ('步数' in i) i['步数'] = up.enabled ? up.steps : 0
+      if ('去噪强度' in i) i['去噪强度'] = up.enabled ? up.denoise : 0
+      if ('音频重绘强度' in i) i['音频重绘强度'] = up.enabled ? up.audioDenoise : 0
+      if ('采样器' in i && up.sampler) i['采样器'] = up.sampler
+      if ('调度器' in i && up.scheduler) i['调度器'] = up.scheduler
+    } else if (ct === 'BanZhang_MMH3_UpscaleParams') {
+      if ('放大模式' in i) i['放大模式'] = up.enabled ? up.mode : '按倍数'
+      if ('放大倍数' in i) i['放大倍数'] = up.enabled ? up.scale : 1
+      if ('目标宽度' in i) i['目标宽度'] = up.targetWidth
+      if ('目标高度' in i) i['目标高度'] = up.targetHeight
+      if ('每块帧数' in i) i['每块帧数'] = up.tileFrames
+      if ('重叠帧数' in i) i['重叠帧数'] = up.overlapFrames
+    }
+  }
+}
+
+/**
+ * 抽帧 / 插帧参数注入（BanZhang_RIFE_Interpolation）。
+ */
+function applyRifeParams(clone: Workflow, rife: RifeSettings): void {
+  for (const node of Object.values(clone)) {
+    if (String(node.class_type) !== 'BanZhang_RIFE_Interpolation') continue
+    const i = node.inputs
+    if ('插帧倍数' in i) i['插帧倍数'] = rife.enabled ? rife.multiplier : 1
+    if ('序列源帧率' in i) i['序列源帧率'] = rife.fps
+    if ('保留原音' in i) i['保留原音'] = rife.keepAudio ? '开' : '关'
+  }
+}
+
+/**
  * 把模板（API 格式）与镜头参数合成最终提交给 ComfyUI 的工作流。
  *
  * 采用「探测式注入」，节点 ID 永不写死：
@@ -237,6 +340,9 @@ export function buildWorkflow(template: Template, params: WorkflowParams): unkno
       injectH3Prompt(clone, params.positive)
     }
     injectH3Data(clone, params)
+    syncH3DeskChain(clone)
+    if (params.upscale) applyUpscaleParams(clone, params.upscale)
+    if (params.rife) applyRifeParams(clone, params.rife)
     clearH3Refs(clone, params.mode)
     fixH3Params(clone)
     // H3 的种子在 KSampler 节点

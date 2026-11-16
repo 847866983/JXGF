@@ -73,8 +73,7 @@ export class ComfyRuntime extends EventEmitter {
   }
 
   /** 探测 runtimeDir 下所有可用 ComfyUI 根目录 */
-  detectRoots(): string[] {
-    const roots: string[] = []
+  detectRoots(): string[] {    const roots: string[] = []
     // runtimeDir 本身可能就是 ComfyUI 根（含 main.py）
     if (exists(path.join(this.runtimeDir, 'ComfyUI', 'main.py')) || exists(path.join(this.runtimeDir, 'main.py'))) {
       roots.push(this.runtimeDir)
@@ -198,5 +197,44 @@ export class ComfyRuntime extends EventEmitter {
     const st = await this.status()
     this.emit('state', st)
     return st
+  }
+
+  /**
+   * 自动检测本机是否装有 ComfyUI：扫描常见盘符下的候选目录，找到含 main.py 或 ComfyUI\main.py 的根。
+   * 找到则写入配置（若尚未配置），返回该根目录；否则返回 null。
+   */
+  async autoDetect(): Promise<string | null> {
+    const cfg = await this.getConfig()
+    if (cfg.root && exists(cfg.root)) return cfg.root // 已配置且有效，直接用
+    // runtimeDir 内先找（一键安装的）
+    const inRuntime = this.detectRoots()
+    if (inRuntime.length > 0) {
+      await this.setConfig({ ...cfg, root: inRuntime[0] })
+      return inRuntime[0]
+    }
+    // 扫常见位置
+    const candidates: string[] = []
+    const drives = ['C', 'D', 'E', 'F', 'G']
+    const names = ['ComfyUI', 'ComfyUI_windows_portable', 'comfyui', 'ComfyUI-Installs']
+    for (const d of drives) {
+      for (const n of names) {
+        candidates.push(`${d}:\\${n}`)
+        candidates.push(`${d}:\\${n}\\ComfyUI`)
+      }
+      candidates.push(`${d}:\\AI\\ComfyUI`, `${d}:\\Program Files\\ComfyUI`)
+    }
+    for (const c of candidates) {
+      if (exists(path.join(c, 'main.py'))) {
+        // 找到 ComfyUI 本体目录；根 = 其父（含 venv/python_embeded）
+        const root = exists(path.join(c, '..', 'python_embeded')) || exists(path.join(c, '..', 'venv')) ? path.dirname(c) : c
+        await this.setConfig({ ...cfg, root })
+        return root
+      }
+      if (exists(path.join(c, 'ComfyUI', 'main.py'))) {
+        await this.setConfig({ ...cfg, root: c })
+        return c
+      }
+    }
+    return null
   }
 }

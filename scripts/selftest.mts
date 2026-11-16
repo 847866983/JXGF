@@ -12,7 +12,7 @@ import crypto from 'node:crypto'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { PRESETS, presetFor } from '../src/main/core/presets.ts'
-import { buildWorkflow, extractH3Chain, injectH3RefImages } from '../src/main/core/workflow.ts'
+import { buildWorkflow, extractH3Chain, injectH3RefImages, injectH3RefVideos } from '../src/main/core/workflow.ts'
 import { ComfyClient } from '../src/main/core/comfy.ts'
 import { DownloadManager } from '../src/main/core/download.ts'
 import { CATALOG, MODEL_CATALOG, resolveCatalog } from '../src/main/core/catalog.ts'
@@ -300,11 +300,12 @@ const nvLowGpu = { vendor: 'nvidia' as const, name: 'GTX 960', vramMB: 4096, vra
 const amdGpu = { vendor: 'amd' as const, name: 'RX 7800', vramMB: 16384, vramKnown: true, driver: '', cudaAvailable: false, raw: '' }
 const intelGpu = { vendor: 'intel' as const, name: 'Arc', vramMB: 8192, vramKnown: true, driver: '', cudaAvailable: false, raw: '' }
 
-ok('目录：NVIDIA 解析出便携版 + 推荐模型', () => {
+ok('目录：NVIDIA 解析出便携版 + 多个推荐模型', () => {
   const items = resolveCatalog(tmp2, nvGpu)
-  assert.equal(items.length, 2)
+  assert.ok(items.length >= 2)
   assert.equal(items[0].id, 'comfyui-portable-nvidia')
-  assert.equal(items[1].id, 'wan21-t2v-13b')
+  assert.ok(items.some((i) => i.id === 'wan21-t2v-13b'))
+  assert.ok(items.some((i) => i.id === 'z-image-turbo'))
 })
 ok('目录：NVIDIA 低显存只给便携版（模型被档位过滤）', () => {
   const items = resolveCatalog(tmp2, nvLowGpu)
@@ -326,8 +327,14 @@ ok('目录：dest 落在安装根目录下且未安装', () => {
 })
 ok('目录：模型 dest 落在 models 子目录', () => {
   const items = resolveCatalog(tmp2, nvGpu)
-  assert.ok(items[1].dest.includes(path.join('models', 'wan2.1_t2v_1.3B_fp16.safetensors')))
-  assert.equal(items[1].extract, false)
+  const wan = items.find((i) => i.id === 'wan21-t2v-13b')!
+  assert.ok(wan.dest.includes(path.join('models', 'wan2.1_t2v_1.3B_fp16.safetensors')))
+  assert.equal(wan.extract, false)
+})
+ok('目录：传 comfyModelsRoot 时模型下到 ComfyUI 的 models', () => {
+  const items = resolveCatalog(tmp2, nvGpu, 'X:/ComfyUI/models')
+  const z = items.find((i) => i.id === 'z-image-turbo')!
+  assert.ok(z.dest.toLowerCase().includes('comfyui') && z.dest.includes('z_image_turbo_bf16.safetensors'))
 })
 ok('目录：便携版需要解压', () => {
   const items = resolveCatalog(tmp2, nvGpu)
@@ -593,6 +600,90 @@ ok('参数：steps 注入 KSampler', () => assert.equal(ksWf['1'].inputs.steps, 
 ok('参数：cfg 注入 KSampler', () => assert.equal(ksWf['1'].inputs.cfg, 2.5))
 ok('参数：sampler 注入 KSampler', () => assert.equal(ksWf['1'].inputs.sampler_name, 'res_multistep'))
 ok('参数：scheduler 注入 KSampler', () => assert.equal(ksWf['1'].inputs.scheduler, 'beta'))
+
+// ---- 分段导演台：h3_data 覆盖 / 放大重绘 / 抽帧插帧 ----
+const segH3Template = {
+  id: 'tpl_h3_seg',
+  name: 'h3-seg',
+  kind: 'video' as const,
+  description: '',
+  apiJson: {
+    '1': {
+      class_type: 'CSGlideCastCS',
+      inputs: {
+        h3_data: JSON.stringify({
+          mode: 'ref2va',
+          width: 576,
+          height: 320,
+          length: 33,
+          cont: { mode: 'latent' },
+          chain: { name: 'old', clip: 'clip_0001', shot: 'x' }
+        })
+      }
+    },
+    '2': { class_type: 'BanZhang_MMH3_Upscale', inputs: { 步数: 2, 去噪强度: 0.45, 音频重绘强度: 0.3, 采样器: 'euler', 调度器: 'simple' } },
+    '3': { class_type: 'BanZhang_MMH3_UpscaleParams', inputs: { 放大模式: '按倍数', 放大倍数: 1, 目标宽度: 1280, 目标高度: 704, 每块帧数: 107, 重叠帧数: 22 } },
+    '4': { class_type: 'BanZhang_RIFE_Interpolation', inputs: { 插帧倍数: 2, 序列源帧率: 24, 保留原音: '开' } },
+    '5': { class_type: 'CSGlideDeskCS', inputs: { desk_data: JSON.stringify({ chain: { name: 'old', clip: 'clip_0001', shot: 'x' }, segs: { clip_0001: '旧提示词' } }) } }
+  },
+  mapping: { version: 1 },
+  createdAt: new Date().toISOString()
+}
+const segWf = buildWorkflow(segH3Template, {
+  positive: '新的提示词',
+  h3: { ratio: '9:16', pin_head: 2, bridge_alpha: 0.7, cont: { mode: 'latent' }, chain: { name: 'E1', clip: 'clip_0002', shot: 's2' } },
+  upscale: {
+    enabled: true,
+    mode: '倍数',
+    scale: 2,
+    targetWidth: 1280,
+    targetHeight: 704,
+    steps: 6,
+    denoise: 0.5,
+    audioDenoise: 0.2,
+    sampler: 'res_multistep',
+    scheduler: 'beta',
+    tileFrames: 64,
+    overlapFrames: 16
+  },
+  rife: { enabled: true, fps: 12, multiplier: 3, keepAudio: false }
+}) as Record<string, { inputs: Record<string, unknown> }>
+const segH3Out = JSON.parse(String(segWf['1'].inputs.h3_data)) as Record<string, any>
+ok('分段：h3 ratio 覆盖', () => assert.equal(segH3Out.ratio, '9:16'))
+ok('分段：pin_head 覆盖', () => assert.equal(segH3Out.pin_head, 2))
+ok('分段：bridge_alpha 覆盖', () => assert.equal(segH3Out.bridge_alpha, 0.7))
+ok('分段：cont 续接保留（不被清除）', () => assert.equal(segH3Out.cont?.mode, 'latent'))
+ok('分段：chain 身份写入', () => {
+  assert.equal(segH3Out.chain?.name, 'E1')
+  assert.equal(segH3Out.chain?.clip, 'clip_0002')
+})
+ok('分段：放大重绘步数/去噪注入', () => {
+  assert.equal(segWf['2'].inputs['步数'], 6)
+  assert.equal(segWf['2'].inputs['去噪强度'], 0.5)
+})
+ok('分段：放大参数倍数/块帧注入', () => {
+  assert.equal(segWf['3'].inputs['放大倍数'], 2)
+  assert.equal(segWf['3'].inputs['每块帧数'], 64)
+})
+ok('分段：抽帧/插帧注入', () => {
+  assert.equal(segWf['4'].inputs['插帧倍数'], 3)
+  assert.equal(segWf['4'].inputs['序列源帧率'], 12)
+  assert.equal(segWf['4'].inputs['保留原音'], '关')
+})
+ok('分段：参考视频写入媒体架 videos 槽', () => {
+  const rackWf = {
+    '1': { class_type: 'CSGlideH3MediaRackCS', inputs: { rack_data: JSON.stringify({ slots: { images: [], videos: [] } }) } }
+  } as Record<string, { class_type: string; inputs: Record<string, unknown> }>
+  injectH3RefVideos(rackWf, ['prev_seg.mp4'])
+  const rack = JSON.parse(String(rackWf['1'].inputs.rack_data))
+  assert.equal(rack.slots?.videos?.[0]?.file, 'prev_seg.mp4')
+})
+
+ok('分段：desk_data 链与 segs 迁移到新 clip', () => {
+  const desk = JSON.parse(String(segWf['5'].inputs.desk_data))
+  assert.equal(desk.chain?.clip, 'clip_0002')
+  assert.equal(desk.segs?.clip_0002, '新的提示词')
+})
 
 ok('错误诊断：显存不足识别', () => {
   const h = explainError('CUDA out of memory. Tried to allocate...')

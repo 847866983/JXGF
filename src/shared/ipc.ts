@@ -14,6 +14,8 @@ export const CH = {
   comfyRuntimeStart: 'runtime:start',
   comfyRuntimeStop: 'runtime:stop',
   comfyRuntimeSetConfig: 'runtime:set-config',
+  comfyInstallStart: 'comfy-install:start',
+  comfyInstallState: 'comfy-install:state',
   projectList: 'project:list',
   projectOpen: 'project:open',
   projectCreate: 'project:create',
@@ -53,6 +55,7 @@ export type PushEvent =
   | { type: 'update:state'; info: import('./types').UpdateInfo }
   | { type: 'download:state'; task: import('./types').DownloadTask }
   | { type: 'comfy:runtime'; state: import('./types').ComfyRuntimeState }
+  | { type: 'comfy:install'; state: import('./types').ComfyInstallState }
   | { type: 'ai:status'; text: string }
   | { type: 'ai:tool'; name: string; args: Record<string, unknown>; summary?: string }
   | { type: 'ai:done'; changed: boolean }

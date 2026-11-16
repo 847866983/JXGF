@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Activity, CheckCircle2, Cpu, Download, FolderOpen, PackagePlus, Play, RefreshCw, ServerCog, Square, TriangleAlert } from 'lucide-react'
-import type { CatalogItem, ComfyRuntimeState, DownloadTask, EnvironmentReport } from '@shared/types'
+import type { CatalogItem, ComfyInstallState, ComfyRuntimeState, DownloadTask, EnvironmentReport } from '@shared/types'
 import { PageHeader } from '../components/ui'
 
 const modeText: Record<string, { label: string; tone: string }> = {
@@ -32,6 +32,16 @@ export default function Environment({ embedded = false }: { embedded?: boolean }
   const [runtimeRoot, setRuntimeRoot] = useState('')
   const [runtimePort, setRuntimePort] = useState('8188')
   const [busy, setBusy] = useState(false)
+  const [install, setInstall] = useState<ComfyInstallState | null>(null)
+
+  const startOneClickInstall = async (): Promise<void> => {
+    setInstall({ phase: 'downloading', percent: 0, message: '准备安装…' })
+    try {
+      await window.api.comfyInstallStart()
+    } catch (err) {
+      setInstall({ phase: 'error', percent: 0, message: '安装失败', error: String((err as Error).message ?? err) })
+    }
+  }
 
   const scan = (): void => {
     setLoading(true)
@@ -116,6 +126,14 @@ export default function Environment({ embedded = false }: { embedded?: boolean }
         refreshCatalog()
       }
       if (e.type === 'comfy:runtime') setRuntime(e.state)
+      if (e.type === 'comfy:install') {
+        setInstall(e.state)
+        if (e.state.phase === 'done') {
+          refreshRuntime()
+          refreshCatalog()
+          scan()
+        }
+      }
     })
   }, [])
 
@@ -473,6 +491,46 @@ export default function Environment({ embedded = false }: { embedded?: boolean }
               <div className="mb-3 flex items-center gap-2 text-sm font-medium text-white">
                 <ServerCog size={15} className="text-accent-400" />
                 7 · 内置 ComfyUI
+              </div>
+
+              {/* 一键安装：自动下载便携版 + 解压 + 配置 + 启动（不含模型） */}
+              <div className="mb-4 rounded-lg border border-accent/40 bg-accent-600/[0.08] px-3 py-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium text-white">一键安装 ComfyUI（推荐）</div>
+                    <div className="mt-0.5 text-[11px] text-slate-400">
+                      自动下载官方便携版并解压、配置、启动。约 2.5GB，**不含模型**（模型到下方「模型库/环境安装」按需下载）。
+                    </div>
+                  </div>
+                  <button
+                    className="btn-primary shrink-0"
+                    disabled={install?.phase === 'downloading' || install?.phase === 'extracting' || install?.phase === 'configuring' || install?.phase === 'starting'}
+                    onClick={() => void startOneClickInstall()}
+                  >
+                    <Download size={14} />
+                    一键安装
+                  </button>
+                </div>
+                {install && install.phase !== 'idle' && (
+                  <div className="mt-2">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className={install.phase === 'error' ? 'text-rose-300' : install.phase === 'done' ? 'text-emerald-300' : 'text-accent-300'}>
+                        {install.message}
+                      </span>
+                      {(install.phase === 'downloading' || install.phase === 'extracting') && (
+                        <span className="text-slate-500">{install.percent}%</span>
+                      )}
+                    </div>
+                    {(install.phase === 'downloading' || install.phase === 'extracting') && (
+                      <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-white/10">
+                        <div className="h-full bg-accent-500 transition-all" style={{ width: `${install.percent}%` }} />
+                      </div>
+                    )}
+                    {install.error && install.phase === 'error' && (
+                      <div className="mt-1 text-[11px] text-rose-400">{install.error}</div>
+                    )}
+                  </div>
+                )}
               </div>
 
               <div className="flex items-center gap-3">

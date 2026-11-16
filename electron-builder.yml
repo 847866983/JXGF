@@ -18,6 +18,11 @@ extraResources:
     to: skills
     filter:
       - '**/*'
+  # 内置解压工具 7za.exe，供「一键安装 ComfyUI」解压便携版
+  - from: resources/tools
+    to: tools
+    filter:
+      - '**/*'
 win:
   target:
     - target: nsis

@@ -24,6 +24,7 @@ import { DownloadManager } from './core/download'
 import { resolveCatalog } from './core/catalog'
 import { extractArchive } from './core/extract'
 import { ComfyRuntime } from './core/comfy-runtime'
+import { ComfyInstaller } from './core/comfy-installer'
 import { isUiWorkflow, convertUiToApi, detectWorkflowKind } from './core/workflow-convert'
 import { listMemory, readMemory, writeMemory, appendMemory } from './core/memory'
 import { AiAssistant } from './core/ai-assistant'
@@ -37,6 +38,7 @@ let store: ProjectStore
 let jobs: JobManager
 const downloads = new DownloadManager()
 let comfyRuntime: ComfyRuntime
+let comfyInstaller: ComfyInstaller
 const updater = new Updater()
 let aiAssistant: AiAssistant
 let skillsRoot = ''
@@ -199,7 +201,10 @@ function registerIpc(): void {
 
   ipcMain.handle(CH.envCatalog, async () => {
     const report = await getHardware()
-    return resolveCatalog(path.join(app.getPath('userData'), 'runtime'), report.gpu)
+    // 若已配置 ComfyUI 根目录，模型直接下到它的 models/，这样 ComfyUI 能直接加载
+    const st = await comfyRuntime.status()
+    const modelsRoot = st.root ? path.join(st.root, 'ComfyUI', 'models') : st.root ? path.join(st.root, 'models') : null
+    return resolveCatalog(path.join(app.getPath('userData'), 'runtime'), report.gpu, modelsRoot)
   })
 
   ipcMain.handle(CH.envExtract, async (_e, payload: { archive: string; dest: string }) => {
@@ -216,6 +221,10 @@ function registerIpc(): void {
   ipcMain.handle(CH.comfyRuntimeStart, () => comfyRuntime.start())
   ipcMain.handle(CH.comfyRuntimeStop, () => comfyRuntime.stop())
   ipcMain.handle(CH.comfyRuntimeSetConfig, (_e, cfg: ComfyRuntimeConfig) => comfyRuntime.setConfig(cfg))
+  ipcMain.handle(CH.comfyInstallStart, async () => {
+    const hw = await getHardware()
+    return comfyInstaller.install(hw.gpu)
+  })
 
   ipcMain.handle(CH.projectList, () => store.list())
   ipcMain.handle(CH.projectCreate, async (_e, name: string) => store.create(name))
@@ -384,6 +393,15 @@ app.whenReady().then(() => {
   comfyRuntime = new ComfyRuntime(path.join(app.getPath('userData'), 'runtime'))
   comfyRuntime.on('state', (state) => push({ type: 'comfy:runtime', state }))
 
+  comfyInstaller = new ComfyInstaller({
+    downloads,
+    runtime: comfyRuntime,
+    resourcesPath: process.resourcesPath,
+    appPath: app.getAppPath(),
+    runtimeDir: path.join(app.getPath('userData'), 'runtime')
+  })
+  comfyInstaller.on('state', (state) => push({ type: 'comfy:install', state }))
+
   // AI 助手：内置技能目录 + 全局 AI 配置
   skillsRoot = app.isPackaged ? path.join(process.resourcesPath, 'skills') : path.join(app.getAppPath(), 'skills')
   aiConfigFile = path.join(app.getPath('userData'), 'ai-config.json')
@@ -406,6 +424,24 @@ app.whenReady().then(() => {
 
   // 启动后静默检查一次更新（仅打包版本有效）
   setTimeout(() => void updater.check(), 5000)
+
+  // 启动后自动检测本机是否已装 ComfyUI，找到则接管；若已装未运行则自动启动
+  setTimeout(() => {
+    void (async () => {
+      try {
+        const found = await comfyRuntime.autoDetect()
+        if (!found) return
+        const st = await comfyRuntime.status()
+        push({ type: 'comfy:runtime', state: st })
+        // 已安装但未运行 → 自动启动（后台，不阻塞）
+        if (st.status === 'installed' || st.status === 'stopped') {
+          void comfyRuntime.start().catch(() => undefined)
+        }
+      } catch {
+        // 忽略
+      }
+    })()
+  }, 1500)
 })
 
 app.on('second-instance', () => {

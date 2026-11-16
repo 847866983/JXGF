@@ -10,6 +10,7 @@ export interface ShotPatch {
   duration: number
   prompt: string
   assetIds: string[]
+  characterNotes: Record<string, string>
 }
 
 const groups: { kind: AssetKind; label: string }[] = [
@@ -34,12 +35,19 @@ export function ShotEditor({
   const [duration, setDuration] = useState<number>(shot.duration)
   const [prompt, setPrompt] = useState(shot.prompt || shot.description || '')
   const [assetIds, setAssetIds] = useState<string[]>(shot.assetIds)
+  const [characterNotes, setCharacterNotes] = useState<Record<string, string>>(shot.characterNotes ?? {})
 
   const toggleAsset = (id: string): void => {
     setAssetIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]))
   }
 
   const submit = (): void => {
+    // 只保留已引用资产的动作说明
+    const notes: Record<string, string> = {}
+    for (const id of assetIds) {
+      const v = (characterNotes[id] ?? '').trim()
+      if (v) notes[id] = v
+    }
     onSave({
       title: title.trim(),
       description,
@@ -47,7 +55,8 @@ export function ShotEditor({
       camera: camera.trim(),
       duration: Number.isFinite(duration) && duration > 0 ? duration : 5,
       prompt: prompt.trim(),
-      assetIds
+      assetIds,
+      characterNotes: notes
     })
   }
 
@@ -123,21 +132,37 @@ export function ShotEditor({
                   <KindBadge kind={g.kind} />
                   <span className="text-xs text-slate-500">{g.label}</span>
                 </div>
-                <div className="space-y-0.5">
-                  {items.map((a) => (
-                    <label
-                      key={a.id}
-                      className="flex cursor-pointer items-center gap-2 rounded px-1.5 py-1 text-sm text-slate-300 hover:bg-white/[0.04]"
-                    >
-                      <input
-                        type="checkbox"
-                        className="accent-[#7c5cff]"
-                        checked={assetIds.includes(a.id)}
-                        onChange={() => toggleAsset(a.id)}
-                      />
-                      <span className="truncate">{a.name}</span>
-                    </label>
-                  ))}
+                <div className="space-y-1">
+                  {items.map((a) => {
+                    const checked = assetIds.includes(a.id)
+                    return (
+                      <div key={a.id} className="rounded px-1.5 py-1 hover:bg-white/[0.04]">
+                        <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-300">
+                          <input
+                            type="checkbox"
+                            className="accent-[#7c5cff]"
+                            checked={checked}
+                            onChange={() => toggleAsset(a.id)}
+                          />
+                          <span className="truncate">{a.name}</span>
+                        </label>
+                        {checked && (
+                          <input
+                            className="field mt-1 !py-1 text-xs"
+                            placeholder={
+                              g.kind === 'character'
+                                ? '本镜位置/动作，如：左侧前景，正低头系鞋带'
+                                : '本镜中的位置/状态（可选）'
+                            }
+                            value={characterNotes[a.id] ?? ''}
+                            onChange={(e) =>
+                              setCharacterNotes((prev) => ({ ...prev, [a.id]: e.target.value }))
+                            }
+                          />
+                        )}
+                      </div>
+                    )
+                  })}
                 </div>
               </div>
             )

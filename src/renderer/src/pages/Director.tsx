@@ -1,12 +1,16 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ChevronDown, ChevronRight, Film, Play, SlidersHorizontal, Wand2 } from 'lucide-react'
-import type { Shot, Template } from '@shared/types'
+import { ChevronDown, ChevronRight, Film, Link2, Play, SlidersHorizontal, Wand2 } from 'lucide-react'
+import type { Shot, Template, SegmentSettings } from '@shared/types'
 import { useApp } from '../store/app'
 import { EmptyState, PageHeader } from '../components/ui'
 import { NoProject } from '../components/NoProject'
 import { ShotStatusBadge } from '../components/badges'
 import { MediaImage } from '../components/MediaImage'
+import { Modal } from '../components/Modal'
+import { persistProject } from '../components/mutate'
+import { defaultSegment, framesFor, getSegment, ratioOf } from '../lib/segment'
+import Storyboard from './Storyboard'
 
 const byIndex = (a: { index: number }, b: { index: number }): number => a.index - b.index
 
@@ -44,22 +48,24 @@ export default function Director(): React.JSX.Element {
   const navigate = useNavigate()
 
   const [episodeId, setEpisodeId] = useState('')
+  const [tab, setTab] = useState<'segment' | 'storyboard'>('segment')
   const [templateId, setTemplateId] = useState('')
-  const [submittingShotId, setSubmittingShotId] = useState<string | null>(null)
+  const [selectedShotId, setSelectedShotId] = useState('')
+  const [paramsShotId, setParamsShotId] = useState<string | null>(null)
   const [batchRunning, setBatchRunning] = useState(false)
-  // 生成参数（可调）
+  const [submittingShotId, setSubmittingShotId] = useState<string | null>(null)
+
+  // 全局采样参数（KSampler，应用于所有段）
   const [paramsOpen, setParamsOpen] = useState(false)
   const [genSteps, setGenSteps] = useState('')
   const [genCfg, setGenCfg] = useState('')
   const [genSampler, setGenSampler] = useState('')
   const [genScheduler, setGenScheduler] = useState('')
-  const [genWidth, setGenWidth] = useState('')
-  const [genHeight, setGenHeight] = useState('')
-  const [genFrames, setGenFrames] = useState('')
   const [genSeed, setGenSeed] = useState('')
 
-  // 切换模板/硬件档位时，预填默认参数（steps/cfg/采样器/调度器/宽高帧数）
-  const hwKey = hardware?.preset.video ? `${hardware.preset.video.width}x${hardware.preset.video.height}x${hardware.preset.video.frames}` : ''
+  const hwKey = hardware?.preset.video
+    ? `${hardware.preset.video.width}x${hardware.preset.video.height}x${hardware.preset.video.frames}`
+    : ''
   useEffect(() => {
     const p = useApp.getState().project
     if (!p) return
@@ -70,17 +76,36 @@ export default function Director(): React.JSX.Element {
     setGenCfg(String(ks.cfg ?? 1))
     setGenSampler(ks.samplerName ?? 'euler')
     setGenScheduler(ks.scheduler ?? 'simple')
-    setGenWidth(String(pv?.width ?? 576))
-    setGenHeight(String(pv?.height ?? 320))
-    setGenFrames(String(pv?.frames ?? 33))
     setGenSeed('')
+    void pv
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [templateId, hwKey])
+
+  const tabBar = (
+    <div className="flex items-center gap-2 px-8 pt-4">
+      <button className={tab === 'segment' ? 'btn-primary' : 'btn-ghost'} onClick={() => setTab('segment')}>
+        分段导演
+      </button>
+      <button className={tab === 'storyboard' ? 'btn-primary' : 'btn-ghost'} onClick={() => setTab('storyboard')}>
+        剧本与分镜
+      </button>
+    </div>
+  )
+
+  // 剧本与分镜直接整合进导演台
+  if (tab === 'storyboard') {
+    return (
+      <div>
+        {tabBar}
+        <Storyboard />
+      </div>
+    )
+  }
 
   if (!project) {
     return (
       <div>
-        <PageHeader title="导演台" desc="按集编排镜头时间线，引用角色资产并提交生成" />
+        <PageHeader title="导演台" desc="分段编排、逐段生成并续接成长视频" />
         <div className="px-8 pb-8">
           <NoProject />
         </div>
@@ -91,7 +116,7 @@ export default function Director(): React.JSX.Element {
   if (project.episodes.length === 0) {
     return (
       <div>
-        <PageHeader title="导演台" desc="按集编排镜头时间线，引用角色资产并提交生成" />
+        <PageHeader title="导演台" desc="分段编排、逐段生成并续接成长视频" />
         <div className="px-8 pb-8">
           <EmptyState title="还没有剧集" desc="先去「剧本分镜」创建剧集、场次与分镜" />
         </div>
@@ -117,83 +142,149 @@ export default function Director(): React.JSX.Element {
   const preset = hardware?.preset.video ?? null
   const canGenerate = Boolean(template && preset)
   const pendingCount = shots.filter((s) => s.outputs.length === 0).length
+  const selectedShot = shots.find((s) => s.id === selectedShotId) ?? shots[0] ?? null
+  const selectedIndex = selectedShot ? shots.indexOf(selectedShot) : -1
 
-  const generateHint = (): string | undefined => {
-    if (!template) return '项目还没有工作流模板，先在设置里导入'
-    if (!preset) return '尚未检测到硬件档位，无法确定生成参数'
-    return undefined
+  const segOf = (shot: Shot): SegmentSettings => getSegment(shot, preset, shots.indexOf(shot))
+  const seg = selectedShot ? segOf(selectedShot) : null
+  const totalSec = shots.reduce((sum, s) => sum + segOf(s).durationSec, 0)
+
+  const num = (s: string, d: number): number => {
+    const n = Number(s)
+    return Number.isFinite(n) && n > 0 ? n : d
   }
 
-  const submitJob = async (shot: Shot): Promise<void> => {
-    if (!template || !preset) return
-    // 收集分镜引用资产的封面图作为视频参考图（H3 ref2va 素材）
-    const refImages = shot.assetIds
-      .map((id) => project.assets.find((a) => a.id === id)?.coverFile)
-      .filter((f): f is string => Boolean(f))
-    const num = (s: string, d: number): number => {
-      const n = Number(s)
-      return Number.isFinite(n) && n > 0 ? n : d
+  const buildH3 = (shot: Shot, index: number): Record<string, unknown> => {
+    const s = segOf(shot)
+    const chainName = `${project.name}·${selectedEpisode.title}`
+    const clip = `clip_${String(index + 1).padStart(4, '0')}`
+    const h3: Record<string, unknown> = {
+      mode: s.genMode === 't2v' ? 't2v' : 'ref2va',
+      ratio: s.ratio,
+      pin_head: s.pinHead,
+      pin_tail: s.pinTail,
+      ref_image_size: s.refImageSize,
+      ref_video_size: s.refVideoSize,
+      ref_video_fps: s.refVideoFps,
+      ref_scale_hd: s.refScaleHd,
+      bridge_adapter: s.bridgeAdapter,
+      bridge_alpha: s.bridgeAlpha,
+      bridge_mode: s.bridgeMode,
+      pace: s.pace,
+      push_whole: s.pushWhole,
+      chain: { name: chainName, clip, shot: shot.id }
     }
+    if (s.contMode !== 'none') h3.cont = { mode: s.contMode }
+    return h3
+  }
+
+  const submitJob = async (shot: Shot, index: number): Promise<void> => {
+    if (!template || !preset) return
+    const s = segOf(shot)
+    // 参考图：仅「参考图」模式；参考视频：仅「视频参考」模式，取上一段成片
+    const refImages =
+      s.genMode === 'ref2va'
+        ? shot.assetIds
+            .map((id) => project.assets.find((a) => a.id === id)?.coverFile)
+            .filter((f): f is string => Boolean(f))
+        : []
+    let refVideos: string[] = []
+    if (s.genMode === 'video') {
+      const prev = shots[index - 1]
+      const prevVideos = (prev?.outputs ?? []).filter((o) => o.kind === 'video').map((o) => o.file)
+      if (prevVideos.length > 0) refVideos = [prevVideos[prevVideos.length - 1]]
+    }
+    // 角色位置/动作拼进提示词
+    const notes = shot.characterNotes ?? {}
+    const charDesc = shot.assetIds
+      .map((id) => {
+        const a = project.assets.find((x) => x.id === id)
+        const note = (notes[id] ?? '').trim()
+        return a && note ? `${a.name}：${note}` : ''
+      })
+      .filter(Boolean)
+      .join('；')
+    const basePrompt = shot.prompt || shot.description || shot.title
+    const positive = charDesc ? `${basePrompt}\n角色位置与动作：${charDesc}` : basePrompt
+
     await window.api.jobGenerate({
       projectId: project.id,
       shotId: shot.id,
       templateId: template.id,
-      positive: shot.prompt || shot.description || shot.title,
-      width: num(genWidth, preset.width),
-      height: num(genHeight, preset.height),
-      frames: num(genFrames, preset.frames),
+      positive,
+      width: s.width,
+      height: s.height,
+      frames: s.frames,
       steps: genSteps ? num(genSteps, 0) || undefined : undefined,
       cfg: genCfg ? Number(genCfg) || undefined : undefined,
       samplerName: genSampler.trim() || undefined,
       scheduler: genScheduler.trim() || undefined,
       seed: genSeed.trim() ? Number(genSeed) || undefined : undefined,
-      refImages: refImages.length > 0 ? refImages : undefined
+      h3: buildH3(shot, index),
+      upscale: s.upscale,
+      rife: s.rife,
+      refImages: refImages.length > 0 ? refImages : undefined,
+      refVideos: refVideos.length > 0 ? refVideos : undefined
     })
   }
 
   const generateOne = async (shot: Shot): Promise<void> => {
+    const index = shots.indexOf(shot)
     setSubmittingShotId(shot.id)
     try {
-      await submitJob(shot)
+      await submitJob(shot, index)
       navigate('/queue')
     } finally {
       setSubmittingShotId(null)
     }
   }
 
+  /** 连续生成：按时间线顺序逐段提交，段间自动续接（第一段不续接，其余 latent） */
   const generateAll = async (): Promise<void> => {
     if (!canGenerate || batchRunning) return
     setBatchRunning(true)
     try {
-      for (const shot of shots) {
-        if (shot.outputs.length > 0) continue
-        setSubmittingShotId(shot.id)
-        await submitJob(shot)
+      for (let i = 0; i < shots.length; i += 1) {
+        const s = shots[i]
+        if (s.outputs.length > 0) continue
+        await submitJob(s, i)
       }
       navigate('/queue')
     } finally {
-      setSubmittingShotId(null)
       setBatchRunning(false)
     }
   }
 
-  const assetName = (id: string): string => project.assets.find((a) => a.id === id)?.name ?? id
+  const saveSegment = async (shotId: string, next: SegmentSettings): Promise<void> => {
+    await persistProject((draft) => {
+      const sh = draft.shots.find((x) => x.id === shotId)
+      if (sh) {
+        sh.segment = next
+        sh.updatedAt = new Date().toISOString()
+      }
+    })
+  }
+
+  /** 快捷改单段参数（续接方式 / 生成方式按钮用），立即保存 */
+  const patchSegment = async (shot: Shot, patch: Partial<SegmentSettings>): Promise<void> => {
+    await saveSegment(shot.id, { ...segOf(shot), ...patch })
+  }
+
+  const hint = (): string | undefined => {
+    if (!template) return '项目还没有工作流模板，先在设置里导入'
+    if (!preset) return '尚未检测到硬件档位，无法确定生成参数'
+    return undefined
+  }
 
   return (
     <div>
-      <PageHeader
-        title="导演台"
-        desc="按集编排镜头时间线，引用角色资产并提交生成"
-        crumbs={[project.name, '导演台']}
-      />
+      {tabBar}
+      <PageHeader title="导演台" desc="分段编排 · 每段画布/参考/放大重绘 · 段间续接成长视频" crumbs={[project.name, '导演台']} />
 
       <div className="px-8 pb-8">
-        <div className="mb-4 flex items-center gap-3">
-          <select
-            className="field w-80"
-            value={selectedEpisode.id}
-            onChange={(e) => setEpisodeId(e.target.value)}
-          >
+        {/* 顶栏 */}
+        <div className="mb-4 flex flex-wrap items-center gap-3">
+          <select className="field w-80" value={selectedEpisode.id} onChange={(e) => setEpisodeId(e.target.value)}>
             {episodes.map((ep) => {
               const script = project.scripts.find((s) => s.id === ep.scriptId)
               return (
@@ -204,15 +295,8 @@ export default function Director(): React.JSX.Element {
               )
             })}
           </select>
-          <span className="text-xs text-slate-500">
-            {shots.length} 个分镜 · {pendingCount} 个待生成
-          </span>
           {project.templates.length > 1 && (
-            <select
-              className="field w-56"
-              value={template?.id ?? ''}
-              onChange={(e) => setTemplateId(e.target.value)}
-            >
+            <select className="field w-56" value={template?.id ?? ''} onChange={(e) => setTemplateId(e.target.value)}>
               {project.templates.map((t) => (
                 <option key={t.id} value={t.id}>
                   {t.kind === 'video' ? '视频 · ' : '图片 · '}
@@ -221,152 +305,447 @@ export default function Director(): React.JSX.Element {
               ))}
             </select>
           )}
-          <div className="ml-auto">
-            <button
-              className="btn-ghost"
-              disabled={!canGenerate || batchRunning || pendingCount === 0}
-              onClick={() => void generateAll()}
-            >
+          <span className="text-xs text-slate-500">
+            {shots.length} 段 · 总时长 {totalSec.toFixed(1)}s · {pendingCount} 段待生成
+          </span>
+          <div className="ml-auto flex gap-2">
+            <button className="btn-ghost" onClick={() => setParamsOpen((v) => !v)}>
+              <SlidersHorizontal size={15} />
+              采样参数
+            </button>
+            <button className="btn-primary" disabled={!canGenerate || batchRunning || pendingCount === 0} onClick={() => void generateAll()}>
               <Play size={15} />
               {batchRunning ? '提交中…' : `连续生成（${pendingCount}）`}
             </button>
           </div>
         </div>
 
-        {/* 生成参数（可调） */}
-        <div className="mb-4">
-          <button
-            className="flex items-center gap-1.5 text-sm text-slate-400 hover:text-slate-200"
-            onClick={() => setParamsOpen((v) => !v)}
-          >
-            {paramsOpen ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
-            <SlidersHorizontal size={14} />
-            生成参数（步数 / CFG / 采样器 / 调度器 / 分辨率 / 帧数 / 种子）
-          </button>
-          {paramsOpen && (
-            <div className="mt-2 rounded-lg border border-white/5 bg-white/[0.02] p-3">
-              <div className="grid grid-cols-4 gap-3">
-                <div>
-                  <label className="label">步数 steps</label>
-                  <input className="field" value={genSteps} onChange={(e) => setGenSteps(e.target.value.replace(/[^0-9]/g, ''))} placeholder="4" />
-                </div>
-                <div>
-                  <label className="label">CFG</label>
-                  <input className="field" value={genCfg} onChange={(e) => setGenCfg(e.target.value.replace(/[^0-9.]/g, ''))} placeholder="1" />
-                </div>
-                <div>
-                  <label className="label">采样器 sampler</label>
-                  <input className="field" list="sampler-list" value={genSampler} onChange={(e) => setGenSampler(e.target.value)} placeholder="euler" />
-                  <datalist id="sampler-list">
-                    {['euler', 'euler_ancestral', 'dpmpp_2m', 'dpmpp_2m_sde', 'dpmpp_sde', 'res_multistep', 'ddim', 'uni_pc'].map((s) => (
-                      <option key={s} value={s} />
-                    ))}
-                  </datalist>
-                </div>
-                <div>
-                  <label className="label">调度器 scheduler</label>
-                  <input className="field" list="sched-list" value={genScheduler} onChange={(e) => setGenScheduler(e.target.value)} placeholder="simple" />
-                  <datalist id="sched-list">
-                    {['simple', 'normal', 'karras', 'exponential', 'beta', 'sgm_uniform', 'ddim_uniform'].map((s) => (
-                      <option key={s} value={s} />
-                    ))}
-                  </datalist>
-                </div>
-                <div>
-                  <label className="label">宽</label>
-                  <input className="field" value={genWidth} onChange={(e) => setGenWidth(e.target.value.replace(/[^0-9]/g, ''))} />
-                </div>
-                <div>
-                  <label className="label">高</label>
-                  <input className="field" value={genHeight} onChange={(e) => setGenHeight(e.target.value.replace(/[^0-9]/g, ''))} />
-                </div>
-                <div>
-                  <label className="label">帧数</label>
-                  <input className="field" value={genFrames} onChange={(e) => setGenFrames(e.target.value.replace(/[^0-9]/g, ''))} />
-                </div>
-                <div>
-                  <label className="label">种子（空=随机）</label>
-                  <input className="field" value={genSeed} onChange={(e) => setGenSeed(e.target.value.replace(/[^0-9]/g, ''))} placeholder="随机" />
-                </div>
-              </div>
-              <div className="mt-2 text-[11px] text-slate-600">
-                默认值取自当前工作流。H3 的「SelfLift 分段步数」会按步数自动对齐；显存吃紧时调低分辨率/帧数。
-              </div>
+        {/* 全局采样参数 */}
+        {paramsOpen && (
+          <div className="mb-4 grid grid-cols-5 gap-3 rounded-lg border border-white/5 bg-white/[0.02] p-3">
+            <div>
+              <label className="label">步数</label>
+              <input className="field" value={genSteps} onChange={(e) => setGenSteps(e.target.value.replace(/[^0-9]/g, ''))} />
             </div>
-          )}
-        </div>
-
-        {!canGenerate && (
-          <div className="mb-4 rounded-lg bg-amber-500/10 px-3 py-2.5 text-sm text-amber-300">
-            {generateHint()}
+            <div>
+              <label className="label">CFG</label>
+              <input className="field" value={genCfg} onChange={(e) => setGenCfg(e.target.value.replace(/[^0-9.]/g, ''))} />
+            </div>
+            <div>
+              <label className="label">采样器</label>
+              <input className="field" value={genSampler} onChange={(e) => setGenSampler(e.target.value)} />
+            </div>
+            <div>
+              <label className="label">调度器</label>
+              <input className="field" value={genScheduler} onChange={(e) => setGenScheduler(e.target.value)} />
+            </div>
+            <div>
+              <label className="label">种子（空=随机）</label>
+              <input className="field" value={genSeed} onChange={(e) => setGenSeed(e.target.value.replace(/[^0-9]/g, ''))} placeholder="随机" />
+            </div>
           </div>
         )}
+
+        {!canGenerate && <div className="mb-4 rounded-lg bg-amber-500/10 px-3 py-2.5 text-sm text-amber-300">{hint()}</div>}
 
         {shots.length === 0 ? (
-          <EmptyState title="该剧集下还没有分镜" desc="先去「剧本分镜」为场次添加镜头" />
+          <EmptyState title="本集还没有分镜" desc="先去「剧本分镜」给本集添加场次与分镜" />
         ) : (
-          <div className="space-y-3">
-            {shots.map((shot) => {
-              const scene = sceneById.get(shot.sceneId)
-              const characters = shot.characterIds.map(assetName)
-              return (
-                <div key={shot.id} className="panel flex items-center gap-4 p-4">
-                  <div className="h-20 w-32 shrink-0 overflow-hidden rounded-lg border border-white/5 bg-ink-800">
-                    <MediaImage
-                      src={shot.refImage}
-                      alt={shot.title}
-                      className="h-full w-full object-cover"
-                      fallback={
-                        <div className="flex h-full w-full items-center justify-center text-slate-600">
-                          <Film size={22} />
-                        </div>
-                      }
-                    />
-                  </div>
-
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="truncate text-sm font-medium text-white">
-                        {scene ? `S${scene.index}.` : ''}
-                        {shot.index} {shot.title || '未命名分镜'}
-                      </span>
-                      <ShotStatusBadge status={shot.status} />
-                      <span className="shrink-0 text-[11px] text-slate-500">
-                        {shot.duration}s · {shot.outputs.length} 输出
-                      </span>
-                    </div>
-                    <div className="mt-1 line-clamp-2 text-xs text-slate-500">
-                      {shot.description || '暂无画面描述'}
-                    </div>
-                    {characters.length > 0 && (
-                      <div className="mt-2 flex flex-wrap gap-1">
-                        {characters.map((name) => (
-                          <span
-                            key={name}
-                            className="rounded bg-accent-600/15 px-1.5 py-0.5 text-[11px] text-accent-400"
-                          >
-                            {name}
-                          </span>
-                        ))}
+          <>
+            {/* 全片总览时间线 */}
+            <div className="panel mb-4 p-3">
+              <div className="mb-2 flex items-center gap-2 text-xs text-slate-400">
+                <Link2 size={14} className="text-accent-400" />
+                全片总览 · {shots.length} 段 · 段间自动续接（第 1 段起，后续段 latent 续接）
+              </div>
+              <div className="flex gap-2 overflow-x-auto pb-1">
+                {shots.map((shot, i) => {
+                  const s = segOf(shot)
+                  const active = selectedShot?.id === shot.id
+                  return (
+                    <button
+                      key={shot.id}
+                      onClick={() => setSelectedShotId(shot.id)}
+                      className={`min-w-[150px] shrink-0 rounded-lg border px-3 py-2 text-left transition-colors ${
+                        active ? 'border-accent-500 bg-accent-600/10' : 'border-white/10 bg-white/[0.02] hover:border-white/20'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between text-xs">
+                        <span className={active ? 'text-accent-300' : 'text-slate-400'}>第 {i + 1} 段</span>
+                        <ShotStatusBadge status={shot.status} />
                       </div>
-                    )}
-                  </div>
+                      <div className="mt-1 text-[11px] text-slate-500">
+                        {s.durationSec}s · {s.width}×{s.height}
+                      </div>
+                      <div className="text-[11px] text-slate-600">
+                        {s.frames} 帧{s.contMode !== 'none' ? ' · 续接' : ' · 不续接'}
+                      </div>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
 
-                  <button
-                    className="btn-primary shrink-0"
-                    disabled={!canGenerate || submittingShotId === shot.id || batchRunning}
-                    title={generateHint()}
-                    onClick={() => void generateOne(shot)}
+            {/* 段列表 */}
+            <div className="space-y-3">
+              {shots.map((shot, i) => {
+                const s = segOf(shot)
+                const cover = shot.assetIds.map((id) => project.assets.find((a) => a.id === id)?.coverFile).find(Boolean) ?? null
+                return (
+                  <div
+                    key={shot.id}
+                    className={`panel p-4 ${selectedShot?.id === shot.id ? 'border-accent/40' : ''}`}
+                    onClick={() => setSelectedShotId(shot.id)}
                   >
-                    <Wand2 size={14} />
-                    {submittingShotId === shot.id ? '提交中…' : '生成'}
-                  </button>
-                </div>
-              )
-            })}
-          </div>
+                    <div className="flex gap-4">
+                      <div className="h-20 w-32 shrink-0 overflow-hidden rounded-lg border border-white/5 bg-ink-800">
+                        <MediaImage
+                          src={cover}
+                          alt={shot.title}
+                          className="h-full w-full object-cover"
+                          fallback={
+                            <div className="flex h-full w-full items-center justify-center text-slate-600">
+                              <Film size={22} />
+                            </div>
+                          }
+                        />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-semibold text-white">第 {i + 1} 段</span>
+                          <span className="truncate text-sm text-slate-300">{shot.title}</span>
+                          <ShotStatusBadge status={shot.status} />
+                        </div>
+                        <div className="mt-1 line-clamp-2 text-xs text-slate-500">{shot.description || shot.prompt}</div>
+                        <div className="mt-2 flex flex-wrap items-center gap-3 text-[11px] text-slate-500">
+                          <span>
+                            画布 {s.width}×{s.height}（{s.ratio}）
+                          </span>
+                          <span>
+                            时长 {s.durationSec}s · {s.fps}fps · {s.frames} 帧
+                          </span>
+                          <span>保留头 {s.pinHead} / 尾 {s.pinTail}</span>
+                          <span>参考图 {s.refImageSize} · 视频 {s.refVideoSize}px</span>
+                          <span>放大重绘 {s.upscale.enabled ? `${s.upscale.mode} ${s.upscale.mode === '倍数' ? s.upscale.scale + '×' : s.upscale.targetWidth + '×' + s.upscale.targetHeight}` : '关'}</span>
+                          <span>抽帧 {s.rife.fps}fps{s.rife.enabled ? ` · 插帧 ${s.rife.multiplier}×` : ''}</span>
+                          <span>语义桥 {s.bridgeMode} · {s.bridgeAlpha}</span>
+                        </div>
+                        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                          <span className="text-[11px] text-slate-600">续接：</span>
+                          {([
+                            ['none', '不续接'],
+                            ['latent', 'latent 续接'],
+                            ['video', 'video 续接']
+                          ] as const).map(([m, label]) => (
+                            <button
+                              key={m}
+                              className={`rounded px-2 py-0.5 text-[11px] ${s.contMode === m ? 'bg-accent-600/30 text-accent-200' : 'bg-white/5 text-slate-400 hover:bg-white/10'}`}
+                              onClick={(e) => { e.stopPropagation(); void patchSegment(shot, { contMode: m }) }}
+                            >
+                              {label}
+                            </button>
+                          ))}
+                          <span className="ml-3 text-[11px] text-slate-600">生成方式：</span>
+                          {([
+                            ['ref2va', '参考图'],
+                            ['video', '视频参考'],
+                            ['t2v', '文生']
+                          ] as const).map(([m, label]) => (
+                            <button
+                              key={m}
+                              className={`rounded px-2 py-0.5 text-[11px] ${s.genMode === m ? 'bg-accent-600/30 text-accent-200' : 'bg-white/5 text-slate-400 hover:bg-white/10'}`}
+                              onClick={(e) => { e.stopPropagation(); void patchSegment(shot, { genMode: m }) }}
+                            >
+                              {label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="flex shrink-0 flex-col gap-2">
+                        <button className="btn-ghost" onClick={(e) => { e.stopPropagation(); setParamsShotId(shot.id) }}>
+                          <SlidersHorizontal size={14} />
+                          段参数
+                        </button>
+                        <button
+                          className="btn-primary"
+                          disabled={!canGenerate || submittingShotId === shot.id}
+                          onClick={(e) => { e.stopPropagation(); void generateOne(shot) }}
+                        >
+                          <Wand2 size={14} />
+                          {submittingShotId === shot.id ? '提交中…' : '生成本段'}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </>
         )}
       </div>
+
+      {paramsShotId && (() => {
+        const shot = project.shots.find((s) => s.id === paramsShotId)
+        if (!shot) return null
+        const index = shots.indexOf(shot)
+        return (
+          <SegmentParamsModal
+            shot={shot}
+            segment={index >= 0 ? segOf(shot) : defaultSegment(shot, preset, 0)}
+            index={index}
+            onSave={(next) => { void saveSegment(shot.id, next); setParamsShotId(null) }}
+            onClose={() => setParamsShotId(null)}
+          />
+        )
+      })()}
     </div>
+  )
+}
+
+/** 段参数弹窗 */
+function SegmentParamsModal({
+  shot,
+  segment,
+  index,
+  onSave,
+  onClose
+}: {
+  shot: Shot
+  segment: SegmentSettings
+  index: number
+  onSave: (s: SegmentSettings) => void
+  onClose: () => void
+}): React.JSX.Element {
+  const [s, setS] = useState<SegmentSettings>({
+    ...segment,
+    upscale: { ...segment.upscale },
+    rife: { ...segment.rife }
+  })
+  const set = <K extends keyof SegmentSettings>(k: K, v: SegmentSettings[K]): void => setS((p) => ({ ...p, [k]: v }))
+  const setUp = <K extends keyof SegmentSettings['upscale']>(k: K, v: SegmentSettings['upscale'][K]): void =>
+    setS((p) => ({ ...p, upscale: { ...p.upscale, [k]: v } }))
+  const setRife = <K extends keyof SegmentSettings['rife']>(k: K, v: SegmentSettings['rife'][K]): void =>
+    setS((p) => ({ ...p, rife: { ...p.rife, [k]: v } }))
+
+  const numField = (label: string, value: number, onChange: (n: number) => void, step = 1): React.JSX.Element => (
+    <div>
+      <label className="label">{label}</label>
+      <input
+        type="number"
+        step={step}
+        className="field"
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+      />
+    </div>
+  )
+
+  return (
+    <Modal
+      title={`第 ${index + 1} 段参数 · ${shot.title}`}
+      onClose={onClose}
+      footer={
+        <>
+          <button className="btn-ghost" onClick={onClose}>取消</button>
+          <button className="btn-primary" onClick={() => onSave(s)}>保存段参数</button>
+        </>
+      }
+    >
+      <div className="space-y-5">
+        <section>
+          <div className="mb-2 text-xs font-medium text-accent-400">画布</div>
+          <div className="grid grid-cols-3 gap-2">
+            <div>
+              <label className="label">宽</label>
+              <input type="number" className="field" value={s.width} onChange={(e) => { const w = Number(e.target.value) || 1; setS((p) => ({ ...p, width: w, ratio: ratioOf(w, p.height) })) }} />
+            </div>
+            <div>
+              <label className="label">高</label>
+              <input type="number" className="field" value={s.height} onChange={(e) => { const h = Number(e.target.value) || 1; setS((p) => ({ ...p, height: h, ratio: ratioOf(p.width, h) })) }} />
+            </div>
+            <div>
+              <label className="label">比例</label>
+              <input className="field" value={s.ratio} onChange={(e) => set('ratio', e.target.value)} />
+            </div>
+          </div>
+        </section>
+
+        <section>
+          <div className="mb-2 text-xs font-medium text-accent-400">时长 / 帧</div>
+          <div className="grid grid-cols-4 gap-2">
+            <div>
+              <label className="label">时长（秒）</label>
+              <input
+                type="number"
+                step={0.1}
+                className="field"
+                value={s.durationSec}
+                onChange={(e) => {
+                  const d = Number(e.target.value) || 0
+                  setS((p) => ({ ...p, durationSec: d, frames: framesFor(d, p.fps) }))
+                }}
+              />
+            </div>
+            <div>
+              <label className="label">帧率 fps</label>
+              <input
+                type="number"
+                className="field"
+                value={s.fps}
+                onChange={(e) => {
+                  const f = Number(e.target.value) || 24
+                  setS((p) => ({ ...p, fps: f, frames: framesFor(p.durationSec, f) }))
+                }}
+              />
+            </div>
+            {numField('帧数', s.frames, (n) => set('frames', n))}
+            <div>
+              <label className="label">按秒重算</label>
+              <button className="btn-ghost w-full" onClick={() => setS((p) => ({ ...p, frames: framesFor(p.durationSec, p.fps) }))}>
+                重算帧数
+              </button>
+            </div>
+          </div>
+          <div className="mt-2 grid grid-cols-2 gap-2">
+            {numField('保留头帧', s.pinHead, (n) => set('pinHead', n))}
+            {numField('保留尾帧', s.pinTail, (n) => set('pinTail', n))}
+          </div>
+        </section>
+
+        <section>
+          <div className="mb-2 text-xs font-medium text-accent-400">参考</div>
+          <div className="grid grid-cols-4 gap-2">
+            <div>
+              <label className="label">图片参考尺寸</label>
+              <input className="field" value={s.refImageSize} onChange={(e) => set('refImageSize', e.target.value)} placeholder="match 或像素" />
+            </div>
+            {numField('视频参考尺寸', s.refVideoSize, (n) => set('refVideoSize', n))}
+            {numField('参考视频 fps', s.refVideoFps, (n) => set('refVideoFps', n))}
+            {numField('参考档位倍数', s.refScaleHd, (n) => set('refScaleHd', n), 0.1)}
+          </div>
+        </section>
+
+        <section>
+          <div className="mb-2 flex items-center justify-between">
+            <span className="text-xs font-medium text-accent-400">放大重绘</span>
+            <label className="flex items-center gap-1.5 text-xs text-slate-300">
+              <input type="checkbox" className="accent-[#7c5cff]" checked={s.upscale.enabled} onChange={(e) => setUp('enabled', e.target.checked)} />
+              启用
+            </label>
+          </div>
+          <div className="grid grid-cols-4 gap-2">
+            <div>
+              <label className="label">模式</label>
+              <select className="field" value={s.upscale.mode} onChange={(e) => setUp('mode', e.target.value as '倍数' | '目标尺寸')}>
+                <option value="倍数">按倍数</option>
+                <option value="目标尺寸">目标尺寸</option>
+              </select>
+            </div>
+            {numField('放大倍数', s.upscale.scale, (n) => setUp('scale', n), 0.1)}
+            {numField('目标宽', s.upscale.targetWidth, (n) => setUp('targetWidth', n))}
+            {numField('目标高', s.upscale.targetHeight, (n) => setUp('targetHeight', n))}
+            {numField('重绘步数', s.upscale.steps, (n) => setUp('steps', n))}
+            {numField('去噪强度', s.upscale.denoise, (n) => setUp('denoise', n), 0.05)}
+            {numField('音频重绘', s.upscale.audioDenoise, (n) => setUp('audioDenoise', n), 0.05)}
+            {numField('每块帧数', s.upscale.tileFrames, (n) => setUp('tileFrames', n))}
+            {numField('重叠帧数', s.upscale.overlapFrames, (n) => setUp('overlapFrames', n))}
+            <div>
+              <label className="label">采样器</label>
+              <input className="field" value={s.upscale.sampler} onChange={(e) => setUp('sampler', e.target.value)} />
+            </div>
+            <div>
+              <label className="label">调度器</label>
+              <input className="field" value={s.upscale.scheduler} onChange={(e) => setUp('scheduler', e.target.value)} />
+            </div>
+          </div>
+        </section>
+
+        <section>
+          <div className="mb-2 flex items-center justify-between">
+            <span className="text-xs font-medium text-accent-400">抽帧 / 插帧</span>
+            <label className="flex items-center gap-1.5 text-xs text-slate-300">
+              <input type="checkbox" className="accent-[#7c5cff]" checked={s.rife.enabled} onChange={(e) => setRife('enabled', e.target.checked)} />
+              启用插帧
+            </label>
+          </div>
+          <div className="grid grid-cols-3 gap-2">
+            {numField('参考视频抽帧 fps', s.rife.fps, (n) => setRife('fps', n))}
+            {numField('插帧倍数', s.rife.multiplier, (n) => setRife('multiplier', n))}
+            <div className="flex items-end">
+              <label className="flex items-center gap-1.5 text-xs text-slate-300">
+                <input type="checkbox" className="accent-[#7c5cff]" checked={s.rife.keepAudio} onChange={(e) => setRife('keepAudio', e.target.checked)} />
+                保留原音
+              </label>
+            </div>
+          </div>
+        </section>
+
+        <section>
+          <div className="mb-2 text-xs font-medium text-accent-400">语义桥</div>
+          <div className="grid grid-cols-4 gap-2">
+            <div>
+              <label className="label">模型 / adapter</label>
+              <input className="field" value={s.bridgeAdapter} onChange={(e) => set('bridgeAdapter', e.target.value)} placeholder="默认(v1)" />
+            </div>
+            {numField('强度', s.bridgeAlpha, (n) => set('bridgeAlpha', n), 0.1)}
+            <div>
+              <label className="label">范围</label>
+              <select className="field" value={s.bridgeMode} onChange={(e) => set('bridgeMode', e.target.value)}>
+                <option value="full">全量</option>
+                <option value="head">首帧</option>
+                <option value="tail">尾帧</option>
+              </select>
+            </div>
+            {numField('节奏 pace', s.pace, (n) => set('pace', n), 0.1)}
+          </div>
+        </section>
+
+        <section>
+          <div className="mb-2 text-xs font-medium text-accent-400">生成方式</div>
+          <div className="flex gap-2">
+            {([
+              ['ref2va', '参考图生成'],
+              ['video', '视频参考'],
+              ['t2v', '纯文生']
+            ] as const).map(([m, label]) => (
+              <button
+                key={m}
+                type="button"
+                className={`rounded-lg px-3 py-1.5 text-sm ${s.genMode === m ? 'bg-accent-600/30 text-accent-200 ring-1 ring-accent-500' : 'bg-white/5 text-slate-400 hover:bg-white/10'}`}
+                onClick={() => set('genMode', m)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <div className="mt-1 text-[11px] text-slate-600">
+            参考图：用分镜引用资产的绑定图；视频参考：用上一段成片当参考；纯文生：不带任何参考。
+          </div>
+        </section>
+
+        <section>
+          <div className="mb-2 text-xs font-medium text-accent-400">续接</div>
+          <div className="grid grid-cols-3 gap-2">
+            <div>
+              <label className="label">续接模式</label>
+              <select className="field" value={s.contMode} onChange={(e) => set('contMode', e.target.value as SegmentSettings['contMode'])}>
+                <option value="none">不续接</option>
+                <option value="latent">latent 续接（推荐）</option>
+                <option value="video">video 续接</option>
+              </select>
+            </div>
+            <div className="flex items-end">
+              <label className="flex items-center gap-1.5 text-xs text-slate-300">
+                <input type="checkbox" className="accent-[#7c5cff]" checked={s.pushWhole} onChange={(e) => set('pushWhole', e.target.checked)} />
+                整片潜空间发送
+              </label>
+            </div>
+            <div className="flex items-end text-[11px] text-slate-500">
+              第 1 段建议不续接；后续段 latent 续接上一段，形成连续长视频。
+            </div>
+          </div>
+        </section>
+      </div>
+    </Modal>
   )
 }

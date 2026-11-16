@@ -187,6 +187,7 @@ export default function Storyboard(): React.JSX.Element {
         shot.duration = patch.duration
         shot.prompt = patch.prompt
         shot.assetIds = patch.assetIds
+        shot.characterNotes = patch.characterNotes
         shot.updatedAt = new Date().toISOString()
       }
     })

@@ -45,6 +45,8 @@ const api = {
   comfyRuntimeStop: (): Promise<ComfyRuntimeState> => ipcRenderer.invoke(CH.comfyRuntimeStop),
   comfyRuntimeSetConfig: (cfg: ComfyRuntimeConfig): Promise<ComfyRuntimeConfig> =>
     ipcRenderer.invoke(CH.comfyRuntimeSetConfig, cfg),
+  comfyInstallStart: (): Promise<ComfyRuntimeState | import('../shared/types').ComfyInstallState> =>
+    ipcRenderer.invoke(CH.comfyInstallStart),
 
   projectList: () => ipcRenderer.invoke(CH.projectList),
   projectOpen: (id: string): Promise<Project> => ipcRenderer.invoke(CH.projectOpen, id),

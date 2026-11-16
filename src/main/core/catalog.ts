@@ -63,7 +63,19 @@ export const CATALOG: CatalogEntry[] = [
 const WAN_REPO = 'Comfy-Org/Wan_2.1_ComfyUI_repackaged'
 const WAN_FILE = 'split_files/diffusion_models/wan2.1_t2v_1.3B_fp16.safetensors'
 
-/** 视频模型目录：按显存档位推荐，三个下载源（HF 官方 + hf-mirror + ModelScope） */
+/** 通用：给某个模型条目生成 HF 官方 + hf-mirror + ModelScope 三源 */
+function hfSources(repo: string, file: string): { name: string; url: string }[] {
+  return [
+    { name: 'HuggingFace 官方', url: `${HF}/${repo}/resolve/main/${file}` },
+    { name: 'hf-mirror 国内镜像', url: `${HF_MIRROR}/${repo}/resolve/main/${file}` },
+    { name: 'ModelScope 魔搭', url: `${MODELSCOPE}/models/${repo}/resolve/master/${file}` }
+  ]
+}
+
+/**
+ * 视频/图片模型目录：按显存档位推荐。file 指向 ComfyUI 的 models/<子目录>/文件名，
+ * dest 由 resolveCatalog 按 kind 计算（模型 = installRoot/models/...）。
+ */
 export const MODEL_CATALOG: CatalogEntry[] = [
   {
     id: 'wan21-t2v-13b',
@@ -74,11 +86,40 @@ export const MODEL_CATALOG: CatalogEntry[] = [
     vendor: 'nvidia',
     minVramMB: 6 * 1024,
     file: 'wan2.1_t2v_1.3B_fp16.safetensors',
-    sources: [
-      { name: 'HuggingFace 官方', url: `${HF}/${WAN_REPO}/resolve/main/${WAN_FILE}` },
-      { name: 'hf-mirror 国内镜像', url: `${HF_MIRROR}/${WAN_REPO}/resolve/main/${WAN_FILE}` },
-      { name: 'ModelScope 魔搭', url: `${MODELSCOPE}/models/${WAN_REPO}/resolve/master/${WAN_FILE}` }
-    ]
+    sources: hfSources(WAN_REPO, WAN_FILE)
+  },
+  {
+    id: 'z-image-turbo',
+    label: 'Z-Image-Turbo（角色四视图/文生图）',
+    kind: 'model',
+    description: '阿里通义 Z-Image Turbo 扩散模型（约 11.5GB）。角色四视图、文生图首选。放到 models/diffusion_models。',
+    sizeMB: 11780,
+    vendor: 'nvidia',
+    minVramMB: 6 * 1024,
+    file: 'z_image_turbo_bf16.safetensors',
+    sources: hfSources('Tongyi-MAI/Z-Image-Turbo', 'z_image_turbo_bf16.safetensors')
+  },
+  {
+    id: 'qwen-image-21-vae',
+    label: 'Qwen-Image-2.1 VAE',
+    kind: 'model',
+    description: 'Qwen-Image 2.1 配套 VAE（约 0.6GB）。放到 models/vae。',
+    sizeMB: 620,
+    vendor: 'nvidia',
+    minVramMB: 6 * 1024,
+    file: 'vae/qwen_image_2.1_vae_bf16.safetensors',
+    sources: hfSources('Qwen/Qwen-Image-2.1', 'vae/qwen_image_2.1_vae_bf16.safetensors')
+  },
+  {
+    id: 'qwen-image-21-te',
+    label: 'Qwen-Image-2.1 文本编码器（Qwen3-VL 8B）',
+    kind: 'model',
+    description: 'Qwen-Image 2.1 配套文本编码器（约 8.7GB）。放到 models/text_encoders。',
+    sizeMB: 8900,
+    vendor: 'nvidia',
+    minVramMB: 6 * 1024,
+    file: 'text_encoders/qwen3vl_8b_int8_convrot.safetensors',
+    sources: hfSources('Qwen/Qwen-Image-2.1', 'text_encoders/qwen3vl_8b_int8_convrot.safetensors')
   }
 ]
 
@@ -91,7 +132,7 @@ export interface ResolvedCatalogItem extends CatalogEntry {
   extract: boolean
 }
 
-export function resolveCatalog(installRoot: string, gpu: GpuInfo): ResolvedCatalogItem[] {
+export function resolveCatalog(installRoot: string, gpu: GpuInfo, comfyModelsRoot?: string | null): ResolvedCatalogItem[] {
   const runtimes = CATALOG.filter((e) => !e.vendor || e.vendor === gpu.vendor)
   const models = MODEL_CATALOG.filter((m) => {
     if (m.vendor && m.vendor !== gpu.vendor) return false
@@ -99,8 +140,12 @@ export function resolveCatalog(installRoot: string, gpu: GpuInfo): ResolvedCatal
     return m.minVramMB === undefined || gpu.vramMB >= m.minVramMB
   })
   return [...runtimes, ...models].map((e) => {
+    // 模型：优先放到 ComfyUI 的 models/<子目录>，否则放 runtime/models
     const rel = e.kind === 'model' ? path.join('models', e.file) : e.file
-    const dest = path.join(installRoot, rel)
+    const dest =
+      e.kind === 'model' && comfyModelsRoot
+        ? path.join(comfyModelsRoot, e.file) // e.file 已含子目录，如 vae/xxx.safetensors
+        : path.join(installRoot, rel)
     const isArchive = /\.(7z|zip)$/i.test(e.file)
     const extractedDir = isArchive ? dest.replace(/\.(7z|zip)$/i, '') : dest
     const installed = fs.existsSync(dest)

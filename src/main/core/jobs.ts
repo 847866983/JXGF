@@ -1,7 +1,7 @@
 import path from 'node:path'
 import type { ComfySettings, JobInfo, JobParams, JobStatus, ShotOutput, Template } from '@shared/types'
 import { ComfyClient, makeClient } from './comfy'
-import { buildWorkflow, extractH3Chain, injectH3RefImages } from './workflow'
+import { buildWorkflow, extractH3Chain, injectH3RefImages, injectH3RefVideos } from './workflow'
 import { uid, now, ProjectStore } from './store'
 
 interface QueuedJob {
@@ -119,7 +119,10 @@ export class JobManager {
         steps: params.steps,
         cfg: params.cfg,
         samplerName: params.samplerName,
-        scheduler: params.scheduler
+        scheduler: params.scheduler,
+        h3: params.h3,
+        upscale: params.upscale,
+        rife: params.rife
       })
 
       // 参考图：分镜引用的资产封面，上传到 ComfyUI 后注入 H3 媒体架（ref2va 素材）。
@@ -134,6 +137,21 @@ export class JobManager {
           injectH3RefImages(workflow, uploaded)
         } catch (err) {
           console.warn('[jobs] 上传参考图失败（不阻断生成）:', String((err as Error).message ?? err))
+        }
+      }
+
+      // 参考视频：本段生成方式=视频参考时，上传上一段成片并写入媒体架 videos 槽
+      const refVideos = Array.isArray(params.refVideos) ? params.refVideos.filter(Boolean) : []
+      if (refVideos.length > 0) {
+        try {
+          const uploaded: string[] = []
+          for (const localPath of refVideos) {
+            const up = await this.client.uploadImage(localPath)
+            uploaded.push(up.subfolder ? `${up.subfolder}/${up.name}` : up.name)
+          }
+          injectH3RefVideos(workflow, uploaded)
+        } catch (err) {
+          console.warn('[jobs] 上传参考视频失败（不阻断生成）:', String((err as Error).message ?? err))
         }
       }
 
@@ -154,11 +172,13 @@ export class JobManager {
 
       const outputs = await this.waitForOutput(promptId, template.kind, info, settings)
       info.outputs = outputs.map((o) => ({ file: o.file, kind: o.kind }))
+      this.writeShotOutputs(params.shotId, outputs)
+      await this.writeAssetOutputs(params.assetId, outputs) // 先落盘
       info.status = 'done'
       info.progress = 100
       info.finishedAt = now()
-      this.writeShotOutputs(params.shotId, outputs)
-      this.writeAssetOutputs(params.assetId, outputs)
+      // done 事件带上最新项目快照，前端直接用它刷新，避免重读磁盘的竞态
+      this.emit('job:updated', { job: info, project: this.store.getCurrent() })
     } catch (err) {
       const project2 = this.store.getCurrent()
       const autoRetry = project2?.settings.autoRetry ?? 1
@@ -295,19 +315,20 @@ export class JobManager {
   }
 
   /** 图片生成完成后，把产物写进资产的 images + coverFile，供剧本分镜引用 */
-  private writeAssetOutputs(assetId: string | undefined, outputs: ShotOutput[]): void {
+  private async writeAssetOutputs(assetId: string | undefined, outputs: ShotOutput[]): Promise<void> {
     if (!assetId || outputs.length === 0) return
     const project = this.store.getCurrent()
     if (!project) return
     const asset = project.assets.find((a) => a.id === assetId)
     if (!asset) return
-    // 只取图片产物
     const imageFiles = outputs.filter((o) => o.kind === 'image').map((o) => o.file)
     if (imageFiles.length === 0) return
-    asset.images.push(...imageFiles)
-    // 第一张作为封面（用于分镜引用 / 参考图）
+    // 去重追加（同一 promptId 可能重复回调）
+    for (const f of imageFiles) {
+      if (!asset.images.includes(f)) asset.images.push(f)
+    }
     if (!asset.coverFile) asset.coverFile = imageFiles[0]
     asset.updatedAt = now()
-    void this.store.flush()
+    await this.store.flush() // 等待落盘完成，避免前端重读磁盘读到旧数据
   }
 }

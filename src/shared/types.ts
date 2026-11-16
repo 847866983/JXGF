@@ -71,6 +71,66 @@ export interface ShotOutput {
   createdAt: string
 }
 
+/** 放大重绘参数（映射 BanZhang_MMH3_Upscale / UpscaleParams） */
+export interface UpscaleSettings {
+  enabled: boolean
+  mode: '倍数' | '目标尺寸'
+  scale: number
+  targetWidth: number
+  targetHeight: number
+  steps: number
+  denoise: number
+  audioDenoise: number
+  sampler: string
+  scheduler: string
+  tileFrames: number
+  overlapFrames: number
+}
+
+/** 抽帧 / 插帧参数（映射 ref_video_fps 与 BanZhang_RIFE_Interpolation） */
+export interface RifeSettings {
+  enabled: boolean
+  /** 参考视频抽帧 fps（24 = 不抽帧） */
+  fps: number
+  /** 插帧倍数 */
+  multiplier: number
+  keepAudio: boolean
+}
+
+/** 分段导演台：单个分镜（段）的 H3 参数（映射 CSGlideCastCS.h3_data） */
+export interface SegmentSettings {
+  /** 画布 */
+  width: number
+  height: number
+  ratio: string
+  /** 时长 / 帧 */
+  durationSec: number
+  fps: number
+  frames: number
+  /** 保留头 / 尾帧 */
+  pinHead: number
+  pinTail: number
+  /** 参考 */
+  refImageSize: string
+  refVideoSize: number
+  refVideoFps: number
+  refScaleHd: number
+  /** 语义桥 */
+  bridgeAdapter: string
+  bridgeAlpha: number
+  bridgeMode: string
+  pace: number
+  /** 续接 */
+  contMode: 'latent' | 'video' | 'none'
+  pushWhole: boolean
+  /** 本段生成方式：ref2va=参考图生成，video=参考视频生成，t2v=纯文生 */
+  genMode: 'ref2va' | 'video' | 't2v'
+  /** 放大重绘 */
+  upscale: UpscaleSettings
+  /** 抽帧 / 插帧 */
+  rife: RifeSettings
+}
+
 export interface Shot {
   id: string
   sceneId: string
@@ -84,6 +144,10 @@ export interface Shot {
   prompt: string
   characterIds: string[]
   assetIds: string[]
+  /** 本镜内各角色的位置/动作说明（资产 id -> 描述），如「屏幕左上，正伸手抓取」 */
+  characterNotes?: Record<string, string>
+  /** 分段导演台：本段（分镜）的 H3 参数 */
+  segment?: SegmentSettings
   refImage: string | null
   status: ShotStatus
   outputs: ShotOutput[]
@@ -228,7 +292,15 @@ export interface JobParams {
   cfg?: number
   samplerName?: string
   scheduler?: string
+  /** 分段导演台：H3 h3_data 覆盖字段（画布/参考/语义桥/续接等） */
+  h3?: Record<string, unknown>
+  /** 放大重绘 */
+  upscale?: UpscaleSettings
+  /** 抽帧 / 插帧 */
+  rife?: RifeSettings
   refImages?: string[]
+  /** 参考视频（本段生成方式=视频参考时，传上一段成片） */
+  refVideos?: string[]
   assetImageIds?: string[]
 }
 
@@ -343,5 +415,14 @@ export interface ComfyRuntimeState {
   port: number
   pid: number | null
   logTail: string
+  error?: string
+}
+
+export type ComfyInstallPhase = 'idle' | 'downloading' | 'extracting' | 'configuring' | 'starting' | 'done' | 'error'
+
+export interface ComfyInstallState {
+  phase: ComfyInstallPhase
+  percent: number
+  message: string
   error?: string
 }
