@@ -221,6 +221,13 @@ export interface JobParams {
   height?: number
   frames?: number
   seed?: number
+  /** 每批生成张数（资产多图生成用） */
+  batch?: number
+  /** 采样器细参 */
+  steps?: number
+  cfg?: number
+  samplerName?: string
+  scheduler?: string
   refImages?: string[]
   assetImageIds?: string[]
 }

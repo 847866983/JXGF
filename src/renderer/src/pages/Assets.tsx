@@ -1,11 +1,13 @@
 import { useState } from 'react'
-import { Image, Plus } from 'lucide-react'
+import { Image, Layers, Plus } from 'lucide-react'
 import type { Asset, AssetKind } from '@shared/types'
 import { useApp } from '../store/app'
 import { EmptyState, PageHeader } from '../components/ui'
 import { AssetCard } from '../components/AssetCard'
 import { AssetForm, type AssetFormData } from '../components/AssetForm'
 import { AssetGenerateDialog } from '../components/AssetGenerateDialog'
+import { AssetBatchGenerateDialog } from '../components/AssetBatchGenerateDialog'
+import { MediaImage } from '../components/MediaImage'
 import { NoProject } from '../components/NoProject'
 import { Modal } from '../components/Modal'
 import { persistProject } from '../components/mutate'
@@ -25,6 +27,7 @@ export default function Assets(): React.JSX.Element {
   const [formOpen, setFormOpen] = useState(false)
   const [editing, setEditing] = useState<Asset | null>(null)
   const [generating, setGenerating] = useState<Asset | null>(null)
+  const [batchOpen, setBatchOpen] = useState(false)
 
   if (!project) {
     return (
@@ -89,6 +92,31 @@ export default function Assets(): React.JSX.Element {
     closeForm()
   }
 
+  /** 把某张生成图设为绑定图（封面，视频生成时作为参考图传给模型） */
+  const handleSetCover = async (assetId: string, img: string): Promise<void> => {
+    await persistProject((draft) => {
+      const a = draft.assets.find((x) => x.id === assetId)
+      if (a) {
+        a.coverFile = img
+        a.updatedAt = new Date().toISOString()
+      }
+    })
+  }
+
+  /** 删除某张生成图；若删的是绑定图，自动改绑到剩下的第一张 */
+  const handleRemoveImage = async (assetId: string, img: string): Promise<void> => {
+    await persistProject((draft) => {
+      const a = draft.assets.find((x) => x.id === assetId)
+      if (!a) return
+      a.images = a.images.filter((x) => x !== img)
+      if (a.coverFile === img) a.coverFile = a.images[0] ?? null
+      a.updatedAt = new Date().toISOString()
+    })
+  }
+
+  // 始终用最新项目数据里的资产（生成/改绑定后能实时反映）
+  const editingLive = editing ? (project.assets.find((a) => a.id === editing.id) ?? editing) : null
+
   return (
     <div>
       <PageHeader
@@ -96,10 +124,16 @@ export default function Assets(): React.JSX.Element {
         desc="角色 / 场景 / 道具的统一资产库，供所有剧本共享"
         crumbs={[project.name, '资产管理']}
         actions={
-          <button className="btn-primary" onClick={openCreate}>
-            <Plus size={15} />
-            新建资产
-          </button>
+          <>
+            <button className="btn-ghost" onClick={() => setBatchOpen(true)}>
+              <Layers size={15} />
+              一键生成
+            </button>
+            <button className="btn-primary" onClick={openCreate}>
+              <Plus size={15} />
+              新建资产
+            </button>
+          </>
         }
       />
 
@@ -144,10 +178,10 @@ export default function Assets(): React.JSX.Element {
                   删除
                 </button>
               )}
-              {editing && (
-                <button className="btn-ghost" onClick={() => setGenerating(editing)}>
+              {editingLive && (
+                <button className="btn-ghost" onClick={() => setGenerating(editingLive)}>
                   <Image size={15} />
-                  生成封面图
+                  生成 / 再生成图
                 </button>
               )}
               <button className="btn-ghost" onClick={closeForm}>
@@ -159,6 +193,51 @@ export default function Assets(): React.JSX.Element {
             </>
           }
         >
+          {editingLive && editingLive.images.length > 0 && (
+            <div className="mb-5">
+              <label className="label">生成图（点图设为绑定图，视频生成时用它当参考）</label>
+              <div className="grid grid-cols-4 gap-2">
+                {editingLive.images.map((img) => {
+                  const bound = editingLive.coverFile === img
+                  return (
+                    <div
+                      key={img}
+                      className={`group relative aspect-square overflow-hidden rounded-lg border ${
+                        bound ? 'border-accent-500 ring-1 ring-accent-500' : 'border-white/10'
+                      }`}
+                    >
+                      <button
+                        type="button"
+                        className="h-full w-full"
+                        onClick={() => void handleSetCover(editingLive.id, img)}
+                        title={bound ? '当前绑定图' : '点此设为绑定图'}
+                      >
+                        <MediaImage
+                          src={img}
+                          alt=""
+                          className="h-full w-full object-cover"
+                          fallback={<div className="h-full w-full bg-ink-850" />}
+                        />
+                      </button>
+                      {bound && (
+                        <span className="pointer-events-none absolute left-1 top-1 rounded bg-accent-600 px-1.5 py-0.5 text-[10px] text-white">
+                          绑定
+                        </span>
+                      )}
+                      <button
+                        type="button"
+                        className="absolute right-1 top-1 hidden h-5 w-5 items-center justify-center rounded bg-black/60 text-xs text-white group-hover:flex hover:bg-rose-600"
+                        title="删除这张"
+                        onClick={() => void handleRemoveImage(editingLive.id, img)}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
           <AssetForm initial={editing} submitId="asset-form" onSubmit={(d) => void handleSubmit(d)} />
         </Modal>
       )}
@@ -166,6 +245,8 @@ export default function Assets(): React.JSX.Element {
       {generating && (
         <AssetGenerateDialog asset={generating} onClose={() => setGenerating(null)} />
       )}
+
+      {batchOpen && <AssetBatchGenerateDialog onClose={() => setBatchOpen(false)} />}
     </div>
   )
 }

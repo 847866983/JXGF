@@ -65,9 +65,12 @@ const api = {
     messages: { role: 'user' | 'assistant'; content: string }[]
   }): Promise<{ content: string; changed: boolean }> => ipcRenderer.invoke(CH.aiChat, payload),
 
+  mediaDataUrl: (p: string): Promise<string | null> => ipcRenderer.invoke(CH.mediaDataUrl, p),
+
   jobGenerate: (params: JobParams) => ipcRenderer.invoke(CH.jobGenerate, params),
   jobList: () => ipcRenderer.invoke(CH.jobList),
   jobCancel: (jobId: string) => ipcRenderer.invoke(CH.jobCancel, jobId),
+  jobRetry: (jobId: string) => ipcRenderer.invoke(CH.jobRetry, jobId),
 
   updateInfo: (): Promise<UpdateInfo> => ipcRenderer.invoke(CH.updateInfo),
   updateCheck: (): Promise<UpdateInfo> => ipcRenderer.invoke(CH.updateCheck),

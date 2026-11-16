@@ -61,7 +61,6 @@ export function AssetForm({
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder="例如：沈砚"
-          autoFocus
         />
       </div>
 

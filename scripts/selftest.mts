@@ -20,6 +20,7 @@ import { extractArchive } from '../src/main/core/extract.ts'
 import { ProjectStore, uid, now } from '../src/main/core/store.ts'
 import { listMemory, readMemory, writeMemory, appendMemory } from '../src/main/core/memory.ts'
 import { AiAssistant } from '../src/main/core/ai-assistant.ts'
+import { explainError } from '../src/renderer/src/lib/errorHelp.ts'
 import { ComfyRuntime } from '../src/main/core/comfy-runtime.ts'
 import { detectWorkflowKind, isUiWorkflow } from '../src/main/core/workflow-convert.ts'
 
@@ -574,6 +575,38 @@ ok('AI：create_asset 工具真的写入了资产', () => assert.equal(aiStore.g
 ok('AI：changed 标记为 true', () => assert.equal(aiRes.changed, true))
 ok('AI：发出 tool 事件', () => assert.ok(aiEvents.includes('tool')))
 await fsp.rm(aiTmp, { recursive: true, force: true })
+
+// ---- 生成参数注入 + 错误诊断 ----
+const ksTemplate = {
+  id: 'tpl_ks',
+  name: 'ks',
+  kind: 'video' as const,
+  description: '',
+  apiJson: {
+    '1': { class_type: 'KSampler', inputs: { seed: 1, steps: 4, cfg: 1, sampler_name: 'euler', scheduler: 'simple', denoise: 1 } }
+  },
+  mapping: { version: 1 },
+  createdAt: new Date().toISOString()
+}
+const ksWf = buildWorkflow(ksTemplate, { steps: 8, cfg: 2.5, samplerName: 'res_multistep', scheduler: 'beta' }) as Record<string, { class_type: string; inputs: Record<string, unknown> }>
+ok('参数：steps 注入 KSampler', () => assert.equal(ksWf['1'].inputs.steps, 8))
+ok('参数：cfg 注入 KSampler', () => assert.equal(ksWf['1'].inputs.cfg, 2.5))
+ok('参数：sampler 注入 KSampler', () => assert.equal(ksWf['1'].inputs.sampler_name, 'res_multistep'))
+ok('参数：scheduler 注入 KSampler', () => assert.equal(ksWf['1'].inputs.scheduler, 'beta'))
+
+ok('错误诊断：显存不足识别', () => {
+  const h = explainError('CUDA out of memory. Tried to allocate...')
+  assert.ok(h && /显存/.test(h.reason))
+})
+ok('错误诊断：连接失败识别', () => {
+  const h = explainError('fetch failed: connect ECONNREFUSED 127.0.0.1:8188')
+  assert.ok(h && /连接/.test(h.reason))
+})
+ok('错误诊断：未知错误给通用建议', () => {
+  const h = explainError('some weird error')
+  assert.ok(h && h.suggestion.length > 0)
+})
+ok('错误诊断：空错误返回 null', () => assert.equal(explainError(''), null))
 
 console.log(`\nselftest: ${pass} passed, ${fail} failed`)
 if (fail > 0) process.exit(1)

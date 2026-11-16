@@ -1,16 +1,41 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Film, Play, Wand2 } from 'lucide-react'
-import type { Shot } from '@shared/types'
+import { ChevronDown, ChevronRight, Film, Play, SlidersHorizontal, Wand2 } from 'lucide-react'
+import type { Shot, Template } from '@shared/types'
 import { useApp } from '../store/app'
 import { EmptyState, PageHeader } from '../components/ui'
 import { NoProject } from '../components/NoProject'
 import { ShotStatusBadge } from '../components/badges'
+import { MediaImage } from '../components/MediaImage'
 
 const byIndex = (a: { index: number }, b: { index: number }): number => a.index - b.index
 
-function renderable(src: string | null): boolean {
-  return Boolean(src && /^(https?:|file:|data:)/.test(src))
+/** 导演台默认模板：优先用户所选；否则优先 H3/MiniMax/BanZhang 视频模板；再退其它视频/首个 */
+function pickDirectorTemplate(templates: Template[], id: string): Template | null {
+  return (
+    templates.find((t) => t.id === id) ??
+    templates.find((t) => t.kind === 'video' && /H3|MiniMax|BanZhang|三采/i.test(t.name)) ??
+    templates.find((t) => t.kind === 'video') ??
+    templates[0] ??
+    null
+  )
+}
+
+/** 从模板 apiJson 读取第一个 KSampler 的默认采样参数 */
+function ksDefaults(apiJson: unknown): { steps?: number; cfg?: number; samplerName?: string; scheduler?: string } {
+  if (!apiJson || typeof apiJson !== 'object') return {}
+  for (const n of Object.values(apiJson as Record<string, { class_type?: string; inputs?: Record<string, unknown> }>)) {
+    if (String(n?.class_type) === 'KSampler' && n.inputs) {
+      const i = n.inputs
+      return {
+        steps: typeof i.steps === 'number' ? i.steps : undefined,
+        cfg: typeof i.cfg === 'number' ? i.cfg : undefined,
+        samplerName: typeof i.sampler_name === 'string' ? i.sampler_name : undefined,
+        scheduler: typeof i.scheduler === 'string' ? i.scheduler : undefined
+      }
+    }
+  }
+  return {}
 }
 
 export default function Director(): React.JSX.Element {
@@ -22,6 +47,35 @@ export default function Director(): React.JSX.Element {
   const [templateId, setTemplateId] = useState('')
   const [submittingShotId, setSubmittingShotId] = useState<string | null>(null)
   const [batchRunning, setBatchRunning] = useState(false)
+  // 生成参数（可调）
+  const [paramsOpen, setParamsOpen] = useState(false)
+  const [genSteps, setGenSteps] = useState('')
+  const [genCfg, setGenCfg] = useState('')
+  const [genSampler, setGenSampler] = useState('')
+  const [genScheduler, setGenScheduler] = useState('')
+  const [genWidth, setGenWidth] = useState('')
+  const [genHeight, setGenHeight] = useState('')
+  const [genFrames, setGenFrames] = useState('')
+  const [genSeed, setGenSeed] = useState('')
+
+  // 切换模板/硬件档位时，预填默认参数（steps/cfg/采样器/调度器/宽高帧数）
+  const hwKey = hardware?.preset.video ? `${hardware.preset.video.width}x${hardware.preset.video.height}x${hardware.preset.video.frames}` : ''
+  useEffect(() => {
+    const p = useApp.getState().project
+    if (!p) return
+    const t = pickDirectorTemplate(p.templates, templateId)
+    const ks = ksDefaults(t?.apiJson)
+    const pv = useApp.getState().hardware?.preset.video
+    setGenSteps(String(ks.steps ?? 4))
+    setGenCfg(String(ks.cfg ?? 1))
+    setGenSampler(ks.samplerName ?? 'euler')
+    setGenScheduler(ks.scheduler ?? 'simple')
+    setGenWidth(String(pv?.width ?? 576))
+    setGenHeight(String(pv?.height ?? 320))
+    setGenFrames(String(pv?.frames ?? 33))
+    setGenSeed('')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [templateId, hwKey])
 
   if (!project) {
     return (
@@ -59,8 +113,7 @@ export default function Director(): React.JSX.Element {
       return sa.index - sb.index || a.index - b.index
     })
 
-  const template =
-    project.templates.find((t) => t.id === templateId) ?? project.templates[0] ?? null
+  const template = pickDirectorTemplate(project.templates, templateId)
   const preset = hardware?.preset.video ?? null
   const canGenerate = Boolean(template && preset)
   const pendingCount = shots.filter((s) => s.outputs.length === 0).length
@@ -77,14 +130,23 @@ export default function Director(): React.JSX.Element {
     const refImages = shot.assetIds
       .map((id) => project.assets.find((a) => a.id === id)?.coverFile)
       .filter((f): f is string => Boolean(f))
+    const num = (s: string, d: number): number => {
+      const n = Number(s)
+      return Number.isFinite(n) && n > 0 ? n : d
+    }
     await window.api.jobGenerate({
       projectId: project.id,
       shotId: shot.id,
       templateId: template.id,
       positive: shot.prompt || shot.description || shot.title,
-      width: preset.width,
-      height: preset.height,
-      frames: preset.frames,
+      width: num(genWidth, preset.width),
+      height: num(genHeight, preset.height),
+      frames: num(genFrames, preset.frames),
+      steps: genSteps ? num(genSteps, 0) || undefined : undefined,
+      cfg: genCfg ? Number(genCfg) || undefined : undefined,
+      samplerName: genSampler.trim() || undefined,
+      scheduler: genScheduler.trim() || undefined,
+      seed: genSeed.trim() ? Number(genSeed) || undefined : undefined,
       refImages: refImages.length > 0 ? refImages : undefined
     })
   }
@@ -171,6 +233,69 @@ export default function Director(): React.JSX.Element {
           </div>
         </div>
 
+        {/* 生成参数（可调） */}
+        <div className="mb-4">
+          <button
+            className="flex items-center gap-1.5 text-sm text-slate-400 hover:text-slate-200"
+            onClick={() => setParamsOpen((v) => !v)}
+          >
+            {paramsOpen ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+            <SlidersHorizontal size={14} />
+            生成参数（步数 / CFG / 采样器 / 调度器 / 分辨率 / 帧数 / 种子）
+          </button>
+          {paramsOpen && (
+            <div className="mt-2 rounded-lg border border-white/5 bg-white/[0.02] p-3">
+              <div className="grid grid-cols-4 gap-3">
+                <div>
+                  <label className="label">步数 steps</label>
+                  <input className="field" value={genSteps} onChange={(e) => setGenSteps(e.target.value.replace(/[^0-9]/g, ''))} placeholder="4" />
+                </div>
+                <div>
+                  <label className="label">CFG</label>
+                  <input className="field" value={genCfg} onChange={(e) => setGenCfg(e.target.value.replace(/[^0-9.]/g, ''))} placeholder="1" />
+                </div>
+                <div>
+                  <label className="label">采样器 sampler</label>
+                  <input className="field" list="sampler-list" value={genSampler} onChange={(e) => setGenSampler(e.target.value)} placeholder="euler" />
+                  <datalist id="sampler-list">
+                    {['euler', 'euler_ancestral', 'dpmpp_2m', 'dpmpp_2m_sde', 'dpmpp_sde', 'res_multistep', 'ddim', 'uni_pc'].map((s) => (
+                      <option key={s} value={s} />
+                    ))}
+                  </datalist>
+                </div>
+                <div>
+                  <label className="label">调度器 scheduler</label>
+                  <input className="field" list="sched-list" value={genScheduler} onChange={(e) => setGenScheduler(e.target.value)} placeholder="simple" />
+                  <datalist id="sched-list">
+                    {['simple', 'normal', 'karras', 'exponential', 'beta', 'sgm_uniform', 'ddim_uniform'].map((s) => (
+                      <option key={s} value={s} />
+                    ))}
+                  </datalist>
+                </div>
+                <div>
+                  <label className="label">宽</label>
+                  <input className="field" value={genWidth} onChange={(e) => setGenWidth(e.target.value.replace(/[^0-9]/g, ''))} />
+                </div>
+                <div>
+                  <label className="label">高</label>
+                  <input className="field" value={genHeight} onChange={(e) => setGenHeight(e.target.value.replace(/[^0-9]/g, ''))} />
+                </div>
+                <div>
+                  <label className="label">帧数</label>
+                  <input className="field" value={genFrames} onChange={(e) => setGenFrames(e.target.value.replace(/[^0-9]/g, ''))} />
+                </div>
+                <div>
+                  <label className="label">种子（空=随机）</label>
+                  <input className="field" value={genSeed} onChange={(e) => setGenSeed(e.target.value.replace(/[^0-9]/g, ''))} placeholder="随机" />
+                </div>
+              </div>
+              <div className="mt-2 text-[11px] text-slate-600">
+                默认值取自当前工作流。H3 的「SelfLift 分段步数」会按步数自动对齐；显存吃紧时调低分辨率/帧数。
+              </div>
+            </div>
+          )}
+        </div>
+
         {!canGenerate && (
           <div className="mb-4 rounded-lg bg-amber-500/10 px-3 py-2.5 text-sm text-amber-300">
             {generateHint()}
@@ -187,17 +312,16 @@ export default function Director(): React.JSX.Element {
               return (
                 <div key={shot.id} className="panel flex items-center gap-4 p-4">
                   <div className="h-20 w-32 shrink-0 overflow-hidden rounded-lg border border-white/5 bg-ink-800">
-                    {renderable(shot.refImage) ? (
-                      <img
-                        src={shot.refImage as string}
-                        alt={shot.title}
-                        className="h-full w-full object-cover"
-                      />
-                    ) : (
-                      <div className="flex h-full w-full items-center justify-center text-slate-600">
-                        <Film size={22} />
-                      </div>
-                    )}
+                    <MediaImage
+                      src={shot.refImage}
+                      alt={shot.title}
+                      className="h-full w-full object-cover"
+                      fallback={
+                        <div className="flex h-full w-full items-center justify-center text-slate-600">
+                          <Film size={22} />
+                        </div>
+                      }
+                    />
                   </div>
 
                   <div className="min-w-0 flex-1">

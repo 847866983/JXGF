@@ -1,6 +1,7 @@
-import { app, BrowserWindow, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, ipcMain, shell, protocol } from 'electron'
 import path from 'node:path'
 import fs from 'node:fs'
+import fsp from 'node:fs/promises'
 import { spawnSync } from 'node:child_process'
 import { CH, type PushEvent } from '../shared/ipc'
 import type {
@@ -40,6 +41,11 @@ const updater = new Updater()
 let aiAssistant: AiAssistant
 let skillsRoot = ''
 let aiConfigFile = ''
+
+// 必须在 app ready 前注册自定义协议特权
+protocol.registerSchemesAsPrivileged([
+  { scheme: 'appmedia', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } }
+])
 
 const gotLock = app.requestSingleInstanceLock()
 if (!gotLock) {
@@ -300,9 +306,35 @@ function registerIpc(): void {
     }
   })
 
+  // 本地图片读取成 data URL（供渲染进程预览，避开 file:// 安全限制与自定义协议坑）
+  ipcMain.handle(CH.mediaDataUrl, async (_e, p: string) => {
+    try {
+      const buf = await fsp.readFile(p)
+      const ext = path.extname(p).toLowerCase()
+      const mime =
+        ext === '.png'
+          ? 'image/png'
+          : ext === '.jpg' || ext === '.jpeg'
+            ? 'image/jpeg'
+            : ext === '.webp'
+              ? 'image/webp'
+              : ext === '.gif'
+                ? 'image/gif'
+                : ext === '.mp4'
+                  ? 'video/mp4'
+                  : ext === '.webm'
+                    ? 'video/webm'
+                    : 'application/octet-stream'
+      return `data:${mime};base64,${buf.toString('base64')}`
+    } catch {
+      return null
+    }
+  })
+
   ipcMain.handle(CH.jobGenerate, (_e, params: JobParams) => jobs.enqueue(params))
   ipcMain.handle(CH.jobList, () => jobs.list())
   ipcMain.handle(CH.jobCancel, (_e, jobId: string) => jobs.cancel(jobId))
+  ipcMain.handle(CH.jobRetry, (_e, jobId: string) => jobs.retry(jobId))
 
   ipcMain.handle(CH.updateInfo, () => updater.getInfo())
   ipcMain.handle(CH.updateCheck, () => updater.check())
@@ -317,6 +349,35 @@ function registerIpc(): void {
 }
 
 app.whenReady().then(() => {
+  // 自定义协议：本地图片/视频预览（避开 file:// 的 web 安全限制，支持中文路径）
+  // 用法：appmedia:///C:/path/to/file.png  → 读取该绝对路径文件
+  protocol.handle('appmedia', async (request) => {
+    try {
+      const u = new URL(request.url)
+      let p = decodeURIComponent(u.pathname)
+      if (/^\/[a-zA-Z]:/.test(p)) p = p.slice(1) // /C:/foo -> C:/foo
+      const buf = await fsp.readFile(p)
+      const ext = path.extname(p).toLowerCase()
+      const mime =
+        ext === '.png'
+          ? 'image/png'
+          : ext === '.jpg' || ext === '.jpeg'
+            ? 'image/jpeg'
+            : ext === '.webp'
+              ? 'image/webp'
+              : ext === '.gif'
+                ? 'image/gif'
+                : ext === '.mp4'
+                  ? 'video/mp4'
+                  : ext === '.webm'
+                    ? 'video/webm'
+                    : 'application/octet-stream'
+      return new Response(new Uint8Array(buf), { headers: { 'content-type': mime, 'cache-control': 'no-cache' } })
+    } catch (err) {
+      return new Response(`not found: ${String((err as Error).message ?? err)}`, { status: 404 })
+    }
+  })
+
   store = new ProjectStore(path.join(app.getPath('userData'), 'projects'))
   void store.init()
 

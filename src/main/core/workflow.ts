@@ -7,6 +7,13 @@ export interface WorkflowParams {
   height?: number
   frames?: number
   seed?: number
+  /** 每批生成张数（图片批量出图用） */
+  batch?: number
+  /** 采样器细参（视频/图片生成共用） */
+  steps?: number
+  cfg?: number
+  samplerName?: string
+  scheduler?: string
   /** 生成模式：t2v（文生视频）/ fl2va（首尾帧）/ ref2va（参考图生视频） */
   mode?: 't2v' | 'fl2va' | 'ref2va'
 }
@@ -193,6 +200,21 @@ function fixH3Params(clone: Workflow): void {
 }
 
 /**
+ * 通用采样器细参注入：对 KSampler / KSamplerAdvanced 设置 steps/cfg/sampler_name/scheduler。
+ * 放在 H3 参数修正之前，这样 SelfLift 分段步数能按新 steps 对齐。
+ */
+function applySamplerParams(clone: Workflow, params: WorkflowParams): void {
+  for (const node of Object.values(clone)) {
+    if (!/^KSampler(Advanced)?$/.test(String(node.class_type))) continue
+    const inp = node.inputs
+    if (params.steps !== undefined && 'steps' in inp) inp.steps = params.steps
+    if (params.cfg !== undefined && 'cfg' in inp) inp.cfg = params.cfg
+    if (params.samplerName && 'sampler_name' in inp) inp.sampler_name = params.samplerName
+    if (params.scheduler && 'scheduler' in inp) inp.scheduler = params.scheduler
+  }
+}
+
+/**
  * 把模板（API 格式）与镜头参数合成最终提交给 ComfyUI 的工作流。
  *
  * 采用「探测式注入」，节点 ID 永不写死：
@@ -204,6 +226,9 @@ export function buildWorkflow(template: Template, params: WorkflowParams): unkno
     throw new Error('模板不是有效的 API 工作流（缺少 nodes 结构）')
   }
   const clone: Workflow = JSON.parse(JSON.stringify(template.apiJson)) as Workflow
+
+  // 先注入采样器细参（steps/cfg/sampler/scheduler），H3 的 SelfLift 会据此对齐
+  applySamplerParams(clone, params)
 
   const isH3 = Object.values(clone).some((n) => String(n.class_type).includes('CSGlide'))
 
@@ -244,6 +269,7 @@ export function buildWorkflow(template: Template, params: WorkflowParams): unkno
     if (ct.includes('emptylatentimage') || ct.includes('latent')) {
       if (params.width && 'width' in node.inputs) node.inputs.width = params.width
       if (params.height && 'height' in node.inputs) node.inputs.height = params.height
+      if (params.batch && 'batch_size' in node.inputs) node.inputs.batch_size = params.batch
     }
     if (params.seed !== undefined && 'seed' in node.inputs) {
       node.inputs.seed = params.seed

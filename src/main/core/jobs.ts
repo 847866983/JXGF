@@ -24,6 +24,8 @@ export class JobManager {
   private running = false
   private client: ComfyClient | null = null
   private readonly emit: Emit
+  /** 记录每个 jobId 的原始参数，供失败后一键重试 */
+  private jobParams = new Map<string, JobParams>()
 
   constructor(private readonly store: ProjectStore, emit: Emit) {
     this.emit = emit
@@ -48,10 +50,23 @@ export class JobManager {
       createdAt: now()
     }
     this.jobs.set(info.id, info)
+    this.jobParams.set(info.id, params)
     this.queue.push({ info, params, template, settings: project.settings.comfy, attempt: 0 })
     this.emit('job:updated', { job: info })
     void this.pump()
     return info
+  }
+
+  /** 用原参数重新提交（失败重试） */
+  retry(jobId: string): JobInfo {
+    const params = this.jobParams.get(jobId)
+    if (!params) throw new Error('该任务没有可重试的原始参数（可能已过期）')
+    const job = this.jobs.get(jobId)
+    if (job) {
+      job.status = 'cancelled'
+      this.emit('job:updated', { job })
+    }
+    return this.enqueue(params)
   }
 
   cancel(jobId: string): void {
@@ -99,7 +114,12 @@ export class JobManager {
         width: params.width,
         height: params.height,
         frames: params.frames,
-        seed: params.seed
+        seed: params.seed,
+        batch: params.batch,
+        steps: params.steps,
+        cfg: params.cfg,
+        samplerName: params.samplerName,
+        scheduler: params.scheduler
       })
 
       // 参考图：分镜引用的资产封面，上传到 ComfyUI 后注入 H3 媒体架（ref2va 素材）。

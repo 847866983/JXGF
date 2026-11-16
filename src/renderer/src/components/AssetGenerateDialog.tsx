@@ -3,25 +3,20 @@ import { Image, ScanFace, Wand2 } from 'lucide-react'
 import type { Asset } from '@shared/types'
 import { useApp } from '../store/app'
 import { Modal } from './Modal'
+import {
+  DEFAULT_STYLE_ID,
+  STYLES,
+  buildFourViewPositive,
+  fourViewNegative,
+  pickAssetTemplate,
+  styledPositive
+} from '../lib/assetGen'
 
 /**
- * 资产生图对话框：选图片模板 + 提示词，生成图片作为资产封面。
- * 角色资产：默认用「Z-Image-Turbo」并自动套「四视图」提示词（正/四分之三/侧/背）。
+ * 资产生图对话框：选 画风 + 模板 + 提示词，生成图片作为资产封面。
+ * 角色资产：默认用「Z-Image-Turbo」并套「四视图」提示词（上半身特写 + 全身正/侧/背）。
  * 生成完成后图片自动写入 asset.images + coverFile，可在剧本分镜中引用。
  */
-
-// 四视图提示词模板（英文，适配 Z-Image / 扩散模型）
-const FOUR_VIEW_HEAD =
-  'character turnaround reference sheet, the same single character shown in four full-body views arranged in one row: front view, three-quarter view, side view, back view; consistent face, hairstyle, outfit and colors across all views; full body, standing neutral pose; plain light gray studio background; '
-const FOUR_VIEW_TAIL =
-  ' ; clean character design sheet, high detail, sharp focus, professional concept art'
-const FOUR_VIEW_NEG =
-  'multiple different characters, inconsistent design, different outfit between views, extra heads, extra limbs, deformed, bad anatomy, text, watermark, logo, signature, cropped, out of frame, blurry, low quality'
-
-function buildFourViewPositive(desc: string): string {
-  const d = desc.trim().replace(/[;,\s]+$/, '')
-  return d ? `${FOUR_VIEW_HEAD}${d}${FOUR_VIEW_TAIL}` : `${FOUR_VIEW_HEAD}a character${FOUR_VIEW_TAIL}`
-}
 
 export function AssetGenerateDialog({
   asset,
@@ -35,17 +30,16 @@ export function AssetGenerateDialog({
   const isCharacter = asset.kind === 'character'
 
   // 角色默认选 Z-Image-Turbo
-  const defaultTemplate =
-    (isCharacter && imageTemplates.find((t) => /Z-?Image-?Turbo/i.test(t.name))) ||
-    imageTemplates.find((t) => /Z-?Image/i.test(t.name)) ||
-    imageTemplates[0]
+  const defaultTemplate = pickAssetTemplate(project?.templates ?? [], asset.kind)
 
   const [templateId, setTemplateId] = useState(defaultTemplate?.id ?? '')
+  const [styleId, setStyleId] = useState(DEFAULT_STYLE_ID)
   const [positive, setPositive] = useState(asset.prompt || asset.description || '')
   const [negative, setNegative] = useState(asset.negative || '')
   const [fourView, setFourView] = useState(isCharacter)
-  const [width, setWidth] = useState(isCharacter ? '1024' : '1024')
-  const [height, setHeight] = useState(isCharacter ? '1024' : '1024')
+  const [width, setWidth] = useState(isCharacter ? '1536' : '1024')
+  const [height, setHeight] = useState(isCharacter ? '640' : '1024')
+  const [batch, setBatch] = useState('1')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -62,8 +56,11 @@ export function AssetGenerateDialog({
     setSubmitting(true)
     setError(null)
     try {
-      const finalPositive = fourView ? buildFourViewPositive(positive) : positive.trim()
-      const finalNegative = fourView ? FOUR_VIEW_NEG : negative.trim() || undefined
+      const style = STYLES.find((s) => s.id === styleId)
+      const finalPositive = fourView ? buildFourViewPositive(positive, styleId) : styledPositive(positive, styleId)
+      const finalNegative = fourView
+        ? fourViewNegative(styleId)
+        : [style?.negative, negative.trim()].filter(Boolean).join(', ') || undefined
       await window.api.jobGenerate({
         projectId: project.id,
         assetId: asset.id,
@@ -71,7 +68,8 @@ export function AssetGenerateDialog({
         positive: finalPositive,
         negative: finalNegative,
         width: Number(width) || undefined,
-        height: Number(height) || undefined
+        height: Number(height) || undefined,
+        batch: Number(batch) || 1
       })
       onClose()
     } catch (err) {
@@ -115,6 +113,17 @@ export function AssetGenerateDialog({
           )}
         </div>
 
+        <div>
+          <label className="label">画风风格</label>
+          <select className="field" value={styleId} onChange={(e) => setStyleId(e.target.value)}>
+            {STYLES.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.label}
+              </option>
+            ))}
+          </select>
+        </div>
+
         {isCharacter && (
           <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-accent/40 bg-accent-600/[0.08] px-3 py-2.5">
             <input
@@ -126,10 +135,10 @@ export function AssetGenerateDialog({
             <span className="text-sm text-slate-200">
               <span className="flex items-center gap-1.5 font-medium">
                 <ScanFace size={14} className="text-accent-400" />
-                生成角色四视图（正 / 四分之三 / 侧 / 背）
+                生成角色四视图（上半身特写 + 全身正/侧/背）
               </span>
               <span className="mt-0.5 block text-[11px] text-slate-500">
-                勾选后会把下面的描述套进「角色转身参考表」四视图提示词，用 Z-Image-Turbo 一次出四视图。取消则按普通单图生成。
+                勾选后把下面的描述套进「角色四视图」模板：一张上半身特写（面部细节清晰）+ 全身正、侧、背三视。取消则按普通单图生成。
               </span>
             </span>
           </label>
@@ -156,7 +165,7 @@ export function AssetGenerateDialog({
           </div>
         )}
 
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-3 gap-2">
           <div>
             <label className="label">宽</label>
             <input className="field" value={width} onChange={(e) => setWidth(e.target.value)} />
@@ -165,7 +174,17 @@ export function AssetGenerateDialog({
             <label className="label">高</label>
             <input className="field" value={height} onChange={(e) => setHeight(e.target.value)} />
           </div>
+          <div>
+            <label className="label">张数</label>
+            <input
+              className="field"
+              value={batch}
+              onChange={(e) => setBatch(e.target.value.replace(/[^0-9]/g, ''))}
+              placeholder="1"
+            />
+          </div>
         </div>
+        <div className="text-[11px] text-slate-600">张数 &gt; 1 会一次出多张，完成后可在资产里挑一张设为绑定图（显存吃紧时建议 1~2）。</div>
 
         <div className="flex items-start gap-2 rounded-lg bg-white/[0.03] px-3 py-2 text-xs text-slate-500">
           <Image size={14} className="mt-0.5 shrink-0 text-accent-400" />

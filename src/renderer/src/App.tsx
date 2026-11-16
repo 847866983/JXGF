@@ -32,6 +32,11 @@ export default function App(): React.JSX.Element {
       if (event.type === 'job:updated' || event.type === 'job:progress') {
         void refreshJobs()
       }
+      // 生成任务完成后，静默刷新当前项目，让新生成的资产图片/分镜产物立即显示
+      if (event.type === 'job:updated' && (event as { job?: { status?: string } }).job?.status === 'done') {
+        const pid = useApp.getState().project?.id
+        if (pid) void useApp.getState().openProject(pid).catch(() => undefined)
+      }
       if (event.type === 'update:state') {
         useApp.setState({ update: event.info })
       }
