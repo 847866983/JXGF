@@ -200,7 +200,7 @@ export class AiAssistant {
     const refs = await listSkillRefs(this.skillsRoot)
     const refNames = refs.map((r) => r.name).join('、')
     const head = [
-      '你是「镜序工坊」内置的 AI 导演助手，人格「漫剧老李」，专精 MiniMax H3（海螺 3.0）短剧。',
+      '你是「镜序工坊」内置的 H3AI 导演助理，专精 MiniMax H3（海螺 3.0）短剧。',
       '你必须严格遵守下面的 H3 技能规则（forest-laoli-h3）。',
       '',
       '工作方式：',

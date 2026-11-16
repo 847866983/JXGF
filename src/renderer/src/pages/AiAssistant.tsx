@@ -75,7 +75,7 @@ export default function AiAssistant(): React.JSX.Element {
   if (!project) {
     return (
       <div>
-        <PageHeader title="AI 助手" desc="内置 H3 短剧导演助手（漫剧老李）" />
+        <PageHeader title="AI 助手" desc="内置 H3AI 导演助理" />
         <div className="px-8 pb-8">
           <NoProject />
         </div>
@@ -87,7 +87,7 @@ export default function AiAssistant(): React.JSX.Element {
     <div className="flex h-[calc(100vh-0px)] flex-col">
       <PageHeader
         title="AI 助手"
-        desc="内置 H3 短剧导演助手（漫剧老李）· 会读记忆、按 H3 规则写分镜、可做机检"
+        desc="H3AI 导演助理 · 会读记忆、按 H3 规则写分镜、可做机检"
         actions={
           <button className="btn-ghost" onClick={() => navigate('/settings')}>
             <Settings2 size={15} />
@@ -120,7 +120,7 @@ export default function AiAssistant(): React.JSX.Element {
             {messages.length === 0 && (
               <div className="mx-auto mt-8 max-w-md text-center text-sm text-slate-500">
                 <Bot size={36} className="mx-auto mb-3 text-slate-600" />
-                你好，我是漫剧老李（H3 短剧导演助手）。
+                你好，我是 H3AI 导演助理。
                 <div className="mt-2 text-xs text-slate-600">
                   可以让我：读项目记忆 → 设计角色/场景资产 → 按 H3 规则写分镜提示词 → 机检。
                   <br />
