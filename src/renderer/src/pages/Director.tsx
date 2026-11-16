@@ -15,6 +15,23 @@ import Storyboard from './Storyboard'
 
 const byIndex = (a: { index: number }, b: { index: number }): number => a.index - b.index
 
+/** 按项目 + 剧集计算分镜时间线（组件渲染与连续生成循环共用，避免闭包拿旧数据） */
+function computeShots(p: { episodes: { id: string; index: number }[]; scenes: { id: string; episodeId: string; index: number }[]; shots: Shot[] }, episodeId: string): Shot[] {
+  const episodes = [...p.episodes].sort(byIndex)
+  const ep = episodes.find((e) => e.id === episodeId) ?? episodes[0]
+  if (!ep) return []
+  const scenes = p.scenes.filter((s) => s.episodeId === ep.id).sort(byIndex)
+  const sceneById = new Map(scenes.map((s) => [s.id, s]))
+  return p.shots
+    .filter((sh) => sceneById.has(sh.sceneId))
+    .sort((a, b) => {
+      const sa = sceneById.get(a.sceneId)
+      const sb = sceneById.get(b.sceneId)
+      if (!sa || !sb) return 0
+      return sa.index - sb.index || a.index - b.index
+    })
+}
+
 /** 导演台默认模板：优先用户所选；否则优先 H3/MiniMax/BanZhang 视频模板；再退其它视频/首个 */
 function pickDirectorTemplate(templates: Template[], id: string): Template | null {
   return (
@@ -128,16 +145,7 @@ export default function Director(): React.JSX.Element {
   const episodes = [...project.episodes].sort(byIndex)
   const selectedEpisode = episodes.find((e) => e.id === episodeId) ?? episodes[0]
 
-  const scenes = project.scenes.filter((s) => s.episodeId === selectedEpisode.id).sort(byIndex)
-  const sceneById = new Map(scenes.map((s) => [s.id, s]))
-  const shots = project.shots
-    .filter((sh) => sceneById.has(sh.sceneId))
-    .sort((a, b) => {
-      const sa = sceneById.get(a.sceneId)
-      const sb = sceneById.get(b.sceneId)
-      if (!sa || !sb) return 0
-      return sa.index - sb.index || a.index - b.index
-    })
+  const shots = computeShots(project, selectedEpisode.id)
 
   const template = pickDirectorTemplate(project.templates, templateId)
   const preset = hardware?.preset.video ?? null
@@ -181,17 +189,20 @@ export default function Director(): React.JSX.Element {
 
   const submitJob = async (shot: Shot, index: number): Promise<void> => {
     if (!template || !preset) return
-    const s = segOf(shot)
+    // 用 store 里最新项目数据（连续生成时上一段产物刚写回，闭包里的 project 是旧的）
+    const liveProject = useApp.getState().project ?? project
+    const liveShots = computeShots(liveProject, selectedEpisode.id)
+    const s = getSegment(shot, preset, index)
     // 参考图：仅「参考图」模式；参考视频：仅「视频参考」模式，取上一段成片
     const refImages =
       s.genMode === 'ref2va'
         ? shot.assetIds
-            .map((id) => project.assets.find((a) => a.id === id)?.coverFile)
+            .map((id) => liveProject.assets.find((a) => a.id === id)?.coverFile)
             .filter((f): f is string => Boolean(f))
         : []
     let refVideos: string[] = []
     if (s.genMode === 'video') {
-      const prev = shots[index - 1]
+      const prev = liveShots[index - 1]
       const prevVideos = (prev?.outputs ?? [])
         .filter((o) => o.kind === 'video' && o.kept !== false)
         .map((o) => o.file)
@@ -201,7 +212,7 @@ export default function Director(): React.JSX.Element {
     const notes = shot.characterNotes ?? {}
     const charDesc = shot.assetIds
       .map((id) => {
-        const a = project.assets.find((x) => x.id === id)
+        const a = liveProject.assets.find((x) => x.id === id)
         const note = (notes[id] ?? '').trim()
         return a && note ? `${a.name}：${note}` : ''
       })
@@ -231,6 +242,24 @@ export default function Director(): React.JSX.Element {
     })
   }
 
+  /** 轮询等待某个任务完成（主进程队列顺序执行，完成后 project 快照已刷新） */
+  const waitJobDone = async (shotId: string, timeoutMs = 45 * 60 * 1000): Promise<'done' | 'failed' | 'timeout'> => {
+    const started = Date.now()
+    while (Date.now() - started < timeoutMs) {
+      await new Promise((r) => setTimeout(r, 3000))
+      const jobs = (await window.api.jobList()) as { shotId?: string; status: string }[]
+      const job = jobs.find((j) => j.shotId === shotId)
+      if (!job) return 'timeout' // 任务不在队列（可能已被清理），保守当作失败
+      if (job.status === 'done') {
+        // 重新拉项目快照，确保拿到刚写回的产物
+        await useApp.getState().openProject(useApp.getState().project?.id ?? '')
+        return 'done'
+      }
+      if (job.status === 'failed' || job.status === 'cancelled') return 'failed'
+    }
+    return 'timeout'
+  }
+
   const generateOne = async (shot: Shot): Promise<void> => {
     const index = shots.indexOf(shot)
     setSubmittingShotId(shot.id)
@@ -242,15 +271,24 @@ export default function Director(): React.JSX.Element {
     }
   }
 
-  /** 连续生成：按时间线顺序逐段提交，段间自动续接（第一段不续接，其余 latent） */
+  /** 连续生成：按时间线顺序逐段生成，每段完成后再提交下一段。
+   *  这样「视频参考」模式能拿到上一段刚生成的成片；latent 续接同样按序走链。 */
   const generateAll = async (): Promise<void> => {
     if (!canGenerate || batchRunning) return
     setBatchRunning(true)
     try {
-      for (let i = 0; i < shots.length; i += 1) {
-        const s = shots[i]
+      // 每轮用最新项目数据重算分镜（上一段产物写回后 store 已刷新）
+      const liveP = useApp.getState().project
+      const liveShots = liveP ? computeShots(liveP, selectedEpisode.id) : shots
+      for (let i = 0; i < liveShots.length; i += 1) {
+        const s = liveShots[i]
         if (s.outputs.length > 0) continue
         await submitJob(s, i)
+        const result = await waitJobDone(s.id)
+        if (result === 'failed') {
+          // 失败后停止连续生成，让用户去队列看原因，避免后续段空跑
+          break
+        }
       }
       navigate('/queue')
     } finally {
@@ -285,12 +323,16 @@ export default function Director(): React.JSX.Element {
 
   /** 删除某个产物（不删磁盘文件，仅从分镜移除） */
   const removeOutput = async (shotId: string, outputId: string): Promise<void> => {
+    const shot = project.shots.find((s) => s.id === shotId)
+    const output = shot?.outputs.find((o) => o.id === outputId)
     await persistProject((draft) => {
       const sh = draft.shots.find((x) => x.id === shotId)
       if (!sh) return
       sh.outputs = sh.outputs.filter((o) => o.id !== outputId)
       sh.updatedAt = new Date().toISOString()
     })
+    // 清理磁盘文件（主进程检查是否仍被引用，如被下一段视频参考引用则保留）
+    if (output?.file) void window.api.mediaDeleteFile(output.file)
   }
 
   const hint = (): string | undefined => {

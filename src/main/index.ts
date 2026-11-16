@@ -236,6 +236,12 @@ function registerIpc(): void {
   ipcMain.handle(CH.projectCreate, async (_e, name: string) => store.create(name))
   ipcMain.handle(CH.projectOpen, (_e, id: string) => store.open(id))
   ipcMain.handle(CH.projectSave, (_e, project: Project) => store.save(project))
+  // 返回主进程当前项目的深拷贝：渲染层 persistProject 用它做 base，
+  // 避免用旧快照覆盖主进程 side-effect 写入（如生成完成后写回的 shot.outputs）
+  ipcMain.handle(CH.projectGetCurrent, () => {
+    const cur = store.getCurrent()
+    return cur ? (structuredClone(cur) as Project) : null
+  })
 
   ipcMain.handle(CH.projectImportTemplate, async (_e, payload: { name: string; kind?: 'image' | 'video'; apiJson: unknown }) => {
     const project = store.getCurrent()
@@ -346,6 +352,31 @@ function registerIpc(): void {
       return `data:${mime};base64,${buf.toString('base64')}`
     } catch {
       return null
+    }
+  })
+
+  // 删除媒体文件（物理删除），删除前检查是否仍被当前项目引用，避免误删其它资产/分镜还在用的文件
+  ipcMain.handle(CH.mediaDeleteFile, async (_e, p: string) => {
+    try {
+      const project = store.getCurrent()
+      if (!project) return { deleted: false, reason: '没有打开的项目' }
+      const norm = path.resolve(p)
+      const isReferenced = (file: string | null | undefined): boolean => {
+        if (!file) return false
+        try {
+          return path.resolve(file) === norm
+        } catch {
+          return false
+        }
+      }
+      const referenced =
+        project.assets.some((a) => a.coverFile === norm || a.images.some((i) => i === norm)) ||
+        project.shots.some((s) => s.outputs.some((o) => o.file === norm) || isReferenced(s.refImage))
+      if (referenced) return { deleted: false, reason: '该文件仍被其它资产或分镜引用' }
+      await fsp.rm(norm, { force: true })
+      return { deleted: true }
+    } catch (err) {
+      return { deleted: false, reason: String((err as Error).message ?? err) }
     }
   })
 

@@ -52,6 +52,7 @@ const api = {
   projectOpen: (id: string): Promise<Project> => ipcRenderer.invoke(CH.projectOpen, id),
   projectCreate: (name: string): Promise<Project> => ipcRenderer.invoke(CH.projectCreate, name),
   projectSave: (project: Project): Promise<Project> => ipcRenderer.invoke(CH.projectSave, project),
+  projectGetCurrent: (): Promise<Project | null> => ipcRenderer.invoke(CH.projectGetCurrent),
   projectImportTemplate: (payload: { name: string; kind?: 'image' | 'video'; apiJson: unknown }) =>
     ipcRenderer.invoke(CH.projectImportTemplate, payload),
 
@@ -68,6 +69,8 @@ const api = {
   }): Promise<{ content: string; changed: boolean }> => ipcRenderer.invoke(CH.aiChat, payload),
 
   mediaDataUrl: (p: string): Promise<string | null> => ipcRenderer.invoke(CH.mediaDataUrl, p),
+  mediaDeleteFile: (p: string): Promise<{ deleted: boolean; reason?: string }> =>
+    ipcRenderer.invoke(CH.mediaDeleteFile, p),
 
   jobGenerate: (params: JobParams) => ipcRenderer.invoke(CH.jobGenerate, params),
   jobList: () => ipcRenderer.invoke(CH.jobList),

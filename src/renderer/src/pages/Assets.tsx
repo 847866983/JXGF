@@ -86,9 +86,12 @@ export default function Assets(): React.JSX.Element {
   }
 
   const handleDelete = async (asset: Asset): Promise<void> => {
+    const files = asset.images
     await persistProject((draft) => {
       draft.assets = draft.assets.filter((a) => a.id !== asset.id)
     })
+    // 删资产后清理磁盘文件（主进程会检查是否被其它资产/分镜引用）
+    for (const f of files) void window.api.mediaDeleteFile(f)
     closeForm()
   }
 
@@ -112,6 +115,8 @@ export default function Assets(): React.JSX.Element {
       if (a.coverFile === img) a.coverFile = a.images[0] ?? null
       a.updatedAt = new Date().toISOString()
     })
+    // 清理磁盘文件（主进程检查是否仍被引用）
+    void window.api.mediaDeleteFile(img)
   }
 
   // 始终用最新项目数据里的资产（生成/改绑定后能实时反映）

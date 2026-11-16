@@ -87,17 +87,21 @@ export class DownloadManager extends EventEmitter {
       }
 
       let total = start
+      let append = start > 0
       if (res.status === 206) {
         const m = /\/(\d+)$/.exec(res.headers.get('content-range') ?? '')
         if (m) total = Number(m[1])
       } else {
+        // 服务器不支持 Range（返回 200 完整文件）：重头写，避免把旧 .part 重复追加导致文件损坏
         const len = Number(res.headers.get('content-length') ?? 0)
-        total = start + (len || 0)
+        total = len || 0
+        append = false
+        start = 0
       }
       this.set(task, { totalBytes: total })
 
       await fsp.mkdir(path.dirname(req.dest), { recursive: true })
-      const ws = fs.createWriteStream(part, { flags: start > 0 ? 'a' : 'w' })
+      const ws = fs.createWriteStream(part, { flags: append ? 'a' : 'w' })
       const reader = (res.body as unknown as ReadableStream<Uint8Array>).getReader()
       let received = start
       for (;;) {
