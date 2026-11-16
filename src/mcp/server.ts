@@ -10,6 +10,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod'
+import path from 'node:path'
 import {
   resolveProjectsDir,
   listProjects,
@@ -22,8 +23,11 @@ import {
   makeShot,
   pickScriptId
 } from './project-api.ts'
+import { listMemory, readMemory, writeMemory, appendMemory } from '../main/core/memory.ts'
+import { memoryFileOf } from '../shared/memory.ts'
 
 const projectsDir = resolveProjectsDir()
+const memoryDirOf = (projectId: string): string => path.join(projectsDir, projectId, 'memory')
 
 const server = new McpServer({ name: 'jingxu-studio', version: '0.1.0' })
 
@@ -305,6 +309,57 @@ server.tool(
       return s
     })
     return ok({ updated: shot })
+  }
+)
+
+// ---------- 记忆库（项目长期记忆）----------
+
+server.tool(
+  'list_memory',
+  '列出项目的记忆库文件（世界观/角色/风格/连续性/决策日志），返回是否已填写',
+  { projectId: z.string() },
+  async ({ projectId }) => {
+    const list = await listMemory(memoryDirOf(projectId))
+    return ok(list)
+  }
+)
+
+server.tool(
+  'read_memory',
+  '读取某类项目记忆的完整内容（AI 开工前应先读，才能"记住"项目设定）',
+  {
+    projectId: z.string(),
+    key: z.enum(['world', 'characters', 'style', 'continuity', 'decisions']).describe('记忆类别')
+  },
+  async ({ projectId, key }) => {
+    const def = memoryFileOf(key)
+    if (!def) throw new Error(`未知记忆类别：${key}`)
+    const content = await readMemory(memoryDirOf(projectId), key)
+    return ok({ key, label: def.label, content: content || '（尚未填写）' })
+  }
+)
+
+server.tool(
+  'write_memory',
+  '覆盖写入某类项目记忆（世界观/角色/风格/连续性）。决策日志请用 append_decision。',
+  {
+    projectId: z.string(),
+    key: z.enum(['world', 'characters', 'style', 'continuity']).describe('记忆类别（不含 decisions）'),
+    content: z.string().describe('完整的 markdown 内容')
+  },
+  async ({ projectId, key, content }) => {
+    await writeMemory(memoryDirOf(projectId), key, content)
+    return ok(`已写入 ${memoryFileOf(key)?.label ?? key}`)
+  }
+)
+
+server.tool(
+  'append_decision',
+  '向决策日志追加一条带时间戳的决策（只追加不覆盖，形成长期历史）',
+  { projectId: z.string(), text: z.string().describe('本次的决定/结论') },
+  async ({ projectId, text }) => {
+    await appendMemory(memoryDirOf(projectId), 'decisions', text)
+    return ok(`已追加决策：${text.slice(0, 60)}`)
   }
 )
 

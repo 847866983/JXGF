@@ -18,6 +18,7 @@ import { DownloadManager } from '../src/main/core/download.ts'
 import { CATALOG, MODEL_CATALOG, resolveCatalog } from '../src/main/core/catalog.ts'
 import { extractArchive } from '../src/main/core/extract.ts'
 import { ProjectStore, uid, now } from '../src/main/core/store.ts'
+import { listMemory, readMemory, writeMemory, appendMemory } from '../src/main/core/memory.ts'
 import { ComfyRuntime } from '../src/main/core/comfy-runtime.ts'
 import { detectWorkflowKind, isUiWorkflow } from '../src/main/core/workflow-convert.ts'
 
@@ -476,6 +477,49 @@ ok('convert：视频工作流识别（含 CSGlide）', () => {
 ok('convert：图片工作流识别', () => {
   assert.equal(detectWorkflowKind({ '1': { class_type: 'KSampler' }, '2': { class_type: 'SaveImage' } }), 'image')
 })
+
+// ---- 记忆库 ----
+const memDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'jxgf-mem-'))
+const memList0 = await listMemory(memDir)
+ok('memory：listMemory 返回 5 类记忆且初始不存在', () => {
+  assert.equal(memList0.length, 5)
+  assert.equal(memList0.every((m) => m.exists === false), true)
+  assert.deepEqual(
+    memList0.map((m) => m.key),
+    ['world', 'characters', 'style', 'continuity', 'decisions']
+  )
+})
+await writeMemory(memDir, 'world', '# 世界观\n\n古代仙侠。')
+const worldRead = await readMemory(memDir, 'world')
+ok('memory：writeMemory 后 readMemory 内容一致', () => {
+  assert.equal(worldRead, '# 世界观\n\n古代仙侠。')
+})
+const memList1 = await listMemory(memDir)
+ok('memory：写入后 world 标记存在', () => {
+  const w = memList1.find((m) => m.key === 'world')
+  assert.equal(w?.exists, true)
+  assert.ok((w?.size ?? 0) > 0)
+})
+await appendMemory(memDir, 'decisions', '第一条决策：主角黑发')
+await appendMemory(memDir, 'decisions', '第二条决策：场景在雨夜')
+const dec = await readMemory(memDir, 'decisions')
+ok('memory：决策日志只追加，两条都在', () => {
+  assert.ok(dec.includes('第一条决策：主角黑发'))
+  assert.ok(dec.includes('第二条决策：场景在雨夜'))
+})
+await writeMemory(memDir, 'world', '# 世界观 v2')
+const bakText = await fsp.readFile(path.join(memDir, 'world.md.bak'), 'utf8')
+ok('memory：覆盖写入保留 .bak 备份', () => {
+  assert.ok(bakText.includes('古代仙侠'))
+})
+let memThrew = false
+try {
+  await readMemory(memDir, 'nope')
+} catch {
+  memThrew = true
+}
+ok('memory：未知 key 报错', () => assert.equal(memThrew, true))
+await fsp.rm(memDir, { recursive: true, force: true })
 
 console.log(`\nselftest: ${pass} passed, ${fail} failed`)
 if (fail > 0) process.exit(1)

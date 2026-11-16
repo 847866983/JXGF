@@ -7,6 +7,7 @@ import Environment from './pages/Environment'
 import Assets from './pages/Assets'
 import Storyboard from './pages/Storyboard'
 import Director from './pages/Director'
+import Memory from './pages/Memory'
 import Queue from './pages/Queue'
 import Settings from './pages/Settings'
 
@@ -44,6 +45,7 @@ export default function App(): React.JSX.Element {
           <Route path="/assets" element={<Assets />} />
           <Route path="/storyboard" element={<Storyboard />} />
           <Route path="/director" element={<Director />} />
+          <Route path="/memory" element={<Memory />} />
           <Route path="/queue" element={<Queue />} />
           <Route path="/settings" element={<Settings />} />
         </Routes>

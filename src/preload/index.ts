@@ -53,6 +53,11 @@ const api = {
   projectImportTemplate: (payload: { name: string; kind?: 'image' | 'video'; apiJson: unknown }) =>
     ipcRenderer.invoke(CH.projectImportTemplate, payload),
 
+  memoryList: (): Promise<import('../shared/memory').MemoryEntry[]> => ipcRenderer.invoke(CH.memoryList),
+  memoryRead: (key: string): Promise<string> => ipcRenderer.invoke(CH.memoryRead, key),
+  memoryWrite: (key: string, content: string): Promise<void> => ipcRenderer.invoke(CH.memoryWrite, key, content),
+  memoryAppend: (key: string, text: string): Promise<void> => ipcRenderer.invoke(CH.memoryAppend, key, text),
+
   jobGenerate: (params: JobParams) => ipcRenderer.invoke(CH.jobGenerate, params),
   jobList: () => ipcRenderer.invoke(CH.jobList),
   jobCancel: (jobId: string) => ipcRenderer.invoke(CH.jobCancel, jobId),

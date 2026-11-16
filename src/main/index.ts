@@ -23,6 +23,7 @@ import { resolveCatalog } from './core/catalog'
 import { extractArchive } from './core/extract'
 import { ComfyRuntime } from './core/comfy-runtime'
 import { isUiWorkflow, convertUiToApi, detectWorkflowKind } from './core/workflow-convert'
+import { listMemory, readMemory, writeMemory, appendMemory } from './core/memory'
 import { Updater } from './core/updater'
 
 let mainWindow: BrowserWindow | null = null
@@ -232,6 +233,24 @@ function registerIpc(): void {
     project.templates.push(template)
     await store.flush()
     return template
+  })
+
+  // ---- 记忆库 ----
+  ipcMain.handle(CH.memoryList, () => {
+    if (!store.getCurrent()) throw new Error('请先打开一个项目')
+    return listMemory(store.memoryDir())
+  })
+  ipcMain.handle(CH.memoryRead, (_e, key: string) => {
+    if (!store.getCurrent()) throw new Error('请先打开一个项目')
+    return readMemory(store.memoryDir(), key)
+  })
+  ipcMain.handle(CH.memoryWrite, (_e, key: string, content: string) => {
+    if (!store.getCurrent()) throw new Error('请先打开一个项目')
+    return writeMemory(store.memoryDir(), key, content)
+  })
+  ipcMain.handle(CH.memoryAppend, (_e, key: string, text: string) => {
+    if (!store.getCurrent()) throw new Error('请先打开一个项目')
+    return appendMemory(store.memoryDir(), key, text)
   })
 
   ipcMain.handle(CH.jobGenerate, (_e, params: JobParams) => jobs.enqueue(params))

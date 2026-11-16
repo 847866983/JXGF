@@ -152,4 +152,15 @@ export class ProjectStore {
     if (!this.current) throw new Error('没有打开的项目')
     return path.join(this.projectRoot(this.current.id), 'media')
   }
+
+  /** 当前项目根目录（project.json 所在目录） */
+  rootDir(): string {
+    if (!this.current) throw new Error('没有打开的项目')
+    return this.projectRoot(this.current.id)
+  }
+
+  /** 当前项目的记忆库目录（memory/） */
+  memoryDir(): string {
+    return path.join(this.rootDir(), 'memory')
+  }
 }

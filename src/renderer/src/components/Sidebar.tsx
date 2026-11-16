@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import {
   Activity,
+  BookOpen,
   Clapperboard,
   Film,
   FolderKanban,
@@ -20,6 +21,7 @@ const items = [
   { to: '/assets', label: '资产管理', icon: FolderKanban },
   { to: '/storyboard', label: '剧本分镜', icon: ListOrdered },
   { to: '/director', label: '导演台', icon: Clapperboard },
+  { to: '/memory', label: '记忆库', icon: BookOpen },
   { to: '/queue', label: '生成队列', icon: Film },
   { to: '/settings', label: '设置', icon: Settings }
 ]
