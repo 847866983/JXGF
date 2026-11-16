@@ -172,7 +172,7 @@ export function AssetGenerateDialog({
         <div>
           <label className="label">{fourView ? '角色描述（会套进四视图模板）' : '正面提示词'}</label>
           <textarea
-            className="field min-h-[80px] resize-y"
+            className="field min-h-[150px] resize-y leading-relaxed"
             value={positive}
             onChange={(e) => setPositive(e.target.value)}
             placeholder={fourView ? '描述这个角色的外形/服装/发型等（默认取资产的 prompt）' : '描述要生成的画面（默认取资产的 prompt）'}
@@ -183,7 +183,7 @@ export function AssetGenerateDialog({
           <div>
             <label className="label">负面提示词（可留空）</label>
             <textarea
-              className="field min-h-[48px] resize-y"
+              className="field min-h-[80px] resize-y leading-relaxed"
               value={negative}
               onChange={(e) => setNegative(e.target.value)}
             />

@@ -76,7 +76,7 @@ export function ShotEditor({
       <div>
         <label className="label">画面描述</label>
         <textarea
-          className="field min-h-[72px] resize-y"
+          className="field min-h-[120px] resize-y leading-relaxed"
           value={description}
           onChange={(e) => setDescription(e.target.value)}
         />
@@ -85,7 +85,7 @@ export function ShotEditor({
       <div>
         <label className="label">视频提示词（详细，用于生成）</label>
         <textarea
-          className="field min-h-[120px] resize-y"
+          className="field min-h-[200px] resize-y leading-relaxed"
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
           placeholder="详细描述要生成的视频画面：主体、动作、镜头、光影、风格等，用于 H3 视频生成"
