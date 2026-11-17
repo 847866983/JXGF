@@ -6,6 +6,7 @@ import { EmptyState, PageHeader } from '../components/ui'
 import { AssetCard } from '../components/AssetCard'
 import { AssetForm, type AssetFormData } from '../components/AssetForm'
 import { AssetGenerateDialog } from '../components/AssetGenerateDialog'
+import { CharacterAssetWizard } from '../components/CharacterAssetWizard'
 import { AssetBatchGenerateDialog } from '../components/AssetBatchGenerateDialog'
 import { MediaImage } from '../components/MediaImage'
 import { NoProject } from '../components/NoProject'
@@ -27,6 +28,7 @@ export default function Assets(): React.JSX.Element {
   const [formOpen, setFormOpen] = useState(false)
   const [editing, setEditing] = useState<Asset | null>(null)
   const [generating, setGenerating] = useState<Asset | null>(null)
+  const [wizardAsset, setWizardAsset] = useState<Asset | null>(null)
   const [batchOpen, setBatchOpen] = useState(false)
 
   if (!project) {
@@ -187,8 +189,13 @@ export default function Assets(): React.JSX.Element {
                 <button
                   className="btn-ghost"
                   onClick={() => {
-                    setGenerating(editingLive)
+                    const a = editingLive
                     setFormOpen(false) // 关掉编辑弹窗，避免被生成弹窗遮挡
+                    if (a.kind === 'character') {
+                      setWizardAsset(a) // 角色资产：三步向导
+                    } else {
+                      setGenerating(a) // 场景 / 道具：沿用旧对话框
+                    }
                   }}
                 >
                   <Image size={15} />
@@ -260,6 +267,19 @@ export default function Assets(): React.JSX.Element {
             // 生成弹窗关闭后，重新打开该资产的编辑弹窗，方便看新生成的图
             const a = generating
             setGenerating(null)
+            setEditing(a)
+            setFormOpen(true)
+          }}
+        />
+      )}
+
+      {wizardAsset && (
+        <CharacterAssetWizard
+          asset={wizardAsset}
+          onClose={() => {
+            // 向导关闭后，重新打开该资产的编辑弹窗，方便看新生成的图
+            const a = wizardAsset
+            setWizardAsset(null)
             setEditing(a)
             setFormOpen(true)
           }}

@@ -15,6 +15,13 @@ import { PRESETS, presetFor } from '../src/main/core/presets.ts'
 import { buildWorkflow, extractH3Chain, injectH3RefImages, injectH3RefVideos } from '../src/main/core/workflow.ts'
 import { ComfyClient } from '../src/main/core/comfy.ts'
 import { collectMediaFiles, collectHistoryFiles, pickFinalMedia } from '../src/main/core/output-files.ts'
+import {
+  pickQwenT2ITemplate,
+  pickQwenEditTemplate,
+  buildCharacterT2IInput,
+  buildCharacterFourViewInput,
+  buildCharacterEditInput
+} from '../src/renderer/src/lib/assetGen.ts'
 import { buildChatUrl, normalizeAiConfig, defaultAiConfig } from '../src/shared/ai.ts'
 import { DownloadManager } from '../src/main/core/download.ts'
 import { CATALOG, MODEL_CATALOG, resolveCatalog } from '../src/main/core/catalog.ts'
@@ -924,6 +931,21 @@ ok('选版：图片任务取最后一个', () => {
   assert.equal(picked[0].filename, 'b.png')
 })
 ok('选版：空输入返回空', () => assert.equal(pickFinalMedia([], 'video').length, 0))
+
+// ---- 角色资产三步流程（千问同模型） ----
+const qTpl = [
+  { id: 't2i', name: 'Qwen-image21-文生图流', kind: 'image', apiJson: {}, mapping: { version: 1 }, createdAt: '', description: '' },
+  { id: 'edit', name: '千问图片编辑(全能编辑)', kind: 'image', apiJson: {}, mapping: { version: 1 }, createdAt: '', description: '' },
+  { id: 'z', name: '01 Z-Image-Turbo', kind: 'image', apiJson: {}, mapping: { version: 1 }, createdAt: '', description: '' }
+]
+const qAsset = { id: 'a', kind: 'character', name: '测试角色', tags: [], description: 'd', prompt: 'p', negative: '', coverFile: null, images: [], versions: [], createdAt: '', updatedAt: '' }
+ok('三步：pickQwenT2ITemplate 选中文生图', () => assert.equal(pickQwenT2ITemplate(qTpl).id, 't2i'))
+ok('三步：pickQwenEditTemplate 选中编辑', () => assert.equal(pickQwenEditTemplate(qTpl).id, 'edit'))
+ok('三步：T2I 不带参考图', () => { const r = buildCharacterT2IInput(qAsset, qTpl); assert.equal(r.templateId, 't2i'); assert.ok(!r.refImages) })
+ok('三步：四视图用编辑模板+参考图', () => { const r = buildCharacterFourViewInput(qAsset, qTpl, undefined, 'ref.png'); assert.equal(r.templateId, 'edit'); assert.deepEqual(r.refImages, ['ref.png']) })
+ok('三步：编辑用编辑模板+参考图+指令', () => { const r = buildCharacterEditInput(qAsset, qTpl, undefined, 'ref.png', '加红围巾'); assert.equal(r.templateId, 'edit'); assert.deepEqual(r.refImages, ['ref.png']); assert.ok(r.positive.includes('红围巾')) })
+ok('三步：缺编辑模板返回 null', () => assert.equal(buildCharacterFourViewInput(qAsset, [qTpl[0]], undefined, 'ref.png'), null))
+ok('三步：编辑空指令返回 null', () => assert.equal(buildCharacterEditInput(qAsset, qTpl, undefined, 'ref.png', '  '), null))
 
 console.log(`\nselftest: ${pass} passed, ${fail} failed`)
 if (fail > 0) process.exit(1)

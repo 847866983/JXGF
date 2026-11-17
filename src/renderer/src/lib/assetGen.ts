@@ -113,6 +113,8 @@ export interface AssetJobInput {
   width: number
   height: number
   batch: number
+  /** 参考图（图片编辑/图生图/转四视图用） */
+  refImages?: string[]
 }
 
 const FOUR_VIEW_W = 1536
@@ -142,5 +144,85 @@ export function buildAssetJobInput(asset: Asset, templates: Template[], styleId?
     width: 1024,
     height: 1024,
     batch: 1
+  }
+}
+
+// ---------- 角色资产生成三步流程（千问同模型：文生图 → 转四视图 / 图片编辑） ----------
+
+/** 千问文生图模板 */
+export function pickQwenT2ITemplate(templates: Template[]): Template | undefined {
+  const imgs = templates.filter((t) => t.kind === 'image')
+  return (
+    imgs.find((t) => /Qwen-image21-文生图|qwen_image_2_1_t2i/i.test(t.name)) ||
+    imgs.find((t) => /Qwen/i.test(t.name) && /文生图|t2i/i.test(t.name))
+  )
+}
+
+/** 千问图片编辑模板（CSGlideImageCastCS，支持参考图） */
+export function pickQwenEditTemplate(templates: Template[]): Template | undefined {
+  const imgs = templates.filter((t) => t.kind === 'image')
+  return (
+    imgs.find((t) => /千问图片编辑|全能编辑/i.test(t.name)) ||
+    imgs.find((t) => /Qwen/i.test(t.name) && /编辑|edit/i.test(t.name))
+  )
+}
+
+/** 步骤1：文生图生成角色单图（不带参考图） */
+export function buildCharacterT2IInput(asset: Asset, templates: Template[], styleId?: string): AssetJobInput | null {
+  const template = pickQwenT2ITemplate(templates)
+  if (!template) return null
+  const style = getStyle(styleId)
+  const desc = asset.prompt || asset.description || asset.name || ''
+  return {
+    templateId: template.id,
+    positive: styledPositive(desc, styleId),
+    negative: [style.negative, asset.negative].filter(Boolean).join(', ') || undefined,
+    width: 1024,
+    height: 1024,
+    batch: 1
+  }
+}
+
+/** 步骤2a：满意 → 用千问编辑+参考图 转四视图 */
+export function buildCharacterFourViewInput(
+  asset: Asset,
+  templates: Template[],
+  styleId: string | undefined,
+  refImage: string
+): AssetJobInput | null {
+  const template = pickQwenEditTemplate(templates)
+  if (!template || !refImage) return null
+  const desc = asset.prompt || asset.description || asset.name || ''
+  return {
+    templateId: template.id,
+    positive: buildFourViewPositive(desc, styleId),
+    negative: fourViewNegative(styleId),
+    width: FOUR_VIEW_W,
+    height: FOUR_VIEW_H,
+    batch: 1,
+    refImages: [refImage]
+  }
+}
+
+/** 步骤2b：不满意 → 用千问编辑+参考图 按指令修改（画布跟随参考图，width/height=0） */
+export function buildCharacterEditInput(
+  asset: Asset,
+  templates: Template[],
+  styleId: string | undefined,
+  refImage: string,
+  editPrompt: string
+): AssetJobInput | null {
+  const template = pickQwenEditTemplate(templates)
+  if (!template || !refImage) return null
+  const prompt = (editPrompt || '').trim()
+  if (!prompt) return null
+  return {
+    templateId: template.id,
+    positive: styledPositive(prompt, styleId),
+    negative: fourViewNegative(styleId),
+    width: 0,
+    height: 0,
+    batch: 1,
+    refImages: [refImage]
   }
 }
