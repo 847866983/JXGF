@@ -14,7 +14,7 @@ import { promisify } from 'node:util'
 import { PRESETS, presetFor } from '../src/main/core/presets.ts'
 import { buildWorkflow, extractH3Chain, injectH3RefImages, injectH3RefVideos } from '../src/main/core/workflow.ts'
 import { ComfyClient } from '../src/main/core/comfy.ts'
-import { collectMediaFiles, collectHistoryFiles, pickFinalMedia } from '../src/main/core/output-files.ts'
+import { collectMediaFiles, collectHistoryFiles, pickFinalMedia, sanitizeOutputName } from '../src/main/core/output-files.ts'
 import {
   pickQwenT2ITemplate,
   pickQwenEditTemplate,
@@ -22,6 +22,7 @@ import {
   buildCharacterFourViewInput,
   buildCharacterEditInput,
   buildFourViewPositive,
+  filterRenderableVersions,
   fourViewNegative
 } from '../src/renderer/src/lib/assetGen.ts'
 import { buildChatUrl, normalizeAiConfig, defaultAiConfig } from '../src/shared/ai.ts'
@@ -980,6 +981,29 @@ ok('四视图：编辑模板输入带上投影负词', () => {
   const r = buildCharacterFourViewInput(qAsset, qTpl, undefined, 'ref.png')
   assert.ok(/cast shadow/.test(r.negative), '四视图输入未带投影负词')
 })
+
+// ---- 版本列表 ----
+ok('版本：过滤空值并去重', () => {
+  const v = filterRenderableVersions(['a.png', '', 'a.png', 'b.png'])
+  assert.deepEqual(v, ['a.png', 'b.png'])
+})
+ok('版本：undefined 返回空数组', () => assert.deepEqual(filterRenderableVersions(undefined), []))
+
+// ---- 输出文件名清理（Windows 非法字符导致"生成没反应"） ----
+ok('文件名：%date:...% 占位符展开且无冒号', () => {
+  const n = sanitizeOutputName('QW21-%date:yyyyMMddhhmmss%_00001_.png')
+  assert.ok(!n.includes(':'), '仍含冒号: ' + n)
+  assert.ok(/_00001_\.png$/.test(n), '后缀丢失: ' + n)
+})
+ok('文件名：展开后含时间数字', () => {
+  const n = sanitizeOutputName('A-%date:yyyyMMdd%-B', new Date(2026, 10, 17, 9, 8, 7))
+  assert.ok(n.includes('20261117'), n)
+})
+ok('文件名：非法字符替换为下划线', () => {
+  const n = sanitizeOutputName('a<b>c:d"e/f\\g|h?i*j.png')
+  assert.ok(!/[<>:"/\\|?*]/.test(n), n)
+})
+ok('文件名：空名兜底', () => assert.equal(sanitizeOutputName(''), 'output'))
 
 console.log(`\nselftest: ${pass} passed, ${fail} failed`)
 if (fail > 0) process.exit(1)

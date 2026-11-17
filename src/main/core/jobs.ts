@@ -1,10 +1,19 @@
 import path from 'node:path'
+async function pathExists(p: string): Promise<boolean> {
+  try {
+    await fsp.access(p)
+    return true
+  } catch {
+    return false
+  }
+}
+
 import fsp from 'node:fs/promises'
 import type { ComfySettings, JobInfo, JobParams, JobStatus, ShotOutput, Template } from '@shared/types'
 import { ComfyClient, makeClient } from './comfy'
 import { buildWorkflow, extractH3Chain, injectH3RefImages, injectH3RefVideos } from './workflow'
 import { uid, now, ProjectStore } from './store'
-import { collectMediaFiles, collectHistoryFiles, pickFinalMedia, type MediaFile } from './output-files'
+import { collectMediaFiles, collectHistoryFiles, pickFinalMedia, sanitizeOutputName, type MediaFile } from './output-files'
 
 interface QueuedJob {
   info: JobInfo
@@ -290,9 +299,18 @@ export class JobManager {
           const media = this.store.mediaDir()
           const outputs: ShotOutput[] = []
           for (const f of finalFiles.slice(0, 12)) {
-            const ext = path.extname(f.filename).slice(1).toLowerCase()
+            const safeName = sanitizeOutputName(f.filename)
+            const ext = path.extname(safeName).slice(1).toLowerCase()
             const outKind: ShotOutput['kind'] = ['mp4', 'webm', 'mov'].includes(ext) || f.type === 'output' ? 'video' : 'image'
-            const dest = path.join(media, f.filename)
+            // 目标文件已存在时加序号，避免同名覆盖导致"新版本没出现"
+            let dest = path.join(media, safeName)
+            if (await pathExists(dest)) {
+              const base = path.basename(safeName, path.extname(safeName))
+              const suffix = path.extname(safeName)
+              let i = 2
+              while (await pathExists(path.join(media, `${base}_v${i}${suffix}`))) i++
+              dest = path.join(media, `${base}_v${i}${suffix}`)
+            }
             // BanZhang 节点给的是本地绝对路径(src_path)，优先直接复制；中文文件名也可靠
             if (f.src_path) {
               try {

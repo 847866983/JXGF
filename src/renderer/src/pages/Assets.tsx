@@ -30,6 +30,7 @@ export default function Assets(): React.JSX.Element {
   const [generating, setGenerating] = useState<Asset | null>(null)
   const [wizardAsset, setWizardAsset] = useState<Asset | null>(null)
   const [batchOpen, setBatchOpen] = useState(false)
+  const [query, setQuery] = useState('')
 
   if (!project) {
     return (
@@ -43,9 +44,24 @@ export default function Assets(): React.JSX.Element {
   }
 
   const assets = project.assets
-  const filtered = filter === 'all' ? assets : assets.filter((a) => a.kind === filter)
+  const byKind = filter === 'all' ? assets : assets.filter((a) => a.kind === filter)
+  const q = query.trim().toLowerCase()
+  const filtered = q
+    ? byKind.filter(
+        (a) =>
+          a.name.toLowerCase().includes(q) ||
+          (a.description ?? '').toLowerCase().includes(q) ||
+          (a.prompt ?? '').toLowerCase().includes(q) ||
+          (a.alias ?? '').toLowerCase().includes(q) ||
+          (a.tags ?? []).some((t) => t.toLowerCase().includes(q))
+      )
+    : byKind
   const countOf = (f: Filter): number =>
     f === 'all' ? assets.length : assets.filter((a) => a.kind === f).length
+
+  /** 取 store 里的最新资产（避免重开弹窗时用到过期快照） */
+  const freshAsset = (id: string): Asset | null =>
+    useApp.getState().project?.assets.find((a) => a.id === id) ?? null
 
   const openCreate = (): void => {
     setEditing(null)
@@ -55,6 +71,15 @@ export default function Assets(): React.JSX.Element {
   const openEdit = (asset: Asset): void => {
     setEditing(asset)
     setFormOpen(true)
+  }
+
+  /** 点卡片：角色 → 角色工作台（大图预览）；其余 → 编辑弹窗 */
+  const openAsset = (asset: Asset): void => {
+    if (asset.kind === 'character') {
+      setWizardAsset(asset)
+    } else {
+      openEdit(asset)
+    }
   }
 
   const closeForm = (): void => {
@@ -145,27 +170,43 @@ export default function Assets(): React.JSX.Element {
       />
 
       <div className="px-8 pb-8">
-        <div className="mb-4 flex w-fit items-center gap-1 rounded-lg border border-white/5 bg-ink-900 p-1">
-          {tabs.map((t) => (
-            <button
-              key={t.id}
-              onClick={() => setFilter(t.id)}
-              className={`rounded-md px-3 py-1.5 text-sm transition-colors ${
-                filter === t.id ? 'bg-accent-600/20 text-accent-400' : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              {t.label}
-              <span className="ml-1.5 text-xs text-slate-500">{countOf(t.id)}</span>
-            </button>
-          ))}
+        <div className="mb-4 flex items-center justify-between gap-3">
+          <div className="flex w-fit items-center gap-1 rounded-lg border border-white/5 bg-ink-900 p-1">
+            {tabs.map((t) => (
+              <button
+                key={t.id}
+                onClick={() => setFilter(t.id)}
+                className={`rounded-md px-3 py-1.5 text-sm transition-colors ${
+                  filter === t.id ? 'bg-accent-600/20 text-accent-400' : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                {t.label}
+                <span className="ml-1.5 text-xs text-slate-500">{countOf(t.id)}</span>
+              </button>
+            ))}
+          </div>
+          <input
+            className="field max-w-[240px]"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="搜索名称 / 标签 / 描述…"
+          />
         </div>
 
         {filtered.length === 0 ? (
-          <EmptyState title="没有资产" desc="点击右上角「新建资产」创建角色 / 场景 / 道具" />
+          <EmptyState
+            title={q ? '没有匹配的资产' : '没有资产'}
+            desc={q ? '换个关键词试试' : '点击右上角「新建资产」创建角色 / 场景 / 道具'}
+          />
         ) : (
           <div className="grid grid-cols-2 gap-4 xl:grid-cols-3 2xl:grid-cols-4">
             {filtered.map((asset) => (
-              <AssetCard key={asset.id} asset={asset} onClick={() => openEdit(asset)} />
+              <AssetCard
+                key={asset.id}
+                asset={asset}
+                onClick={() => openAsset(asset)}
+                onEdit={asset.kind === 'character' ? () => openEdit(asset) : undefined}
+              />
             ))}
           </div>
         )}
@@ -264,11 +305,13 @@ export default function Assets(): React.JSX.Element {
         <AssetGenerateDialog
           asset={generating}
           onClose={() => {
-            // 生成弹窗关闭后，重新打开该资产的编辑弹窗，方便看新生成的图
-            const a = generating
+            // 生成弹窗关闭后，用最新资产重开编辑弹窗（避免旧快照）
+            const fresh = freshAsset(generating.id)
             setGenerating(null)
-            setEditing(a)
-            setFormOpen(true)
+            if (fresh) {
+              setEditing(fresh)
+              setFormOpen(true)
+            }
           }}
         />
       )}
@@ -277,11 +320,13 @@ export default function Assets(): React.JSX.Element {
         <CharacterAssetWizard
           asset={wizardAsset}
           onClose={() => {
-            // 向导关闭后，重新打开该资产的编辑弹窗，方便看新生成的图
-            const a = wizardAsset
+            // 工作台关闭后，用最新资产重开编辑弹窗，提示词/图片都是最新的
+            const fresh = freshAsset(wizardAsset.id)
             setWizardAsset(null)
-            setEditing(a)
-            setFormOpen(true)
+            if (fresh) {
+              setEditing(fresh)
+              setFormOpen(true)
+            }
           }}
         />
       )}

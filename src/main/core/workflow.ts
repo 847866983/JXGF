@@ -1,4 +1,5 @@
 import type { Template, UpscaleSettings, RifeSettings } from '@shared/types'
+import { sanitizeOutputName } from './output-files.ts'
 
 export interface WorkflowParams {
   positive?: string
@@ -440,6 +441,17 @@ export function buildWorkflow(template: Template, params: WorkflowParams): unkno
       }
     }
     return clone
+  }
+
+  // 图片输出文件名清理：模板前缀常含 %date:yyyyMMddhhmmss%（冒号在 Windows 非法），
+  // 会导致写盘失败 + 每次生成同名 → 资产图库永远不增加新版本。
+  for (const node of Object.values(clone)) {
+    const ct = String(node.class_type)
+    if (!/^(SaveImage|SaveImageAdvanced|PreviewImage)$/i.test(ct)) continue
+    const prefix = node.inputs.filename_prefix
+    if (typeof prefix === 'string' && /%|[:*?"<>|]/.test(prefix)) {
+      node.inputs.filename_prefix = sanitizeOutputName(prefix)
+    }
   }
 
   // ---- 通用（非 H3）路径 ----

@@ -42,6 +42,51 @@ export function collectHistoryFiles(outputs: unknown): MediaFile[] {
   return files
 }
 
+/** 按 .NET 风格格式串（yyyyMMddHHmmss 等）格式化时间 */
+function formatStamp(fmt: string, d = new Date()): string {
+  const p2 = (n: number): string => String(n).padStart(2, '0')
+  return fmt
+    .replace(/yyyy/g, String(d.getFullYear()))
+    .replace(/MM/g, p2(d.getMonth() + 1))
+    .replace(/dd/g, p2(d.getDate()))
+    .replace(/HH/g, p2(d.getHours()))
+    .replace(/hh/g, p2(d.getHours()))
+    .replace(/mm/g, p2(d.getMinutes()))
+    .replace(/ss/g, p2(d.getSeconds()))
+    .replace(/fff/g, String(d.getMilliseconds()).padStart(3, '0'))
+}
+
+/**
+ * 规范化产出文件名，避免 Windows 非法字符导致写盘失败。
+ *
+ * 关键问题：BanZhang/千问模板的 SaveImage 前缀常带 `%date:yyyyMMddhhmmss%`，
+ * 其中的冒号在 Windows 上是非法文件名字符 —— ComfyUI 展开后写盘失败（只留 0 字节文件），
+ * 且每次生成的"文件名"完全相同，资产图库去重后永远不增加新版本，
+ * 表现为「点了生成没反应」。
+ */
+export function sanitizeOutputName(name: string, d = new Date()): string {
+  let n = String(name ?? '')
+  // 展开 ComfyUI 的日期/时间占位符（它们的格式串里带冒号）
+  n = n.replace(/%date:([^%]*)%/gi, (_m, f: string) => formatStamp(f || 'yyyyMMddHHmmss', d))
+  n = n.replace(/%time:([^%]*)%/gi, (_m, f: string) => formatStamp(f || 'HHmmss', d))
+  // 其它未知占位符直接去掉，避免残留非法字符
+  n = n.replace(/%[A-Za-z_]+:[^%]*%/g, '')
+  // Windows 非法字符 -> 下划线
+  n = n.replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_')
+  n = n.replace(/\s+/g, ' ').trim()
+  n = n.replace(/^\.+/, '')
+  return n || 'output'
+}
+
+/** 规范化完整相对路径（逐段处理，保留 / 分隔与子目录） */
+export function sanitizeOutputPath(relPath: string, d = new Date()): string {
+  const parts = String(relPath ?? '')
+    .split(/[\\/]+/)
+    .filter(Boolean)
+    .map((seg) => sanitizeOutputName(seg, d))
+  return parts.join('/')
+}
+
 /**
  * 从多个产物里挑「最终清晰版」。
  * H3 三采工作流依次产出 一采/二采/三采，必须选三采；

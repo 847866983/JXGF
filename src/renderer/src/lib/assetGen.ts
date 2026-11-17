@@ -153,6 +153,19 @@ export function buildAssetJobInput(asset: Asset, templates: Template[], styleId?
 
 // ---------- 角色资产生成三步流程（千问同模型：文生图 → 转四视图 / 图片编辑） ----------
 
+/** 过滤出可用于展示的版本图（去空、去重，保持生成顺序） */
+export function filterRenderableVersions(images: string[] | undefined): string[] {
+  const out: string[] = []
+  const seen = new Set<string>()
+  for (const f of images ?? []) {
+    if (typeof f !== 'string' || !f.trim()) continue
+    if (seen.has(f)) continue
+    seen.add(f)
+    out.push(f)
+  }
+  return out
+}
+
 /** 千问文生图模板 */
 export function pickQwenT2ITemplate(templates: Template[]): Template | undefined {
   const imgs = templates.filter((t) => t.kind === 'image')

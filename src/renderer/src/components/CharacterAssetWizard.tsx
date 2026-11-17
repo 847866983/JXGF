@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { Check, Loader2, Pencil, RefreshCw, ScanFace, Wand2 } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { Check, ImagePlus, Loader2, Pencil, Save, ScanFace, Trash2, Wand2 } from 'lucide-react'
 import type { Asset, JobInfo } from '@shared/types'
 import { useApp } from '../store/app'
 import { Modal } from './Modal'
@@ -11,72 +11,103 @@ import {
   buildCharacterT2IInput,
   buildCharacterFourViewInput,
   buildCharacterEditInput,
+  filterRenderableVersions,
   type AssetJobInput
 } from '../lib/assetGen'
 
-type Step = 't2i' | 'branch' | 'result'
-type JobOutcome = 'done' | 'failed' | 'timeout'
+const JOB_TIMEOUT_MS = 15 * 60 * 1000
+const POLL_INTERVAL_MS = 2000
 
-const JOB_TIMEOUT_MS = 10 * 60 * 1000
-const POLL_INTERVAL_MS = 3000
-
-/**
- * 角色资产生成三步向导：
- *   1) 生成形象（千问文生图）→ 得到角色正面形象
- *   2) 满意 → 转四视图；不满意 → 编辑修改
- *   3) 预览结果 → 设为角色图（coverFile），编辑分支可继续编辑 / 转四视图
- * 每步产物由主进程自动追加进 asset.images，向导内展示历史缩略图可选。
- */
-
-async function waitForJob(jobId: string, onProgress?: (pct: number) => void): Promise<JobOutcome> {
+/** 轮询任务状态；任务不存在时也继续等（可能尚未登记），超时返回 timeout */
+async function waitForJob(jobId: string, onTick?: (pct: number) => void): Promise<'done' | 'failed' | 'timeout'> {
   const started = Date.now()
   for (;;) {
-    const jobs: JobInfo[] = await window.api.jobList()
-    const job = jobs.find((j) => j.id === jobId)
-    if (job) {
-      onProgress?.(job.progress ?? 0)
-      if (job.status === 'done') return 'done'
-      if (job.status === 'failed' || job.status === 'cancelled') return 'failed'
+    try {
+      const jobs: JobInfo[] = await window.api.jobList()
+      const job = jobs.find((j) => j.id === jobId)
+      if (job) {
+        onTick?.(job.progress ?? 0)
+        if (job.status === 'done') return 'done'
+        if (job.status === 'failed' || job.status === 'cancelled') return 'failed'
+      }
+    } catch {
+      // 单次读失败忽略，继续轮询
     }
     if (Date.now() - started > JOB_TIMEOUT_MS) return 'timeout'
-    await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS))
+    await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS))
   }
 }
 
-export function CharacterAssetWizard({
-  asset,
-  onClose
-}: {
-  asset: Asset
-  onClose: () => void
-}): React.JSX.Element {
+/**
+ * 角色资产工作台：
+ *   大图预览 → 可编辑提示词（可保存）→ 生成新版（每版都保留，可删除）
+ *   → 选一版做局部编辑 → 确认后转四视图 → 设为角色绑定图
+ */
+export function CharacterAssetWizard({ asset, onClose }: { asset: Asset; onClose: () => void }): React.JSX.Element {
   const project = useApp((s) => s.project)
+  const projectId = project?.id
 
-  const [prompt, setPrompt] = useState(asset.prompt || asset.description || '')
-  const [step, setStep] = useState<Step>('t2i')
-  const [currentImage, setCurrentImage] = useState<string | null>(null)
-  const [lastWasEdit, setLastWasEdit] = useState(false)
-  const [editingOpen, setEditingOpen] = useState(false)
+  /** 始终读 store 里的最新资产，避免拿到过期快照 */
+  const live = useMemo(
+    () => useApp.getState().project?.assets.find((a) => a.id === asset.id) ?? asset,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [project, asset.id]
+  )
+
+  const templates = project?.templates ?? []
+  const versions = filterRenderableVersions(live.images)
+
+  const [prompt, setPrompt] = useState(live.prompt || live.description || '')
+  const [dirty, setDirty] = useState(false)
+  const [selected, setSelected] = useState<string | null>(live.coverFile ?? versions[versions.length - 1] ?? null)
+  const [editOpen, setEditOpen] = useState(false)
   const [editPrompt, setEditPrompt] = useState('')
-  const [busyLabel, setBusyLabel] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [status, setStatus] = useState<string | null>(null)
   const [progress, setProgress] = useState(0)
   const [error, setError] = useState<string | null>(null)
 
-  const templates = project?.templates ?? []
-  const projectId = project?.id
-  const historyImages = project?.assets.find((a) => a.id === asset.id)?.images ?? asset.images
+  // 资产提示词在别处（编辑弹窗）改动后，同步回输入框（用户正在编辑时不覆盖）
+  useEffect(() => {
+    if (dirty) return
+    setPrompt(live.prompt || live.description || '')
+  }, [live.prompt, live.description, dirty])
 
-  const latestImages = (): string[] => {
-    const a = useApp.getState().project?.assets.find((x) => x.id === asset.id)
-    return a?.images ?? asset.images
+  // 新版本产生后自动选中最新一版
+  useEffect(() => {
+    if (versions.length === 0) return
+    setSelected((cur) => (cur && versions.includes(cur) ? cur : versions[versions.length - 1]))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [versions.join('|')])
+
+  /** 保存提示词到资产（并刷新项目，让编辑弹窗也看到新提示词） */
+  const savePrompt = async (): Promise<void> => {
+    const text = prompt.trim()
+    if (!text) {
+      setError('提示词不能为空')
+      return
+    }
+    await persistProject((draft) => {
+      const a = draft.assets.find((x) => x.id === asset.id)
+      if (a) {
+        a.prompt = text
+        a.updatedAt = new Date().toISOString()
+      }
+    })
+    setDirty(false)
+    if (projectId) await useApp.getState().openProject(projectId)
+    setStatus('提示词已保存')
+    window.setTimeout(() => setStatus(null), 2000)
   }
 
-  /** 提交一个资产生图任务并等待完成；成功返回该步产出的最新一张图 */
-  const runJob = async (
-    input: AssetJobInput | null,
+  /** 提交生成任务：立刻给出「已提交」反馈，再轮询结果 */
+  const submit = async (
+    build: () => AssetJobInput | null,
     label: string,
     missingMsg: string
   ): Promise<string | null> => {
+    if (busy) return null
+    const input = build()
     if (!input) {
       setError(missingMsg)
       return null
@@ -85,9 +116,11 @@ export function CharacterAssetWizard({
       setError('项目未打开')
       return null
     }
-    setBusyLabel(label)
+    setBusy(true)
     setError(null)
     setProgress(0)
+    setStatus(`正在提交「${label}」…`)
+    const before = new Set(useApp.getState().project?.assets.find((a) => a.id === asset.id)?.images ?? [])
     try {
       const job = await window.api.jobGenerate({
         projectId,
@@ -100,141 +133,113 @@ export function CharacterAssetWizard({
         batch: input.batch,
         refImages: input.refImages && input.refImages.length > 0 ? input.refImages : undefined
       })
+      setStatus(`已提交「${label}」，等待生成…（任务 ${job.id.slice(-6)}）`)
       const outcome = await waitForJob(job.id, setProgress)
       if (outcome !== 'done') {
         setError(
           outcome === 'timeout'
-            ? '生成超时（超过 10 分钟），请到「生成队列」查看进度'
-            : '生成失败，请到「生成队列」查看错误信息'
+            ? `「${label}」超时（超过 15 分钟），请到「生成队列」查看`
+            : `「${label}」失败，请到「生成队列」查看错误`
         )
         return null
       }
       await useApp.getState().openProject(projectId)
-      const imgs = latestImages()
-      return imgs[imgs.length - 1] ?? null
+      const after = useApp.getState().project?.assets.find((a) => a.id === asset.id)?.images ?? []
+      const added = after.filter((f) => !before.has(f))
+      const newest = added[added.length - 1] ?? after[after.length - 1] ?? null
+      if (!newest) {
+        setError('生成完成但没有拿到产物，请重试')
+        return null
+      }
+      setSelected(newest)
+      setStatus(null)
+      return newest
     } catch (err) {
-      setError(String((err as Error).message ?? err))
+      setError(String((err as Error)?.message ?? err))
       return null
     } finally {
-      setBusyLabel(null)
+      setBusy(false)
       setProgress(0)
     }
   }
 
-  const generateT2I = async (): Promise<void> => {
-    const img = await runJob(
-      // 步骤1 的提示词可编辑：把编辑后的文本作为 asset.prompt 传入（lib 内部取 prompt||description||name）
-      buildCharacterT2IInput({ ...asset, prompt: prompt.trim() }, templates),
-      '正在生成角色形象…',
-      '缺少千问文生图模板，请先在「设置 → 导入工作流」导入千问文生图模板'
-    )
-    if (img) {
-      setCurrentImage(img)
-      setLastWasEdit(false)
-      setEditingOpen(false)
-      setStep('branch')
+  const generateNew = async (): Promise<void> => {
+    // 点生成视为确认使用当前提示词：未保存就先落盘，避免"改了提示词但资产里还是旧的"
+    if (dirty) {
+      try {
+        await savePrompt()
+      } catch {
+        // 保存失败不阻断生成，仅提示
+        setError('提示词保存失败，但会用当前内容生成')
+      }
     }
-  }
-
-  const toFourView = async (): Promise<void> => {
-    if (!currentImage) return
-    const img = await runJob(
-      buildCharacterFourViewInput(asset, templates, undefined, currentImage),
-      '正在生成四视图…',
-      '缺少千问编辑模板（转四视图需要「全能编辑」工作流 + 参考图）'
+    const img = await submit(
+      () => buildCharacterT2IInput({ ...live, prompt: prompt.trim() }, templates),
+      '生成形象',
+      '缺少千问文生图模板，请先在「设置 → 导入工作流」导入千问文生图'
     )
-    if (img) {
-      setCurrentImage(img)
-      setLastWasEdit(false)
-      setEditingOpen(false)
-      setStep('result')
-    }
+    if (img) setEditOpen(false)
   }
 
   const applyEdit = async (): Promise<void> => {
-    if (!currentImage) return
     const instruction = editPrompt.trim()
+    if (!selected) return
     if (!instruction) {
       setError('请先填写修改指令')
       return
     }
-    const img = await runJob(
-      buildCharacterEditInput(asset, templates, undefined, currentImage, instruction),
-      '正在按指令修改…',
-      '缺少千问编辑模板，请先在「设置 → 导入工作流」导入千问「全能编辑」工作流'
+    const img = await submit(
+      () => buildCharacterEditInput(live, templates, undefined, selected, instruction),
+      '局部编辑',
+      '缺少千问「全能编辑」工作流模板'
     )
     if (img) {
-      setCurrentImage(img)
-      setLastWasEdit(true)
-      setEditingOpen(false)
-      setStep('result')
+      setEditOpen(false)
+      setEditPrompt('')
     }
   }
 
-  const setCover = async (): Promise<void> => {
-    if (!currentImage) return
+  const toFourView = async (): Promise<void> => {
+    if (!selected) return
+    await submit(
+      () => buildCharacterFourViewInput(live, templates, undefined, selected),
+      '转四视图',
+      '缺少千问「全能编辑」工作流模板（转四视图需要它 + 参考图）'
+    )
+  }
+
+  const removeVersion = async (img: string): Promise<void> => {
+    await persistProject((draft) => {
+      const a = draft.assets.find((x) => x.id === asset.id)
+      if (!a) return
+      a.images = a.images.filter((x) => x !== img)
+      if (a.coverFile === img) a.coverFile = a.images[0] ?? null
+      a.updatedAt = new Date().toISOString()
+    })
+    void window.api.mediaDeleteFile(img)
+    if (projectId) await useApp.getState().openProject(projectId)
+    setSelected((cur) => (cur === img ? null : cur))
+  }
+
+  const useAsCover = async (img: string): Promise<void> => {
     await persistProject((draft) => {
       const a = draft.assets.find((x) => x.id === asset.id)
       if (a) {
-        a.coverFile = currentImage
+        a.coverFile = img
         a.updatedAt = new Date().toISOString()
       }
     })
-    onClose()
+    if (projectId) await useApp.getState().openProject(projectId)
+    setStatus('已设为角色绑定图')
+    window.setTimeout(() => setStatus(null), 2000)
   }
 
-  const pickHistory = (img: string): void => {
-    setCurrentImage(img)
-    setLastWasEdit(false)
-    setEditingOpen(false)
-    setError(null)
-    setStep('branch')
-  }
-
-  const busy = busyLabel !== null
-
-  const historyStrip = (): React.JSX.Element => (
-    <div>
-      <div className="mb-1.5 text-xs text-slate-500">历史图（点选作为当前形象继续下一步）</div>
-      {historyImages.length === 0 ? (
-        <div className="rounded-lg bg-white/[0.03] px-3 py-2 text-[11px] text-slate-500">
-          还没有生成记录。
-        </div>
-      ) : (
-        <div className="grid max-h-[120px] grid-cols-6 gap-1.5 overflow-y-auto rounded-lg border border-white/5 bg-white/[0.02] p-2">
-          {historyImages.map((img) => (
-            <button
-              key={img}
-              type="button"
-              title={img}
-              onClick={() => pickHistory(img)}
-              className={`relative aspect-square overflow-hidden rounded border ${
-                currentImage === img
-                  ? 'border-accent-500 ring-1 ring-accent-500'
-                  : 'border-white/10 hover:border-white/30'
-              }`}
-            >
-              <MediaImage
-                src={img}
-                alt=""
-                className="h-full w-full object-cover"
-                fallback={<div className="h-full w-full bg-ink-800" />}
-              />
-              {currentImage === img && (
-                <span className="absolute right-0.5 top-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-accent-600 text-[10px] text-white">
-                  ✓
-                </span>
-              )}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  )
+  const hasT2I = Boolean(pickQwenT2ITemplate(templates))
+  const hasEdit = Boolean(pickQwenEditTemplate(templates))
 
   return (
     <Modal
-      title={`为「${asset.name}」生成角色形象`}
+      title={`角色资产 · ${live.name}`}
       onClose={onClose}
       footer={
         <button className="btn-ghost" onClick={onClose}>
@@ -243,180 +248,174 @@ export function CharacterAssetWizard({
       }
     >
       <div className="space-y-4">
-        {/* 步骤指示 */}
-        <div className="flex items-center gap-2 text-xs">
-          {(['t2i', 'branch', 'result'] as Step[]).map((s, i) => {
-            const active = step === s
-            const done = (s === 't2i' && (step === 'branch' || step === 'result')) || (s === 'branch' && step === 'result')
-            return (
-              <div key={s} className="flex items-center gap-2">
-                <span
-                  className={`flex h-5 w-5 items-center justify-center rounded-full text-[11px] ${
-                    active
-                      ? 'bg-accent-600 text-white'
-                      : done
-                        ? 'bg-emerald-500/20 text-emerald-400'
-                        : 'bg-white/5 text-slate-500'
-                  }`}
-                >
-                  {i + 1}
-                </span>
-                <span className={active ? 'text-slate-200' : 'text-slate-500'}>
-                  {s === 't2i' ? '生成形象' : s === 'branch' ? '四视图 / 编辑' : '设为角色图'}
-                </span>
-                {i < 2 && <span className="mx-1 text-slate-700">→</span>}
-              </div>
-            )
-          })}
+        {/* 1. 大图预览 */}
+        <div className="overflow-hidden rounded-xl border border-white/10 bg-ink-950">
+          {selected ? (
+            <MediaImage
+              src={selected}
+              alt="当前角色图"
+              className="max-h-[420px] w-full object-contain"
+              fallback={
+                <div className="flex h-52 w-full items-center justify-center text-sm text-slate-600">图片加载失败</div>
+              }
+            />
+          ) : (
+            <div className="flex h-52 w-full flex-col items-center justify-center gap-2 text-sm text-slate-600">
+              <ImagePlus size={28} />
+              还没有生成图，先在下面填提示词并生成
+            </div>
+          )}
         </div>
 
-        {/* 步骤 1：生成形象 */}
-        {(step === 't2i' || step === 'branch') && (
-          <div className="space-y-3">
-            <div>
-              <label className="label">形象描述（默认取资产的 prompt）</label>
-              <textarea
-                className="field min-h-[120px] resize-y leading-relaxed"
-                value={prompt}
-                onChange={(e) => setPrompt(e.target.value)}
-                placeholder="描述这个角色的外形 / 服装 / 发型等"
-              />
-            </div>
-            <button className="btn-primary w-full" disabled={busy || !prompt.trim()} onClick={() => void generateT2I()}>
-              <Wand2 size={15} />
-              {busy && step === 't2i' ? busyLabel : '生成形象'}
-            </button>
-          </div>
-        )}
-
-        {/* 步骤 2：分支选择（有当前形象后） */}
-        {step === 'branch' && currentImage && (
-          <div className="space-y-3">
-            <div className="overflow-hidden rounded-lg border border-white/5">
-              <MediaImage
-                src={currentImage}
-                alt="当前形象"
-                className="max-h-[280px] w-full object-contain bg-ink-950"
-                fallback={<div className="flex h-40 w-full items-center justify-center bg-ink-950 text-slate-600">无预览</div>}
-              />
-            </div>
-
-            {!editingOpen ? (
-              <div className="grid grid-cols-2 gap-2">
-                <button className="btn-primary" disabled={busy} onClick={() => void toFourView()}>
-                  <ScanFace size={15} />
-                  满意，转四视图
-                </button>
-                <button className="btn-ghost" disabled={busy} onClick={() => setEditingOpen(true)}>
-                  <Pencil size={15} />
-                  不满意，编辑修改
-                </button>
-              </div>
-            ) : (
-              <div className="space-y-2">
-                <div>
-                  <label className="label">修改指令（基于当前形象做图片编辑）</label>
-                  <textarea
-                    className="field min-h-[72px] resize-y"
-                    value={editPrompt}
-                    onChange={(e) => setEditPrompt(e.target.value)}
-                    placeholder="例如：把短发改成长发、换成红色外套、去掉眼镜…"
-                  />
-                </div>
-                <div className="flex gap-2">
-                  <button className="btn-primary flex-1" disabled={busy} onClick={() => void applyEdit()}>
-                    <Wand2 size={15} />
-                    应用编辑
-                  </button>
-                  <button className="btn-ghost" disabled={busy} onClick={() => setEditingOpen(false)}>
-                    取消
-                  </button>
-                </div>
-              </div>
-            )}
-
+        {/* 2. 提示词（可编辑 + 保存） */}
+        <div>
+          <div className="mb-1.5 flex items-center justify-between">
+            <label className="label mb-0">提示词（可修改，保存后对全项目生效）</label>
             <button
-              className="btn-ghost w-full"
-              disabled={busy}
-              onClick={() => void generateT2I()}
-              title="不基于当前图，按上面的描述重新生成一张新形象"
+              className={`btn-ghost !px-2.5 !py-1 text-xs ${dirty ? 'text-accent-400' : 'text-slate-500'}`}
+              onClick={() => void savePrompt()}
+              disabled={busy || !dirty}
+              title="把提示词保存到资产"
             >
-              <RefreshCw size={12} />
-              不用这张，重新生成形象
+              <Save size={13} />
+              {dirty ? '保存提示词' : '已保存'}
             </button>
           </div>
-        )}
+          <textarea
+            className="field min-h-[130px] resize-y leading-relaxed"
+            value={prompt}
+            onChange={(e) => {
+              setPrompt(e.target.value)
+              setDirty(true)
+            }}
+            placeholder="描述角色外形 / 服装 / 发型 / 气质…"
+          />
+        </div>
 
-        {/* 步骤 3：结果预览 */}
-        {step === 'result' && currentImage && (
-          <div className="space-y-3">
-            <div className="overflow-hidden rounded-lg border border-white/5">
-              <MediaImage
-                src={currentImage}
-                alt={lastWasEdit ? '编辑结果' : '四视图'}
-                className="max-h-[280px] w-full object-contain bg-ink-950"
-                fallback={<div className="flex h-40 w-full items-center justify-center bg-ink-950 text-slate-600">无预览</div>}
-              />
+        {/* 3. 生成新版 */}
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            className="btn-primary col-span-2"
+            disabled={busy || !prompt.trim() || !hasT2I}
+            onClick={() => void generateNew()}
+            title={hasT2I ? '按提示词生成一版新形象' : '缺少千问文生图模板'}
+          >
+            {busy ? <Loader2 size={15} className="animate-spin" /> : <Wand2 size={15} />}
+            生成新版形象
+          </button>
+        </div>
+        {!hasT2I && <div className="text-xs text-amber-400/80">缺少千问文生图模板，无法生成形象</div>}
+
+        {/* 4. 版本列表（每版都保留，可删除、可选中） */}
+        <div>
+          <div className="mb-1.5 flex items-center justify-between">
+            <span className="text-xs text-slate-500">
+              已保存版本 <span className="text-slate-300">{versions.length}</span> 个（点选一版用于编辑 / 转四视图）
+            </span>
+          </div>
+          {versions.length === 0 ? (
+            <div className="rounded-lg bg-white/[0.03] px-3 py-2 text-[11px] text-slate-500">还没有版本</div>
+          ) : (
+            <div className="grid max-h-[180px] grid-cols-5 gap-2 overflow-y-auto rounded-lg border border-white/5 bg-white/[0.02] p-2">
+              {versions.map((img) => {
+                const active = selected === img
+                const bound = live.coverFile === img
+                return (
+                  <div
+                    key={img}
+                    className={`group relative aspect-square overflow-hidden rounded border ${
+                      active ? 'border-accent-500 ring-1 ring-accent-500' : 'border-white/10 hover:border-white/30'
+                    }`}
+                  >
+                    <button type="button" className="h-full w-full" title={img} onClick={() => setSelected(img)}>
+                      <MediaImage
+                        src={img}
+                        alt=""
+                        className="h-full w-full object-cover"
+                        fallback={<div className="h-full w-full bg-ink-800" />}
+                      />
+                    </button>
+                    {bound && (
+                      <span className="pointer-events-none absolute inset-x-0 bottom-0 bg-accent-600/80 text-center text-[9px] text-white">
+                        绑定图
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      title="删除这一版"
+                      className="absolute right-0.5 top-0.5 hidden h-4 w-4 items-center justify-center rounded bg-black/70 text-[10px] text-white hover:bg-rose-600 group-hover:flex"
+                      onClick={() => void removeVersion(img)}
+                    >
+                      ×
+                    </button>
+                  </div>
+                )
+              })}
             </div>
-            <div className="grid grid-cols-2 gap-2">
-              <button className="btn-primary col-span-2" disabled={busy} onClick={() => void setCover()}>
-                <Check size={15} />
-                设为角色图
-              </button>
-              {lastWasEdit ? (
-                <>
-                  <button className="btn-ghost" disabled={busy} onClick={() => setEditingOpen(true)}>
-                    <Pencil size={15} />
-                    继续编辑
-                  </button>
-                  <button className="btn-ghost" disabled={busy} onClick={() => void toFourView()}>
-                    <ScanFace size={15} />
-                    转四视图
-                  </button>
-                </>
-              ) : (
-                <button className="btn-ghost col-span-2" disabled={busy} onClick={() => setStep('branch')}>
-                  <RefreshCw size={15} />
-                  返回重选
+          )}
+        </div>
+
+        {/* 5. 局部编辑（针对选中版本） */}
+        {selected && (
+          <div className="space-y-2 rounded-lg border border-white/5 bg-white/[0.02] p-3">
+            <div className="flex items-center justify-between">
+              <span className="flex items-center gap-1.5 text-xs text-slate-400">
+                <Pencil size={12} />
+                局部编辑（基于选中版本修改，不重画整张）
+              </span>
+              {!editOpen && (
+                <button className="btn-ghost !px-2 !py-1 text-xs" disabled={busy || !hasEdit} onClick={() => setEditOpen(true)}>
+                  展开
                 </button>
               )}
             </div>
+            {editOpen && (
+              <>
+                <textarea
+                  className="field min-h-[70px] resize-y"
+                  value={editPrompt}
+                  onChange={(e) => setEditPrompt(e.target.value)}
+                  placeholder="例如：短发改成长发、外套换成黑色、去掉眼镜、背景换成深色…"
+                />
+                <div className="flex gap-2">
+                  <button
+                    className="btn-primary flex-1"
+                    disabled={busy || !editPrompt.trim() || !hasEdit}
+                    onClick={() => void applyEdit()}
+                  >
+                    {busy ? <Loader2 size={14} className="animate-spin" /> : <Wand2 size={14} />}
+                    应用编辑（生成新版本）
+                  </button>
+                  <button className="btn-ghost" disabled={busy} onClick={() => setEditOpen(false)}>
+                    收起
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         )}
 
-        {/* 编辑面板在 result 的「继续编辑」时打开 */}
-        {step === 'result' && lastWasEdit && editingOpen && (
-          <div className="space-y-2 rounded-lg border border-white/5 bg-white/[0.02] p-3">
-            <div>
-              <label className="label">修改指令</label>
-              <textarea
-                className="field min-h-[72px] resize-y"
-                value={editPrompt}
-                onChange={(e) => setEditPrompt(e.target.value)}
-                placeholder="例如：把外套换成黑色、背景改成夜晚…"
-              />
-            </div>
-            <div className="flex gap-2">
-              <button className="btn-primary flex-1" disabled={busy} onClick={() => void applyEdit()}>
-                <Wand2 size={15} />
-                应用编辑
-              </button>
-              <button className="btn-ghost" disabled={busy} onClick={() => setEditingOpen(false)}>
-                取消
-              </button>
-            </div>
-          </div>
+        {/* 6. 确定 → 转四视图 / 设为绑定图 */}
+        <div className="grid grid-cols-2 gap-2">
+          <button className="btn-ghost" disabled={busy || !selected || !hasEdit} onClick={() => void toFourView()}>
+            <ScanFace size={15} />
+            确定，转四视图
+          </button>
+          <button className="btn-primary" disabled={busy || !selected} onClick={() => selected && void useAsCover(selected)}>
+            <Check size={15} />
+            设为角色图
+          </button>
+        </div>
+        {!hasEdit && selected && (
+          <div className="text-xs text-amber-400/80">缺少千问「全能编辑」模板，无法编辑或转四视图</div>
         )}
 
-        {/* 历史缩略图 */}
-        {historyStrip()}
-
-        {/* 忙碌状态 */}
+        {/* 状态 / 错误 */}
         {busy && (
           <div className="space-y-2 rounded-lg bg-accent-600/10 px-3 py-2.5">
             <div className="flex items-center gap-2 text-sm text-accent-400">
               <Loader2 size={15} className="animate-spin" />
-              {busyLabel}
+              {status ?? '生成中…'}
             </div>
             {progress > 0 && (
               <div className="h-1.5 overflow-hidden rounded-full bg-white/10">
@@ -425,7 +424,7 @@ export function CharacterAssetWizard({
             )}
           </div>
         )}
-
+        {!busy && status && <div className="text-xs text-emerald-400">{status}</div>}
         {error && <div className="rounded-lg bg-rose-500/10 px-3 py-2 text-sm text-rose-300">{error}</div>}
       </div>
     </Modal>
