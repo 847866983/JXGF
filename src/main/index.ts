@@ -26,6 +26,7 @@ import { extractArchive } from './core/extract'
 import { ComfyRuntime } from './core/comfy-runtime'
 import { ComfyInstaller } from './core/comfy-installer'
 import { isUiWorkflow, convertUiToApi, detectWorkflowKind } from './core/workflow-convert'
+import { adaptTemplateForGpu } from './core/template-adapt'
 import { listMemory, readMemory, writeMemory, appendMemory } from './core/memory'
 import { AiAssistant } from './core/ai-assistant'
 import { defaultAiConfig, normalizeAiConfig, type AiConfig } from '../shared/ai'
@@ -234,7 +235,25 @@ function registerIpc(): void {
 
   ipcMain.handle(CH.projectList, () => store.list())
   ipcMain.handle(CH.projectCreate, async (_e, name: string) => store.create(name))
-  ipcMain.handle(CH.projectOpen, (_e, id: string) => store.open(id))
+  ipcMain.handle(CH.projectOpen, async (_e, id: string) => {
+    const project = await store.open(id)
+    // 打开旧项目时按本机显存适配模板（修 12GB 放大模型在 6GB 卡上的 OOM）
+    try {
+      const hw = await getHardware()
+      let changed = false
+      for (const tpl of project.templates) {
+        const adapted = adaptTemplateForGpu(tpl.apiJson, hw.gpu)
+        if (adapted !== tpl.apiJson) {
+          tpl.apiJson = adapted
+          changed = true
+        }
+      }
+      if (changed) await store.flush()
+    } catch {
+      // 适配失败不阻断打开
+    }
+    return project
+  })
   ipcMain.handle(CH.projectSave, (_e, project: Project) => store.save(project))
   // 返回主进程当前项目的深拷贝：渲染层 persistProject 用它做 base，
   // 避免用旧快照覆盖主进程 side-effect 写入（如生成完成后写回的 shot.outputs）
@@ -252,6 +271,10 @@ function registerIpc(): void {
     if (isUiWorkflow(payload.apiJson)) {
       apiJson = await convertUiToApi(payload.apiJson, project.settings.comfy)
     }
+
+    // 按本机显存自动降级放大节点（6GB 卡不加载 12GB 放大模型，否则必然 OOM）
+    const hw = await getHardware()
+    apiJson = adaptTemplateForGpu(apiJson, hw.gpu)
 
     const kind = payload.kind ?? detectWorkflowKind(apiJson as Record<string, { class_type: string }>)
 

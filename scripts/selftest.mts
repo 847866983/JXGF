@@ -25,6 +25,7 @@ import { AiAssistant } from '../src/main/core/ai-assistant.ts'
 import { explainError } from '../src/renderer/src/lib/errorHelp.ts'
 import { ComfyRuntime } from '../src/main/core/comfy-runtime.ts'
 import { detectWorkflowKind, isUiWorkflow } from '../src/main/core/workflow-convert.ts'
+import { adaptTemplateForGpu } from '../src/main/core/template-adapt.ts'
 
 const execFileAsync = promisify(execFile)
 
@@ -878,6 +879,22 @@ ok('H3 三采仍判为视频', () => {
   })
   assert.equal(kind, 'video')
 })
+
+// ---- 模板显存自适应 ----
+const gpu6 = { vendor: 'nvidia' as const, name: 'RTX 2060', vramMB: 6144, vramKnown: true, driver: '', cudaAvailable: true, raw: '' }
+const gpu12 = { vendor: 'nvidia' as const, name: 'RTX 3080', vramMB: 12288, vramKnown: true, driver: '', cudaAvailable: true, raw: '' }
+const tplApi = {
+  a: { class_type: 'BanZhang_MMH3_UpscaleParams', inputs: { '放大模型': 'minimax_h3_latent_upscaler_3d_bf16.safetensors', '放大倍数': 1.5, '显存预设': '12 GB' } },
+  b: { class_type: 'BanZhang_SLABlockSparseAttention', inputs: { '计算块大小': '64' } },
+  c: { class_type: 'BanZhang_MMH3_Upscale', inputs: { '调度器': 'bong_tangent' } }
+}
+const adapted6 = adaptTemplateForGpu(JSON.parse(JSON.stringify(tplApi)), gpu6) as typeof tplApi
+ok('显存自适应：6GB 卡把放大模型换成免模型', () => assert.equal(adapted6.a.inputs['放大模型'], '⚡ 最近邻精确（免模型）'))
+ok('显存自适应：6GB 卡放大倍数降为1', () => assert.equal(adapted6.a.inputs['放大倍数'], 1))
+ok('显存自适应：6GB 卡显存预设降为6GB', () => assert.equal(adapted6.a.inputs['显存预设'], '6 GB'))
+ok('显存自适应：非法调度器改 simple', () => assert.equal(adapted6.c.inputs['调度器'], 'simple'))
+const adapted12 = adaptTemplateForGpu(JSON.parse(JSON.stringify(tplApi)), gpu12) as typeof tplApi
+ok('显存自适应：12GB 卡不降级模型', () => assert.equal(adapted12.a.inputs['放大模型'], 'minimax_h3_latent_upscaler_3d_bf16.safetensors'))
 
 console.log(`\nselftest: ${pass} passed, ${fail} failed`)
 if (fail > 0) process.exit(1)
