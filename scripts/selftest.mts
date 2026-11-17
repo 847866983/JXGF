@@ -1013,5 +1013,24 @@ ok('双引擎：文生图按引擎选模板', () => {
   assert.equal(buildCharacterT2IInput(qAsset, engTpl, undefined, 'qwen').templateId, 'q-t2i')
 })
 
+// ---- H3 模型目录 ----
+ok('目录：NVIDIA 8GB 解析出 H3 全套模型', () => {
+  const items = resolveCatalog(tmp2, nvGpu)
+  for (const id of ['h3-unet','h3-clip','h3-video-vae','h3-audio-vae','h3-tae','h3-upscaler']) {
+    assert.ok(items.some((i) => i.id === id), '缺少 ' + id)
+  }
+})
+ok('目录：H3 模型 dest 指向正确子目录', () => {
+  const items = resolveCatalog(tmp2, nvGpu)
+  const unet = items.find((i) => i.id === 'h3-unet')
+  assert.ok(unet.dest.includes(path.join('MiniMax-H3', 'minimax_h3_hybrid_fl2va_ref2va_b25-49.safetensors')))
+  const tae = items.find((i) => i.id === 'h3-tae')
+  assert.ok(tae.dest.includes(path.join('vae_approx', 'MiniMax-H3-TAE.safetensors')))
+})
+ok('目录：FFmpeg 工具存在', () => {
+  const items = resolveCatalog(tmp2, nvGpu)
+  assert.ok(items.some((i) => i.id === 'ffmpeg-essentials'))
+})
+
 console.log(`\nselftest: ${pass} passed, ${fail} failed`)
 if (fail > 0) process.exit(1)

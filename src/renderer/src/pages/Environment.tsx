@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Activity, CheckCircle2, Cpu, Download, FolderOpen, PackagePlus, Play, RefreshCw, ServerCog, Square, TriangleAlert } from 'lucide-react'
+import { Activity, CheckCircle2, Cpu, Download, FolderOpen, Package, PackagePlus, Play, RefreshCw, ServerCog, Square, TriangleAlert } from 'lucide-react'
 import type { CatalogItem, ComfyInstallState, ComfyRuntimeState, DownloadTask, EnvironmentReport } from '@shared/types'
 import { PageHeader } from '../components/ui'
 
@@ -33,6 +33,34 @@ export default function Environment({ embedded = false }: { embedded?: boolean }
   const [runtimePort, setRuntimePort] = useState('8188')
   const [busy, setBusy] = useState(false)
   const [install, setInstall] = useState<ComfyInstallState | null>(null)
+  const [nodePack, setNodePack] = useState<{ installed: boolean } | null>(null)
+  const [nodePackBusy, setNodePackBusy] = useState(false)
+  const [nodePackMsg, setNodePackMsg] = useState<string | null>(null)
+
+  const refreshNodePack = async (root: string): Promise<void> => {
+    if (!root.trim()) return
+    try {
+      const st = (await window.api.nodePackStatus(root)) as { installed: boolean }
+      setNodePack(st)
+    } catch {
+      setNodePack(null)
+    }
+  }
+
+  const installNodePack = async (): Promise<void> => {
+    if (!runtimeRoot.trim()) return
+    setNodePackBusy(true)
+    setNodePackMsg(null)
+    try {
+      const r = (await window.api.nodePackInstall(runtimeRoot.trim())) as { installedDir: string; skipped: boolean }
+      setNodePackMsg(r.skipped ? '节点包已存在，无需重复安装' : '节点包安装完成，重启 ComfyUI 后生效')
+      await refreshNodePack(runtimeRoot.trim())
+    } catch (err) {
+      setNodePackMsg(`安装失败：${String((err as Error).message ?? err)}`)
+    } finally {
+      setNodePackBusy(false)
+    }
+  }
 
   const startOneClickInstall = async (): Promise<void> => {
     setInstall({ phase: 'downloading', percent: 0, message: '准备安装…' })
@@ -74,6 +102,7 @@ export default function Environment({ embedded = false }: { embedded?: boolean }
       setRuntime(st)
       setRuntimeRoot(st.root ?? '')
       setRuntimePort(String(st.port ?? 8188))
+      if (st.root) void refreshNodePack(st.root)
     })
   }
 
@@ -531,6 +560,29 @@ export default function Environment({ embedded = false }: { embedded?: boolean }
                     )}
                   </div>
                 )}
+              </div>
+
+              {/* 节点包：BanZhang 自定义节点（装完 ComfyUI 后解压到 custom_nodes） */}
+              <div className="mb-4 rounded-lg border border-white/5 bg-white/[0.02] px-3 py-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium text-white">BanZhang 节点包（H3 工作流必需）</div>
+                    <div className="mt-0.5 text-[11px] text-slate-400">
+                      内置节点包，解压到 ComfyUI 的 custom_nodes。装完 ComfyUI 后点这里安装，无需去官网找节点。
+                      {nodePack?.installed ? '（已安装）' : ''}
+                    </div>
+                  </div>
+                  <button
+                    className="btn-ghost shrink-0"
+                    disabled={nodePackBusy || !runtimeRoot.trim()}
+                    title={runtimeRoot.trim() ? undefined : '请先填写 ComfyUI 根目录'}
+                    onClick={() => void installNodePack()}
+                  >
+                    <Package size={14} />
+                    {nodePackBusy ? '安装中…' : nodePack?.installed ? '重新安装' : '安装节点包'}
+                  </button>
+                </div>
+                {nodePackMsg && <div className="mt-1.5 text-[11px] text-slate-400">{nodePackMsg}</div>}
               </div>
 
               <div className="flex items-center gap-3">

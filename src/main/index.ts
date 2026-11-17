@@ -232,6 +232,15 @@ function registerIpc(): void {
     const hw = await getHardware()
     return comfyInstaller.install(hw.gpu)
   })
+  // 节点包：状态 / 安装（BanZhang 自定义节点，装完 ComfyUI 后解压到 custom_nodes）
+  ipcMain.handle(CH.nodePackStatus, async (_e, comfyRoot: string) => {
+    const { nodePackStatus } = await import('./core/node-pack')
+    return nodePackStatus(comfyRoot)
+  })
+  ipcMain.handle(CH.nodePackInstall, async (_e, comfyRoot: string) => {
+    const { installNodePack } = await import('./core/node-pack')
+    return installNodePack(comfyRoot)
+  })
 
   ipcMain.handle(CH.projectList, () => store.list())
   ipcMain.handle(CH.projectCreate, async (_e, name: string) => store.create(name))

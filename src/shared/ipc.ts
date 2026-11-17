@@ -16,6 +16,8 @@ export const CH = {
   comfyRuntimeSetConfig: 'runtime:set-config',
   comfyInstallStart: 'comfy-install:start',
   comfyInstallState: 'comfy-install:state',
+  nodePackStatus: 'node-pack:status',
+  nodePackInstall: 'node-pack:install',
   projectList: 'project:list',
   projectOpen: 'project:open',
   projectCreate: 'project:create',

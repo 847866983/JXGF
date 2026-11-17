@@ -113,6 +113,17 @@ export class ComfyInstaller extends EventEmitter {
       const cfg = await this.runtime.getConfig()
       await this.runtime.setConfig({ ...cfg, root: comfyRoot, port: cfg.port || 8188, python: null })
 
+      // 3.5 解压内置 BanZhang 节点包到 custom_nodes（装完 ComfyUI 后必做，否则 H3 工作流缺节点）
+      this.emitState({ phase: 'configuring', percent: 55, message: '正在安装 BanZhang 节点包…' })
+      try {
+        const { installNodePack } = await import('./node-pack')
+        const r = await installNodePack(comfyRoot)
+        this.emitState({ phase: 'configuring', percent: 58, message: r.skipped ? '节点包已存在，跳过' : '节点包安装完成' })
+      } catch (err) {
+        // 节点包失败不阻断启动，但提示
+        this.emitState({ phase: 'configuring', percent: 58, message: `节点包安装失败（可稍后手动装）：${String((err as Error).message ?? err)}` })
+      }
+
       // 4. 启动
       this.emitState({ phase: 'starting', percent: 60, message: '正在启动 ComfyUI…' })
       const st = await this.runtime.start()

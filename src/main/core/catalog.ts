@@ -120,6 +120,88 @@ export const MODEL_CATALOG: CatalogEntry[] = [
     minVramMB: 6 * 1024,
     file: 'text_encoders/qwen3vl_8b_int8_convrot.safetensors',
     sources: hfSources('Qwen/Qwen-Image-2.1', 'text_encoders/qwen3vl_8b_int8_convrot.safetensors')
+  },
+  // ---------- MiniMax H3 视频生成必需模型（6 个，约 38GB） ----------
+  {
+    id: 'h3-unet',
+    label: 'MiniMax H3 主模型（UNET hybrid fl2va/ref2va）',
+    kind: 'model',
+    description: 'MiniMax H3 视频生成主模型（约 20GB）。放到 models/MiniMax-H3。',
+    sizeMB: 20000,
+    vendor: 'nvidia',
+    minVramMB: 6 * 1024,
+    file: 'MiniMax-H3/minimax_h3_hybrid_fl2va_ref2va_b25-49.safetensors',
+    sources: hfSources('MiniMax/MiniMax-H3', 'minimax_h3_hybrid_fl2va_ref2va_b25-49.safetensors')
+  },
+  {
+    id: 'h3-clip',
+    label: 'MiniMax H3 文本编码器（Qwen3-VL 32B）',
+    kind: 'model',
+    description: 'MiniMax H3 配套文本编码器（约 15GB）。放到 models/text_encoders。',
+    sizeMB: 15000,
+    vendor: 'nvidia',
+    minVramMB: 6 * 1024,
+    file: 'text_encoders/qwen3vl_32b_minimax_h3-w4a8_convrot.safetensors',
+    sources: hfSources('MiniMax/MiniMax-H3', 'qwen3vl_32b_minimax_h3-w4a8_convrot.safetensors')
+  },
+  {
+    id: 'h3-video-vae',
+    label: 'MiniMax H3 视频 VAE',
+    kind: 'model',
+    description: 'MiniMax H3 视频 VAE（约 2.7GB）。放到 models/vae。',
+    sizeMB: 2700,
+    vendor: 'nvidia',
+    minVramMB: 6 * 1024,
+    file: 'vae/minimax_h3_video_vae_int8_convrot.safetensors',
+    sources: hfSources('MiniMax/MiniMax-H3', 'minimax_h3_video_vae_int8_convrot.safetensors')
+  },
+  {
+    id: 'h3-audio-vae',
+    label: 'MiniMax H3 音频 VAE',
+    kind: 'model',
+    description: 'MiniMax H3 音频 VAE（约 0.6GB）。放到 models/vae。',
+    sizeMB: 580,
+    vendor: 'nvidia',
+    minVramMB: 6 * 1024,
+    file: 'vae/minimax_h3_audio_vae_fp32.safetensors',
+    sources: hfSources('MiniMax/MiniMax-H3', 'minimax_h3_audio_vae_fp32.safetensors')
+  },
+  {
+    id: 'h3-tae',
+    label: 'MiniMax H3 TAE（预览 VAE）',
+    kind: 'model',
+    description: 'MiniMax H3 预览用 TAE（约 9MB）。放到 models/vae_approx。',
+    sizeMB: 9,
+    vendor: 'nvidia',
+    minVramMB: 6 * 1024,
+    file: 'vae_approx/MiniMax-H3-TAE.safetensors',
+    sources: hfSources('MiniMax/MiniMax-H3', 'MiniMax-H3-TAE.safetensors')
+  },
+  {
+    id: 'h3-upscaler',
+    label: 'H3 latent 放大模型',
+    kind: 'model',
+    description: 'H3 latent 放大模型（约 0.66GB）。放到 models/latent_upscale_models。',
+    sizeMB: 660,
+    vendor: 'nvidia',
+    minVramMB: 6 * 1024,
+    file: 'latent_upscale_models/h3_upscaler_lms_v0.1.safetensors',
+    sources: hfSources('MiniMax/MiniMax-H3', 'h3_upscaler_lms_v0.1.safetensors')
+  },
+  // ---------- 图像生成辅助 ----------
+  {
+    id: 'ffmpeg-essentials',
+    label: 'FFmpeg（视频合成必需）',
+    kind: 'tool',
+    description: 'BanZhang 视频合成依赖 ffmpeg/ffprobe。解压后把 bin 目录加入 PATH，或放到 ComfyUI/custom_nodes/.../tools/ffmpeg/bin。',
+    sizeMB: 110,
+    vendor: 'nvidia',
+    minVramMB: 6 * 1024,
+    file: 'ffmpeg-release-essentials.zip',
+    sources: [
+      { name: 'gyan.dev 官方', url: 'https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip' },
+      { name: 'gh-proxy 镜像', url: 'https://gh-proxy.com/https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip' }
+    ]
   }
 ]
 
