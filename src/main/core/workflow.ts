@@ -480,11 +480,12 @@ export function buildWorkflow(template: Template, params: WorkflowParams): unkno
         // 此处 refImages 里是已上传到 ComfyUI 的文件名（由 injectH3RefImages 之后处理），先占位
       }
       if (/^Krea2EditGroundedEncode$/i.test(ct) && params.positive) {
-        // 正向编码器：grounding_px 较大（768）的那个承载正向提示词
+        // Krea2 的 GroundedEncode：grounding_px=0 的节点接 KSampler.positive（正向），
+        // grounding_px>0 的接 negative（负向）。正向提示词必须写进 px=0 的那个。
         const gp = Number(node.inputs.grounding_px ?? 0)
-        if (gp > 0) node.inputs.prompt = params.positive
+        if (gp === 0) node.inputs.prompt = params.positive
       }
-      // 注意：Krea2 是 turbo 模型，负向编码器(grounding_px=0)保持模板原样，不注入资产负词
+      // 注意：Krea2 是 turbo 模型，负向编码器(grounding_px>0)保持模板原样，不注入资产负词
       if (ct === 'EmptySD3LatentImage') {
         if (params.width && 'width' in node.inputs) node.inputs.width = params.width
         if (params.height && 'height' in node.inputs) node.inputs.height = params.height

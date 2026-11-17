@@ -74,7 +74,7 @@ const FOUR_VIEW_STRUCT_NEG =
  * 用千问编辑模板 + 角色参考图，让模型把参考图转成四视图角色设定表。
  */
 export const FOUR_VIEW_PROMPT =
-  'Convert the character in the image to a Character Sheet showing a face close-up, front full body, side full body and back full body views. Arrange the four views side by side in one horizontal row on a plain pure white background, each figure fully opaque with sharp clean edges, crisp outlines, no fading, no ghosting, no translucent effect.'
+  'Convert the character in the image to a Character Sheet showing a face close-up, front full body, side full body and back full body views. Every full-body view shows the complete figure from head to feet, nothing cropped, whole body visible with feet on the ground. Arrange the views side by side on a plain pure white background, each figure fully opaque with sharp clean edges, crisp outlines, no fading, no ghosting.'
 
 /** 兼容旧调用：四视图正向提示词固定为 FOUR_VIEW_PROMPT */
 export function buildFourViewPositive(_desc?: string, _styleId?: string): string {
@@ -116,6 +116,8 @@ export interface AssetJobInput {
   refImages?: string[]
   /** 需要挂载的 LoRA（如千问多角度四视图） */
   loras?: { file: string; strength: number }[]
+  /** 采样步数（覆盖模板默认，提升清晰度） */
+  steps?: number
 }
 
 // 四视图画布用方形：超宽(1536x640)时模型要在两侧"补白"排视图，
@@ -271,10 +273,11 @@ export function buildCharacterFourViewInput(
     templateId: template.id,
     positive: QWEN_QUADVIEW_PROMPT,
     negative: fourViewNegative(),
-    // 方形画布：超宽(1536x640)会让边缘渐隐/草图化
-    width: 1024,
-    height: 1024,
+    // 提高清晰度（默认4步偏糙），但 6GB 显存下不宜过高，取清晰度与可行性平衡
+    width: 1280,
+    height: 1280,
     batch: 1,
+    steps: 8,
     refImages: [refImage],
     loras: [{ file: QWEN_QUADVIEW_LORA, strength: 0.9 }]
   }

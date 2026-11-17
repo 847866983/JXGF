@@ -136,7 +136,8 @@ export function CharacterAssetWizard({ asset, onClose }: { asset: Asset; onClose
         height: input.height,
         batch: input.batch,
         refImages: input.refImages && input.refImages.length > 0 ? input.refImages : undefined,
-        loras: input.loras && input.loras.length > 0 ? input.loras : undefined
+        loras: input.loras && input.loras.length > 0 ? input.loras : undefined,
+        steps: input.steps
       })
       setStatus(`已提交「${label}」，等待生成…（任务 ${job.id.slice(-6)}）`)
       const outcome = await waitForJob(job.id, setProgress)
