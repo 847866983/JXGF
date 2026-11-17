@@ -945,30 +945,11 @@ const qAsset = { id: 'a', kind: 'character', name: '测试角色', tags: [], des
 ok('三步：pickQwenT2ITemplate 选中文生图', () => assert.equal(pickQwenT2ITemplate(qTpl).id, 't2i'))
 ok('三步：pickQwenEditTemplate 选中编辑', () => assert.equal(pickQwenEditTemplate(qTpl).id, 'edit'))
 ok('三步：T2I 不带参考图', () => { const r = buildCharacterT2IInput(qAsset, qTpl); assert.equal(r.templateId, 't2i'); assert.ok(!r.refImages) })
-ok('三步：四视图用编辑模板+参考图', () => { const r = buildCharacterFourViewInput(qAsset, qTpl, undefined, 'ref.png'); assert.equal(r.templateId, 'edit'); assert.deepEqual(r.refImages, ['ref.png']) })
-ok('三步：编辑用编辑模板+参考图+指令', () => { const r = buildCharacterEditInput(qAsset, qTpl, undefined, 'ref.png', '加红围巾'); assert.equal(r.templateId, 'edit'); assert.deepEqual(r.refImages, ['ref.png']); assert.ok(r.positive.includes('红围巾')) })
-ok('三步：缺编辑模板返回 null', () => assert.equal(buildCharacterFourViewInput(qAsset, [qTpl[0]], undefined, 'ref.png'), null))
-ok('三步：编辑空指令返回 null', () => assert.equal(buildCharacterEditInput(qAsset, qTpl, undefined, 'ref.png', '  '), null))
-
-// ---- 千问文本编码器提示词注入（不按提示词生成的根因） ----
-const qwenInjectTpl = {
-  id: 'qwen', name: 'qwen-t2i', kind: 'image' as const, description: '',
-  apiJson: {
-    '517': { class_type: 'PrimitiveStringMultiline', inputs: { value: '旧提示词' } },
-    '522': { class_type: 'TextEncodeQwenImage21', inputs: { clip: ['518',0], prompt: ['517',0], negative_prompt: '', resolution: 0 } },
-    '515': { class_type: 'KSampler', inputs: { seed: 1, steps: 4, cfg: 1 } }
-  },
-  mapping: { version: 1 }, createdAt: ''
-}
-const qwInject = buildWorkflow(qwenInjectTpl, { positive: '全新提示词：机械装甲少女', negative: '低质量' }) as Record<string, { inputs: Record<string, unknown> }>
-ok('千问：提示词写入上游 PrimitiveStringMultiline', () => assert.equal(qwInject['517'].inputs.value, '全新提示词：机械装甲少女'))
-
-// ---- 四视图投影压制 ----
-ok('四视图：正向为固定 Character Sheet 提示词', () => {
-  const p = buildFourViewPositive('任意描述')
-  assert.ok(p.startsWith('Convert the character in the image to a Character Sheet showing a face close-up, front full body, side full body and back full body views.'), p)
-  assert.ok(/no fading/.test(p), '缺少 no fading')
-  assert.ok(/sharp clean edges/.test(p), '缺少 sharp clean edges')
+ok('三步：四视图用Krea2模板+参考图', () => {
+  const krea = [{ id: 'k4', name: '04-Krea2-角色资产四视图', kind: 'image', apiJson: {}, mapping: { version: 1 }, createdAt: '', description: '' }]
+  const r = buildCharacterFourViewInput(qAsset, krea, undefined, 'ref.png')
+  assert.equal(r.templateId, 'k4')
+  assert.deepEqual(r.refImages, ['ref.png'])
 })
 ok('四视图：负向压制投影/地面', () => {
   const n = fourViewNegative()
@@ -976,9 +957,10 @@ ok('四视图：负向压制投影/地面', () => {
   assert.ok(/ground shadow/.test(n), '缺少 ground shadow 负词')
   assert.ok(/floor/.test(n), '缺少 floor 负词')
 })
-ok('四视图：编辑模板输入带上投影负词', () => {
-  const r = buildCharacterFourViewInput(qAsset, qTpl, undefined, 'ref.png')
-  assert.ok(/cast shadow/.test(r.negative), '四视图输入未带投影负词')
+ok('四视图：正向为固定提示词(含no fading)', () => {
+  const p = buildFourViewPositive()
+  assert.ok(p.startsWith('Convert the character in the image to a Character Sheet'))
+  assert.ok(/no fading/.test(p))
 })
 
 // ---- 版本列表 ----

@@ -234,6 +234,16 @@ function clearH3Refs(clone: Workflow, mode?: string): void {
 export function injectH3RefImages(clone: unknown, refImages: string[]): void {
   if (refImages.length === 0) return
   if (!isWorkflowObject(clone)) return
+  // Krea2 图生图：把参考图写进 LoadImage 节点（上传后的文件名）
+  const hasKrea2 = Object.values(clone).some((n) => /Krea2EditGroundedEncode|Krea2EditModelPatch/i.test(String(n.class_type)))
+  if (hasKrea2) {
+    for (const node of Object.values(clone)) {
+      if (String(node.class_type) === 'LoadImage') {
+        node.inputs.image = refImages[0]
+      }
+    }
+    return
+  }
   for (const node of Object.values(clone)) {
     const ct = String(node.class_type)
     if (ct !== 'CSGlideH3MediaRackCS') continue
@@ -441,6 +451,30 @@ export function buildWorkflow(template: Template, params: WorkflowParams): unkno
       }
     }
     return clone
+  }
+
+  // Krea2 图生图模板（04-Krea2-角色资产四视图）：
+  //   - LoadImage 节点加载参考图（用户选中的角色图）
+  //   - Krea2EditGroundedEncode.prompt 写提示词（grounding_px>0 的那个是正向）
+  //   - EmptySD3LatentImage 决定输出画幅（保留模板默认）
+  const isKrea2 = Object.values(clone).some((n) => /Krea2EditGroundedEncode|Krea2EditModelPatch/i.test(String(n.class_type)))
+  if (isKrea2) {
+    for (const node of Object.values(clone)) {
+      const ct = String(node.class_type)
+      if (ct === 'LoadImage' && params.refImages && params.refImages.length > 0) {
+        // 此处 refImages 里是已上传到 ComfyUI 的文件名（由 injectH3RefImages 之后处理），先占位
+      }
+      if (/^Krea2EditGroundedEncode$/i.test(ct) && params.positive) {
+        // 正向编码器：grounding_px 较大（768）的那个承载正向提示词
+        const gp = Number(node.inputs.grounding_px ?? 0)
+        if (gp > 0) node.inputs.prompt = params.positive
+      }
+      // 注意：Krea2 是 turbo 模型，负向编码器(grounding_px=0)保持模板原样，不注入资产负词
+      if (ct === 'EmptySD3LatentImage') {
+        if (params.width && 'width' in node.inputs) node.inputs.width = params.width
+        if (params.height && 'height' in node.inputs) node.inputs.height = params.height
+      }
+    }
   }
 
   // 图片输出文件名清理：模板前缀常含 %date:yyyyMMddhhmmss%（冒号在 Windows 非法），

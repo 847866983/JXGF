@@ -163,6 +163,16 @@ export function filterRenderableVersions(images: string[] | undefined): string[]
   return out
 }
 
+/** Krea2 角色四视图模板（图生图重生成，非编辑原图） */
+export function pickFourViewTemplate(templates: Template[]): Template | undefined {
+  const imgs = templates.filter((t) => t.kind === 'image')
+  return (
+    imgs.find((t) => /四视图/i.test(t.name) && /Krea2/i.test(t.name)) ||
+    imgs.find((t) => /Krea2/i.test(t.name) && /四视图|QuadView/i.test(t.name)) ||
+    imgs.find((t) => /四视图/i.test(t.name))
+  )
+}
+
 /** 千问文生图模板 */
 export function pickQwenT2ITemplate(templates: Template[]): Template | undefined {
   const imgs = templates.filter((t) => t.kind === 'image')
@@ -197,23 +207,23 @@ export function buildCharacterT2IInput(asset: Asset, templates: Template[], _sty
   }
 }
 
-/** 步骤2a：满意 → 用千问编辑+参考图 转四视图 */
+/** 步骤2a：满意 → 用 Krea2 四视图模板 + 参考图 重新生成四视图（不是编辑原图） */
 export function buildCharacterFourViewInput(
   asset: Asset,
   templates: Template[],
   styleId: string | undefined,
   refImage: string
 ): AssetJobInput | null {
-  const template = pickQwenEditTemplate(templates)
+  const template = pickFourViewTemplate(templates)
   if (!template || !refImage) return null
-  const desc = asset.prompt || asset.description || asset.name || ''
   return {
     templateId: template.id,
-    positive: buildFourViewPositive(desc, styleId),
-    // 结构词必须带上（含 no shadow / no floor 压制），再叠加资产自身负词
-    negative: [fourViewNegative(), asset.negative].filter(Boolean).join(', '),
-    width: FOUR_VIEW_W,
-    height: FOUR_VIEW_H,
+    positive: FOUR_VIEW_PROMPT,
+    // Krea2 turbo 不用负向词（模板自带负向编码器，留空）
+    negative: undefined,
+    // 画幅交给模板（模板自带 2000x1200），这里仅作占位
+    width: 0,
+    height: 0,
     batch: 1,
     refImages: [refImage]
   }
