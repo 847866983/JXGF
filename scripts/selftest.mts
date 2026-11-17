@@ -964,12 +964,12 @@ const qwInject = buildWorkflow(qwenInjectTpl, { positive: '全新提示词：机
 ok('千问：提示词写入上游 PrimitiveStringMultiline', () => assert.equal(qwInject['517'].inputs.value, '全新提示词：机械装甲少女'))
 
 // ---- 四视图投影压制 ----
-ok('四视图：正向含无投影/平地光约束', () => {
-  const p = buildFourViewPositive('机械装甲少女')
-  assert.ok(/no cast shadow/.test(p), '缺少 no cast shadow')
-  assert.ok(/no ground shadow/.test(p), '缺少 no ground shadow')
-  assert.ok(/flat even studio lighting/.test(p), '缺少平地光')
-  assert.ok(/no floor/.test(p), '缺少 no floor')
+ok('四视图：正向为固定 Character Sheet 提示词', () => {
+  const p = buildFourViewPositive('任意描述')
+  assert.equal(
+    p,
+    'Convert the character in the image to a Character Sheet showing a face close-up, front full body, side full body and back full body views.'
+  )
 })
 ok('四视图：负向压制投影/地面', () => {
   const n = fourViewNegative()

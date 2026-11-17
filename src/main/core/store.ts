@@ -120,11 +120,11 @@ export class ProjectStore {
     return this.current
   }
 
-  /** 渲染进程把整份项目数据回传保存（简单可靠，配合防抖落盘） */
+  /** 渲染进程把整份项目数据回传保存（落盘后再返回，避免随后重读磁盘拿到旧数据） */
   async save(project: Project): Promise<Project> {
     project.updatedAt = now()
     this.current = migrate(project)
-    this.scheduleFlush()
+    await this.flush()
     return this.current
   }
 

@@ -95,7 +95,6 @@ export function CharacterAssetWizard({ asset, onClose }: { asset: Asset; onClose
       }
     })
     setDirty(false)
-    if (projectId) await useApp.getState().openProject(projectId)
     setStatus('提示词已保存')
     window.setTimeout(() => setStatus(null), 2000)
   }
@@ -217,7 +216,6 @@ export function CharacterAssetWizard({ asset, onClose }: { asset: Asset; onClose
       a.updatedAt = new Date().toISOString()
     })
     void window.api.mediaDeleteFile(img)
-    if (projectId) await useApp.getState().openProject(projectId)
     setSelected((cur) => (cur === img ? null : cur))
   }
 
@@ -229,7 +227,6 @@ export function CharacterAssetWizard({ asset, onClose }: { asset: Asset; onClose
         a.updatedAt = new Date().toISOString()
       }
     })
-    if (projectId) await useApp.getState().openProject(projectId)
     setStatus('已设为角色绑定图')
     window.setTimeout(() => setStatus(null), 2000)
   }
