@@ -555,7 +555,8 @@ export default function Director(): React.JSX.Element {
                         </div>
                         <div className="flex gap-3 overflow-x-auto pb-1">
                           {shot.outputs.map((o) => {
-                            const kept = o.kept !== false
+                            const keptCount = shot.outputs.filter((x) => x.kept !== false).length
+                            const kept = o.kept !== false && keptCount === 1
                             const isVideo = o.kind === 'video'
                             return (
                               <div

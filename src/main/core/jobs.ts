@@ -4,7 +4,7 @@ import type { ComfySettings, JobInfo, JobParams, JobStatus, ShotOutput, Template
 import { ComfyClient, makeClient } from './comfy'
 import { buildWorkflow, extractH3Chain, injectH3RefImages, injectH3RefVideos } from './workflow'
 import { uid, now, ProjectStore } from './store'
-import { collectMediaFiles, collectHistoryFiles, type MediaFile } from './output-files'
+import { collectMediaFiles, collectHistoryFiles, pickFinalMedia, type MediaFile } from './output-files'
 
 interface QueuedJob {
   info: JobInfo
@@ -240,18 +240,55 @@ export class JobManager {
         for (const t of timerHandles) clearInterval(t)
         for (const t of timeoutHandles) clearTimeout(t)
       }
-      const deliverFiles = async (files: MediaFile[]): Promise<void> => {
-        if (settled || files.length === 0) return
+      // 收集到的所有产物（WS executed 多次事件 + history 兜底）
+      const collected = new Map<string, MediaFile>()
+      const addFiles = (files: MediaFile[]): void => {
+        for (const f of files) if (f?.filename) collected.set(f.filename, f)
+      }
+      /** 从收集到的产物里挑最终版本：优先「三采/final」，否则最后一个 */
+      const pickFinal = (): MediaFile[] => pickFinalMedia([...collected.values()], kind)
+      /** 是否已拿到最终清晰版（三采/final）——视频任务必须等到它 */
+      const hasFinalVersion = (): boolean =>
+        kind !== 'video' || [...collected.values()].some((f) => /三采|final|_N471|3rd/i.test(f.filename))
+      /** 等待最终清晰版的兜底超时（到了就按现有产物交付，不再无限等） */
+      const FINAL_WAIT_MS = 12 * 60 * 1000
+      const finalDeadline = Date.now() + FINAL_WAIT_MS
+      let finalWaitExpired = false
+      const finalTimeoutReached = (): boolean => finalWaitExpired || Date.now() >= finalDeadline
+      /** 稍后重试交付（继续等最终清晰版） */
+      const scheduleRetry = (): void => {
+        if (settled) return
+        const t = setTimeout(() => {
+          void deliverFiles()
+        }, 5000)
+        timeoutHandles.push(t)
+      }
+
+      const deliverFiles = async (): Promise<void> => {
+        if (settled) return
+        // 每次交付前都重新读一次 history：
+        //   - WS 可能只送来第一个输出节点（一采）
+        //   - history 里有全部节点（一采/二采/三采），且随时间陆续补齐
+        if (kind === 'video') {
+          try {
+            const hist = await client.history(promptId)
+            const entry = hist[promptId] as { outputs?: Record<string, unknown> } | undefined
+            if (entry?.outputs) addFiles(collectHistoryFiles(entry.outputs))
+          } catch {
+            // history 读不到就按已收集的交付
+          }
+        }
+        const finalFiles = pickFinal()
+        if (finalFiles.length === 0) return
+        // 视频：若还没拿到最终清晰版（三采）且还能等，就先不交付，避免归档到中间版本
+        if (kind === 'video' && !hasFinalVersion() && !finalTimeoutReached()) {
+          scheduleRetry()
+          return
+        }
         finish()
         try {
           const media = this.store.mediaDir()
           const outputs: ShotOutput[] = []
-          // H3 三采工作流会输出 一采/二采/三采 三个视频，只要最终"三采"清晰版
-          let finalFiles = files
-          if (kind === 'video' && files.length > 1) {
-            const third = files.filter((f) => /三采|final|_N471|3rd/i.test(f.filename))
-            finalFiles = third.length > 0 ? third : files.slice(-1)
-          }
           for (const f of finalFiles.slice(0, 12)) {
             const ext = path.extname(f.filename).slice(1).toLowerCase()
             const outKind: ShotOutput['kind'] = ['mp4', 'webm', 'mov'].includes(ext) || f.type === 'output' ? 'video' : 'image'
@@ -283,11 +320,26 @@ export class JobManager {
         }
       }
 
+      // H3 三采工作流会依次输出 一采 → 二采 → 三采（三个独立节点，各自触发一次 WS executed）。
+      // 若收到第一个产物就交付，归档到的会是"一采"而非最终清晰版。
+      // 因此：视频任务一律等 history 显示 completed 后，再从 history 取全部输出节点，
+      //       优先归档「三采/final」；图片任务（单节点产出）仍走 WS 快速路径。
+      let collectTimer: ReturnType<typeof setTimeout> | null = null
+      const scheduleDeliver = (): void => {
+        if (kind === 'video') return // 视频：等 history 完成信号
+        if (collectTimer) return
+        collectTimer = setTimeout(() => {
+          collectTimer = null
+          void deliverFiles()
+        }, 2500)
+        timeoutHandles.push(collectTimer)
+      }
+
       const onExecuted = (e: { promptId?: string; output?: Record<string, unknown> }): void => {
         if (e.promptId !== promptId || settled) return
-        const files = collectMediaFiles(e.output ?? {})
-        if (files.length === 0) return // 有些节点把产物放别的字段，交给 history 兜底
-        void deliverFiles(files)
+        addFiles(collectMediaFiles(e.output ?? {}))
+        if (collected.size === 0) return // 有些节点把产物放别的字段，交给 history 兜底
+        scheduleDeliver()
       }
 
       const onError = (e: { promptId?: string; message?: string }): void => {
@@ -313,9 +365,14 @@ export class JobManager {
           }
           const completed = entry.status?.completed === true || status === 'success'
           if (completed) {
-            const files = collectHistoryFiles(entry.outputs)
-            if (files.length > 0) {
-              await deliverFiles(files)
+            // history 里有全部输出节点（一采/二采/三采），全部加入后统一挑最终版
+            addFiles(collectHistoryFiles(entry.outputs))
+            if (collected.size > 0) {
+              await deliverFiles()
+            }
+            // 视频还没拿到最终清晰版时继续轮询，等三采节点跑完
+            if (kind === 'video' && !hasFinalVersion() && !finalTimeoutReached()) {
+              return false
             }
             return true // 已完成，无论是否拿到文件都停止轮询
           }
@@ -337,7 +394,15 @@ export class JobManager {
         void (async () => {
           if (settled) return
           const doneBefore = await pollHistory()
-          if (settled || doneBefore) return
+          if (settled) return
+          if (doneBefore) return
+          // 最后兜底：如果已经收集到产物（哪怕只是中间版本），按现有产物交付，
+          // 而不是直接判失败让用户白等。
+          if (collected.size > 0) {
+            finalWaitExpired = true // 放行：pickFinal 允许返回中间版本
+            await deliverFiles()
+            return
+          }
           finish()
           const e = new Error(`生成超时（${Math.round(timeoutMs / 60000)} 分钟），可能仍在生成或产物未就绪，请到生成队列查看/手动重试`) as RetryableError
           e.noRetry = true
@@ -354,6 +419,8 @@ export class JobManager {
     if (!project) return
     const shot = project.shots.find((s) => s.id === shotId)
     if (!shot) return
+    // 同一分镜只保留一个"保留版本"：新产物入库时，旧的同段版本标记为弃用
+    for (const o of shot.outputs) o.kept = false
     shot.outputs.push(...outputs)
     shot.status = 'done'
     void this.store.flush()

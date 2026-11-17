@@ -14,7 +14,7 @@ import { promisify } from 'node:util'
 import { PRESETS, presetFor } from '../src/main/core/presets.ts'
 import { buildWorkflow, extractH3Chain, injectH3RefImages, injectH3RefVideos } from '../src/main/core/workflow.ts'
 import { ComfyClient } from '../src/main/core/comfy.ts'
-import { collectMediaFiles, collectHistoryFiles } from '../src/main/core/output-files.ts'
+import { collectMediaFiles, collectHistoryFiles, pickFinalMedia } from '../src/main/core/output-files.ts'
 import { buildChatUrl, normalizeAiConfig, defaultAiConfig } from '../src/shared/ai.ts'
 import { DownloadManager } from '../src/main/core/download.ts'
 import { CATALOG, MODEL_CATALOG, resolveCatalog } from '../src/main/core/catalog.ts'
@@ -895,6 +895,35 @@ ok('显存自适应：6GB 卡显存预设降为6GB', () => assert.equal(adapted6
 ok('显存自适应：非法调度器改 simple', () => assert.equal(adapted6.c.inputs['调度器'], 'simple'))
 const adapted12 = adaptTemplateForGpu(JSON.parse(JSON.stringify(tplApi)), gpu12) as typeof tplApi
 ok('显存自适应：12GB 卡不降级模型', () => assert.equal(adapted12.a.inputs['放大模型'], 'minimax_h3_latent_upscaler_3d_bf16.safetensors'))
+
+// ---- 产物选版：H3 三采必须归档「三采」而非「一采」 ----
+ok('选版：视频从一采/二采/三采中选出三采', () => {
+  const files = [
+    { filename: '一采_N467_0009.mp4', subfolder: '', type: 'output' },
+    { filename: '二采_N468_0007.mp4', subfolder: '', type: 'output' },
+    { filename: '三采_N471_0007.mp4', subfolder: '', type: 'output' }
+  ]
+  const picked = pickFinalMedia(files, 'video')
+  assert.equal(picked.length, 1)
+  assert.equal(picked[0].filename, '三采_N471_0007.mp4')
+})
+ok('选版：没有三采时退回最后一个', () => {
+  const files = [
+    { filename: '一采_N467_0009.mp4', subfolder: '', type: 'output' },
+    { filename: '二采_N468_0007.mp4', subfolder: '', type: 'output' }
+  ]
+  const picked = pickFinalMedia(files, 'video')
+  assert.equal(picked[0].filename, '二采_N468_0007.mp4')
+})
+ok('选版：图片任务取最后一个', () => {
+  const files = [
+    { filename: 'a.png', subfolder: '', type: 'output' },
+    { filename: 'b.png', subfolder: '', type: 'output' }
+  ]
+  const picked = pickFinalMedia(files, 'image')
+  assert.equal(picked[0].filename, 'b.png')
+})
+ok('选版：空输入返回空', () => assert.equal(pickFinalMedia([], 'video').length, 0))
 
 console.log(`\nselftest: ${pass} passed, ${fail} failed`)
 if (fail > 0) process.exit(1)

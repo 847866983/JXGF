@@ -41,3 +41,18 @@ export function collectHistoryFiles(outputs: unknown): MediaFile[] {
   }
   return files
 }
+
+/**
+ * 从多个产物里挑「最终清晰版」。
+ * H3 三采工作流依次产出 一采/二采/三采，必须选三采；
+ * 找不到三采时退回最后一个（通常是最终节点）。
+ */
+export function pickFinalMedia(files: MediaFile[], kind: 'image' | 'video'): MediaFile[] {
+  const all = files.filter((f) => f && typeof f.filename === 'string')
+  if (all.length === 0) return []
+  if (kind === 'video') {
+    const third = all.filter((f) => /三采|final|_N471|3rd/i.test(f.filename))
+    if (third.length > 0) return third
+  }
+  return all.slice(-1)
+}
