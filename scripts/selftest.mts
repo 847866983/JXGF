@@ -966,10 +966,9 @@ ok('千问：提示词写入上游 PrimitiveStringMultiline', () => assert.equal
 // ---- 四视图投影压制 ----
 ok('四视图：正向为固定 Character Sheet 提示词', () => {
   const p = buildFourViewPositive('任意描述')
-  assert.equal(
-    p,
-    'Convert the character in the image to a Character Sheet showing a face close-up, front full body, side full body and back full body views.'
-  )
+  assert.ok(p.startsWith('Convert the character in the image to a Character Sheet showing a face close-up, front full body, side full body and back full body views.'), p)
+  assert.ok(/no fading/.test(p), '缺少 no fading')
+  assert.ok(/sharp clean edges/.test(p), '缺少 sharp clean edges')
 })
 ok('四视图：负向压制投影/地面', () => {
   const n = fourViewNegative()

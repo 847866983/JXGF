@@ -66,14 +66,15 @@ export function getStyle(id: string | undefined): StyleDef {
 /** 四视图结构负向词（配合固定提示词，抑制投影/地面/走形） */
 const FOUR_VIEW_STRUCT_NEG =
   'multiple different characters, inconsistent design, different outfit between views, different face, extra heads, extra limbs, deformed, bad anatomy, blurry face, text, watermark, logo, signature, cropped, out of frame, low quality, chibi, super deformed, big head, oversized head, tiny body, short legs, childlike, doll, figurine, ' +
-  'cast shadow, drop shadow, ground shadow, floor shadow, shadow on wall, shadow on background, floor, ground, floor line, horizon line, scenery, gradient background, spotlight, dramatic lighting, harsh light, vignette'
+  'cast shadow, drop shadow, ground shadow, floor shadow, shadow on wall, shadow on background, floor, ground, floor line, horizon line, scenery, gradient background, spotlight, dramatic lighting, harsh light, vignette, ' +
+  'fading edges, faded edges, ghosting, ghost image, translucent figure, semi-transparent figure, transparent figure, blurry edges, soft edges, white fade, white glow, overexposed, washed out'
 
 /**
  * 四视图固定提示词（用户指定，原样发送，不拼接风格/描述）。
  * 用千问编辑模板 + 角色参考图，让模型把参考图转成四视图角色设定表。
  */
 export const FOUR_VIEW_PROMPT =
-  'Convert the character in the image to a Character Sheet showing a face close-up, front full body, side full body and back full body views.'
+  'Convert the character in the image to a Character Sheet showing a face close-up, front full body, side full body and back full body views. Arrange the four views side by side in one horizontal row on a plain pure white background, each figure fully opaque with sharp clean edges, crisp outlines, no fading, no ghosting, no translucent effect.'
 
 /** 兼容旧调用：四视图正向提示词固定为 FOUR_VIEW_PROMPT */
 export function buildFourViewPositive(_desc?: string, _styleId?: string): string {
@@ -115,8 +116,10 @@ export interface AssetJobInput {
   refImages?: string[]
 }
 
-const FOUR_VIEW_W = 1536
-const FOUR_VIEW_H = 640
+// 四视图画布用方形：超宽(1536x640)时模型要在两侧"补白"排视图，
+// 实测出现边缘渐隐/泛白/重影；1024x1024 方形画布下四视图干净清晰。
+const FOUR_VIEW_W = 1024
+const FOUR_VIEW_H = 1024
 
 /** 根据资产生成 jobGenerate 参数：角色→四视图（横图），其他→单图，均按所选画风 */
 export function buildAssetJobInput(asset: Asset, templates: Template[], styleId?: string): AssetJobInput | null {
