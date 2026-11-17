@@ -273,9 +273,9 @@ export function buildCharacterFourViewInput(
     templateId: template.id,
     positive: QWEN_QUADVIEW_PROMPT,
     negative: fourViewNegative(),
-    // 提高清晰度（默认4步偏糙），但 6GB 显存下不宜过高，取清晰度与可行性平衡
-    width: 1280,
-    height: 1280,
+    // 与 Krea2 对齐：2000x1200、8 步（清晰度足够，6GB 可跑）
+    width: 2000,
+    height: 1200,
     batch: 1,
     steps: 8,
     refImages: [refImage],
