@@ -75,12 +75,11 @@ const FOUR_VIEW_TAIL = ' ; clean character turnaround sheet, high detail, sharp 
 const FOUR_VIEW_STRUCT_NEG =
   'multiple different characters, inconsistent design, different outfit between views, different face, extra heads, extra limbs, deformed, bad anatomy, blurry face, text, watermark, logo, signature, cropped, out of frame, low quality, chibi, super deformed, big head, oversized head, tiny body, short legs, childlike, doll, figurine'
 
-/** 角色四视图正向提示词（含画风） */
-export function buildFourViewPositive(desc: string, styleId?: string): string {
-  const style = getStyle(styleId)
+/** 角色四视图正向提示词（只要构图，不注入画风前缀） */
+export function buildFourViewPositive(desc: string, _styleId?: string): string {
   const d = desc.trim().replace(/[;,\s]+$/, '')
   const body = d ? `${FOUR_VIEW_BODY}${d}` : `${FOUR_VIEW_BODY}a character`
-  return `${style.positive}; ${body}${FOUR_VIEW_TAIL}`
+  return body + FOUR_VIEW_TAIL
 }
 
 /** 角色四视图负向提示词（画风负词 + 结构负词） */
@@ -168,15 +167,15 @@ export function pickQwenEditTemplate(templates: Template[]): Template | undefine
 }
 
 /** 步骤1：文生图生成角色单图（不带参考图） */
-export function buildCharacterT2IInput(asset: Asset, templates: Template[], styleId?: string): AssetJobInput | null {
+export function buildCharacterT2IInput(asset: Asset, templates: Template[], _styleId?: string): AssetJobInput | null {
   const template = pickQwenT2ITemplate(templates)
   if (!template) return null
-  const style = getStyle(styleId)
+  // 提示词直接用原文，不加风格前缀（风格由提示词本身描述，避免风格词干扰主体描述）
   const desc = asset.prompt || asset.description || asset.name || ''
   return {
     templateId: template.id,
-    positive: styledPositive(desc, styleId),
-    negative: [style.negative, asset.negative].filter(Boolean).join(', ') || undefined,
+    positive: desc,
+    negative: asset.negative || undefined,
     width: 1024,
     height: 1024,
     batch: 1
@@ -196,7 +195,7 @@ export function buildCharacterFourViewInput(
   return {
     templateId: template.id,
     positive: buildFourViewPositive(desc, styleId),
-    negative: fourViewNegative(styleId),
+    negative: asset.negative || undefined,
     width: FOUR_VIEW_W,
     height: FOUR_VIEW_H,
     batch: 1,
@@ -218,8 +217,8 @@ export function buildCharacterEditInput(
   if (!prompt) return null
   return {
     templateId: template.id,
-    positive: styledPositive(prompt, styleId),
-    negative: fourViewNegative(styleId),
+    positive: prompt,
+    negative: asset.negative || undefined,
     width: 0,
     height: 0,
     batch: 1,

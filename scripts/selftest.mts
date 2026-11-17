@@ -947,5 +947,18 @@ ok('三步：编辑用编辑模板+参考图+指令', () => { const r = buildCha
 ok('三步：缺编辑模板返回 null', () => assert.equal(buildCharacterFourViewInput(qAsset, [qTpl[0]], undefined, 'ref.png'), null))
 ok('三步：编辑空指令返回 null', () => assert.equal(buildCharacterEditInput(qAsset, qTpl, undefined, 'ref.png', '  '), null))
 
+// ---- 千问文本编码器提示词注入（不按提示词生成的根因） ----
+const qwenInjectTpl = {
+  id: 'qwen', name: 'qwen-t2i', kind: 'image' as const, description: '',
+  apiJson: {
+    '517': { class_type: 'PrimitiveStringMultiline', inputs: { value: '旧提示词' } },
+    '522': { class_type: 'TextEncodeQwenImage21', inputs: { clip: ['518',0], prompt: ['517',0], negative_prompt: '', resolution: 0 } },
+    '515': { class_type: 'KSampler', inputs: { seed: 1, steps: 4, cfg: 1 } }
+  },
+  mapping: { version: 1 }, createdAt: ''
+}
+const qwInject = buildWorkflow(qwenInjectTpl, { positive: '全新提示词：机械装甲少女', negative: '低质量' }) as Record<string, { inputs: Record<string, unknown> }>
+ok('千问：提示词写入上游 PrimitiveStringMultiline', () => assert.equal(qwInject['517'].inputs.value, '全新提示词：机械装甲少女'))
+
 console.log(`\nselftest: ${pass} passed, ${fail} failed`)
 if (fail > 0) process.exit(1)

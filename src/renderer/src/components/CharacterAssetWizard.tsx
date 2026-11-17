@@ -6,8 +6,6 @@ import { Modal } from './Modal'
 import { MediaImage } from './MediaImage'
 import { persistProject } from './mutate'
 import {
-  DEFAULT_STYLE_ID,
-  STYLES,
   pickQwenT2ITemplate,
   pickQwenEditTemplate,
   buildCharacterT2IInput,
@@ -54,7 +52,6 @@ export function CharacterAssetWizard({
 }): React.JSX.Element {
   const project = useApp((s) => s.project)
 
-  const [styleId, setStyleId] = useState(DEFAULT_STYLE_ID)
   const [prompt, setPrompt] = useState(asset.prompt || asset.description || '')
   const [step, setStep] = useState<Step>('t2i')
   const [currentImage, setCurrentImage] = useState<string | null>(null)
@@ -127,7 +124,7 @@ export function CharacterAssetWizard({
   const generateT2I = async (): Promise<void> => {
     const img = await runJob(
       // 步骤1 的提示词可编辑：把编辑后的文本作为 asset.prompt 传入（lib 内部取 prompt||description||name）
-      buildCharacterT2IInput({ ...asset, prompt: prompt.trim() }, templates, styleId),
+      buildCharacterT2IInput({ ...asset, prompt: prompt.trim() }, templates),
       '正在生成角色形象…',
       '缺少千问文生图模板，请先在「设置 → 导入工作流」导入千问文生图模板'
     )
@@ -142,7 +139,7 @@ export function CharacterAssetWizard({
   const toFourView = async (): Promise<void> => {
     if (!currentImage) return
     const img = await runJob(
-      buildCharacterFourViewInput(asset, templates, styleId, currentImage),
+      buildCharacterFourViewInput(asset, templates, undefined, currentImage),
       '正在生成四视图…',
       '缺少千问编辑模板（转四视图需要「全能编辑」工作流 + 参考图）'
     )
@@ -162,7 +159,7 @@ export function CharacterAssetWizard({
       return
     }
     const img = await runJob(
-      buildCharacterEditInput(asset, templates, styleId, currentImage, instruction),
+      buildCharacterEditInput(asset, templates, undefined, currentImage, instruction),
       '正在按指令修改…',
       '缺少千问编辑模板，请先在「设置 → 导入工作流」导入千问「全能编辑」工作流'
     )
@@ -273,18 +270,6 @@ export function CharacterAssetWizard({
           })}
         </div>
 
-        {/* 画风（全程可用） */}
-        <div>
-          <label className="label">画风风格</label>
-          <select className="field" value={styleId} onChange={(e) => setStyleId(e.target.value)}>
-            {STYLES.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.label}
-              </option>
-            ))}
-          </select>
-        </div>
-
         {/* 步骤 1：生成形象 */}
         {(step === 't2i' || step === 'branch') && (
           <div className="space-y-3">
@@ -351,12 +336,13 @@ export function CharacterAssetWizard({
             )}
 
             <button
-              className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-300"
+              className="btn-ghost w-full"
               disabled={busy}
-              onClick={() => setStep('t2i')}
+              onClick={() => void generateT2I()}
+              title="不基于当前图，按上面的描述重新生成一张新形象"
             >
               <RefreshCw size={12} />
-              重新生成形象
+              不用这张，重新生成形象
             </button>
           </div>
         )}

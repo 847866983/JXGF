@@ -443,17 +443,47 @@ export function buildWorkflow(template: Template, params: WorkflowParams): unkno
   }
 
   // ---- 通用（非 H3）路径 ----
-  const textNodes = Object.values(clone).filter((n) => String(n.class_type).includes('CLIPTextEncode'))
 
-  if (params.positive !== undefined && textNodes[0]) {
-    const t = textNodes[0].inputs
-    const key = Object.keys(t).find((k) => /text|prompt/i.test(k)) ?? 'text'
-    t[key] = params.positive
+  // 千问 Qwen-Image 文本编码器：TextEncodeQwenImage21 / ...Edit / ...EditPlus。
+  // 这些节点的 prompt 常是连线到 PrimitiveStringMultiline，必须把值写进那个上游节点，
+  // 直接改连线字段会被忽略（实测：不注入就用模板残留提示词，生成与描述无关的图片）。
+  let injectedQwen = false
+  for (const node of Object.values(clone)) {
+    const ct = String(node.class_type)
+    if (!/^TextEncodeQwenImage/i.test(ct)) continue
+    const promptRef = node.inputs.prompt
+    if (Array.isArray(promptRef) && typeof promptRef[0] === 'string' && params.positive !== undefined) {
+      const upstream = clone[promptRef[0]]
+      if (upstream && /PrimitiveString/i.test(String(upstream.class_type)) && 'value' in upstream.inputs) {
+        upstream.inputs.value = params.positive
+        injectedQwen = true
+      }
+    } else if (typeof promptRef === 'string' && params.positive !== undefined) {
+      node.inputs.prompt = params.positive
+      injectedQwen = true
+    }
+    if (params.negative !== undefined) {
+      const negRef = node.inputs.negative_prompt
+      if (Array.isArray(negRef) && typeof negRef[0] === 'string') {
+        const up = clone[negRef[0]]
+        if (up && /PrimitiveString/i.test(String(up.class_type)) && 'value' in up.inputs) up.inputs.value = params.negative
+      } else if (typeof negRef === 'string') {
+        node.inputs.negative_prompt = params.negative
+      }
+    }
   }
-  if (params.negative !== undefined && textNodes[1]) {
-    const t = textNodes[1].inputs
-    const key = Object.keys(t).find((k) => /text|prompt/i.test(k)) ?? 'text'
-    t[key] = params.negative
+  if (!injectedQwen) {
+    const textNodes = Object.values(clone).filter((n) => String(n.class_type).includes('CLIPTextEncode'))
+    if (params.positive !== undefined && textNodes[0]) {
+      const t = textNodes[0].inputs
+      const key = Object.keys(t).find((k) => /text|prompt/i.test(k)) ?? 'text'
+      t[key] = params.positive
+    }
+    if (params.negative !== undefined && textNodes[1]) {
+      const t = textNodes[1].inputs
+      const key = Object.keys(t).find((k) => /text|prompt/i.test(k)) ?? 'text'
+      t[key] = params.negative
+    }
   }
 
   for (const node of Object.values(clone)) {
