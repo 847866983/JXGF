@@ -20,7 +20,9 @@ import {
   pickQwenEditTemplate,
   buildCharacterT2IInput,
   buildCharacterFourViewInput,
-  buildCharacterEditInput
+  buildCharacterEditInput,
+  buildFourViewPositive,
+  fourViewNegative
 } from '../src/renderer/src/lib/assetGen.ts'
 import { buildChatUrl, normalizeAiConfig, defaultAiConfig } from '../src/shared/ai.ts'
 import { DownloadManager } from '../src/main/core/download.ts'
@@ -959,6 +961,25 @@ const qwenInjectTpl = {
 }
 const qwInject = buildWorkflow(qwenInjectTpl, { positive: '全新提示词：机械装甲少女', negative: '低质量' }) as Record<string, { inputs: Record<string, unknown> }>
 ok('千问：提示词写入上游 PrimitiveStringMultiline', () => assert.equal(qwInject['517'].inputs.value, '全新提示词：机械装甲少女'))
+
+// ---- 四视图投影压制 ----
+ok('四视图：正向含无投影/平地光约束', () => {
+  const p = buildFourViewPositive('机械装甲少女')
+  assert.ok(/no cast shadow/.test(p), '缺少 no cast shadow')
+  assert.ok(/no ground shadow/.test(p), '缺少 no ground shadow')
+  assert.ok(/flat even studio lighting/.test(p), '缺少平地光')
+  assert.ok(/no floor/.test(p), '缺少 no floor')
+})
+ok('四视图：负向压制投影/地面', () => {
+  const n = fourViewNegative()
+  assert.ok(/cast shadow/.test(n), '缺少 cast shadow 负词')
+  assert.ok(/ground shadow/.test(n), '缺少 ground shadow 负词')
+  assert.ok(/floor/.test(n), '缺少 floor 负词')
+})
+ok('四视图：编辑模板输入带上投影负词', () => {
+  const r = buildCharacterFourViewInput(qAsset, qTpl, undefined, 'ref.png')
+  assert.ok(/cast shadow/.test(r.negative), '四视图输入未带投影负词')
+})
 
 console.log(`\nselftest: ${pass} passed, ${fail} failed`)
 if (fail > 0) process.exit(1)

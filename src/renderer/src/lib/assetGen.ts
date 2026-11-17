@@ -69,11 +69,15 @@ const FOUR_VIEW_BODY =
   'leftmost: upper-body close-up portrait of the front view, face clearly visible with detailed realistic facial features, sharp focus on the face; ' +
   'then three full-body standing views: front view full body, side view full body, back view full body; ' +
   'all full-body views show the complete figure from head to feet with realistic adult proportions (7 to 8 heads tall, normal head size, long natural legs); ' +
-  'same hairstyle, outfit and colors in every view; neutral standing pose; plain light gray studio background; '
-const FOUR_VIEW_TAIL = ' ; clean character turnaround sheet, high detail, sharp focus, consistent design across views'
+  'same hairstyle, outfit and colors in every view; neutral standing pose; ' +
+  'flat even studio lighting, soft uniform ambient light, no directional light, ' +
+  'no cast shadow, no drop shadow, no ground shadow, no floor, no floor line, no scenery, ' +
+  'figures floating flat on a plain pure light gray background; '
+const FOUR_VIEW_TAIL = ' ; clean character turnaround sheet, even lighting, shadowless, high detail, sharp focus, consistent design across views'
 
 const FOUR_VIEW_STRUCT_NEG =
-  'multiple different characters, inconsistent design, different outfit between views, different face, extra heads, extra limbs, deformed, bad anatomy, blurry face, text, watermark, logo, signature, cropped, out of frame, low quality, chibi, super deformed, big head, oversized head, tiny body, short legs, childlike, doll, figurine'
+  'multiple different characters, inconsistent design, different outfit between views, different face, extra heads, extra limbs, deformed, bad anatomy, blurry face, text, watermark, logo, signature, cropped, out of frame, low quality, chibi, super deformed, big head, oversized head, tiny body, short legs, childlike, doll, figurine, ' +
+  'cast shadow, drop shadow, ground shadow, floor shadow, shadow on wall, shadow on background, floor, ground, floor line, horizon line, scenery, gradient background, spotlight, dramatic lighting, harsh light, vignette'
 
 /** 角色四视图正向提示词（只要构图，不注入画风前缀） */
 export function buildFourViewPositive(desc: string, _styleId?: string): string {
@@ -82,8 +86,9 @@ export function buildFourViewPositive(desc: string, _styleId?: string): string {
   return body + FOUR_VIEW_TAIL
 }
 
-/** 角色四视图负向提示词（画风负词 + 结构负词） */
+/** 四视图负向提示词：结构词 + 投影压制（styleId 省略时不加画风负词） */
 export function fourViewNegative(styleId?: string): string {
+  if (!styleId) return FOUR_VIEW_STRUCT_NEG
   const style = getStyle(styleId)
   return `${style.negative}, ${FOUR_VIEW_STRUCT_NEG}`
 }
@@ -195,7 +200,8 @@ export function buildCharacterFourViewInput(
   return {
     templateId: template.id,
     positive: buildFourViewPositive(desc, styleId),
-    negative: asset.negative || undefined,
+    // 结构词必须带上（含 no shadow / no floor 压制），再叠加资产自身负词
+    negative: [fourViewNegative(), asset.negative].filter(Boolean).join(', '),
     width: FOUR_VIEW_W,
     height: FOUR_VIEW_H,
     batch: 1,
