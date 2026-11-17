@@ -114,6 +114,8 @@ export interface AssetJobInput {
   batch: number
   /** 参考图（图片编辑/图生图/转四视图用） */
   refImages?: string[]
+  /** 需要挂载的 LoRA（如千问多角度四视图） */
+  loras?: { file: string; strength: number }[]
 }
 
 // 四视图画布用方形：超宽(1536x640)时模型要在两侧"补白"排视图，
@@ -148,7 +150,23 @@ export function buildAssetJobInput(asset: Asset, templates: Template[], styleId?
   }
 }
 
-// ---------- 角色资产生成三步流程（千问同模型：文生图 → 转四视图 / 图片编辑） ----------
+// ---------- 角色资产生成（双引擎：千问 / Krea2） ----------
+
+/** 生图引擎 */
+export type ImageEngine = 'qwen' | 'krea2'
+
+/** 引擎显示名 */
+export const ENGINE_LABEL: Record<ImageEngine, string> = {
+  qwen: '千问 Qwen-Image 2.1',
+  krea2: 'Krea2'
+}
+
+/** 千问四视图多角度 LoRA（已下载到 models/loras） */
+export const QWEN_QUADVIEW_LORA = 'qwen21_multiple_angles_v2.safetensors'
+
+/** 千问四视图提示词：<mva> 触发 + 四视图描述（配合多角度 LoRA） */
+export const QWEN_QUADVIEW_PROMPT =
+  '<mva> Convert the character in the image to a Character Sheet showing a face close-up, front full body, side full body and back full body views. Arrange the four views side by side in one horizontal row on a plain pure white background, each figure fully opaque with sharp clean edges, crisp outlines, no fading, no ghosting.'
 
 /** 过滤出可用于展示的版本图（去空、去重，保持生成顺序） */
 export function filterRenderableVersions(images: string[] | undefined): string[] {
@@ -191,11 +209,29 @@ export function pickQwenEditTemplate(templates: Template[]): Template | undefine
   )
 }
 
-/** 步骤1：文生图生成角色单图（不带参考图） */
-export function buildCharacterT2IInput(asset: Asset, templates: Template[], _styleId?: string): AssetJobInput | null {
-  const template = pickQwenT2ITemplate(templates)
+/** Krea2 文生图模板 */
+export function pickKrea2T2ITemplate(templates: Template[]): Template | undefined {
+  const imgs = templates.filter((t) => t.kind === 'image')
+  return (
+    imgs.find((t) => /Krea2/i.test(t.name) && /单双采|文生图|t2i/i.test(t.name)) ||
+    imgs.find((t) => /Krea2/i.test(t.name) && !/四视图/i.test(t.name))
+  )
+}
+
+/** 按引擎选文生图模板 */
+export function pickT2ITemplate(templates: Template[], engine: ImageEngine): Template | undefined {
+  return engine === 'krea2' ? pickKrea2T2ITemplate(templates) : pickQwenT2ITemplate(templates)
+}
+
+/** 步骤1：文生图生成角色单图（不带参考图），支持双引擎 */
+export function buildCharacterT2IInput(
+  asset: Asset,
+  templates: Template[],
+  _styleId?: string,
+  engine: ImageEngine = 'qwen'
+): AssetJobInput | null {
+  const template = pickT2ITemplate(templates, engine)
   if (!template) return null
-  // 提示词直接用原文，不加风格前缀（风格由提示词本身描述，避免风格词干扰主体描述）
   const desc = asset.prompt || asset.description || asset.name || ''
   return {
     templateId: template.id,
@@ -207,40 +243,70 @@ export function buildCharacterT2IInput(asset: Asset, templates: Template[], _sty
   }
 }
 
-/** 步骤2a：满意 → 用 Krea2 四视图模板 + 参考图 重新生成四视图（不是编辑原图） */
+/** 步骤2a：满意 → 转四视图。Krea2 用现成四视图模板；千问用编辑+多角度LoRA */
 export function buildCharacterFourViewInput(
   asset: Asset,
   templates: Template[],
   styleId: string | undefined,
-  refImage: string
+  refImage: string,
+  engine: ImageEngine = 'krea2'
 ): AssetJobInput | null {
-  const template = pickFourViewTemplate(templates)
+  if (engine === 'krea2') {
+    const template = pickFourViewTemplate(templates)
+    if (!template || !refImage) return null
+    return {
+      templateId: template.id,
+      positive: FOUR_VIEW_PROMPT,
+      negative: undefined, // Krea2 turbo 不用负向词
+      width: 0, // 画幅交给模板（2000x1200）
+      height: 0,
+      batch: 1,
+      refImages: [refImage]
+    }
+  }
+  // 千问：编辑模板 + 多角度 LoRA，提示词用 <mva> 语法
+  const template = pickQwenEditTemplate(templates)
   if (!template || !refImage) return null
   return {
     templateId: template.id,
-    positive: FOUR_VIEW_PROMPT,
-    // Krea2 turbo 不用负向词（模板自带负向编码器，留空）
-    negative: undefined,
-    // 画幅交给模板（模板自带 2000x1200），这里仅作占位
-    width: 0,
-    height: 0,
+    positive: QWEN_QUADVIEW_PROMPT,
+    negative: fourViewNegative(),
+    // 方形画布：超宽(1536x640)会让边缘渐隐/草图化
+    width: 1024,
+    height: 1024,
     batch: 1,
-    refImages: [refImage]
+    refImages: [refImage],
+    loras: [{ file: QWEN_QUADVIEW_LORA, strength: 0.9 }]
   }
 }
 
-/** 步骤2b：不满意 → 用千问编辑+参考图 按指令修改（画布跟随参考图，width/height=0） */
+/** 步骤2b：不满意 → 编辑。千问用全能编辑；Krea2 用其四视图/编辑模板按指令改图 */
 export function buildCharacterEditInput(
   asset: Asset,
   templates: Template[],
   styleId: string | undefined,
   refImage: string,
-  editPrompt: string
+  editPrompt: string,
+  engine: ImageEngine = 'qwen'
 ): AssetJobInput | null {
-  const template = pickQwenEditTemplate(templates)
-  if (!template || !refImage) return null
   const prompt = (editPrompt || '').trim()
-  if (!prompt) return null
+  if (!prompt || !refImage) return null
+  if (engine === 'krea2') {
+    // Krea2 用其四视图/编辑模板做图生图修改（grounded encode 承载指令）
+    const template = pickFourViewTemplate(templates)
+    if (!template) return null
+    return {
+      templateId: template.id,
+      positive: prompt,
+      negative: undefined,
+      width: 0,
+      height: 0,
+      batch: 1,
+      refImages: [refImage]
+    }
+  }
+  const template = pickQwenEditTemplate(templates)
+  if (!template) return null
   return {
     templateId: template.id,
     positive: prompt,

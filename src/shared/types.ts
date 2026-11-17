@@ -301,6 +301,8 @@ export interface JobParams {
   /** 抽帧 / 插帧 */
   rife?: RifeSettings
   refImages?: string[]
+  /** 需要挂载的 LoRA（如千问多角度四视图） */
+  loras?: { file: string; strength: number }[]
   /** 参考视频（本段生成方式=视频参考时，传上一段成片） */
   refVideos?: string[]
   assetImageIds?: string[]

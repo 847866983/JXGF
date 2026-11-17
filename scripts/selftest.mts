@@ -22,6 +22,8 @@ import {
   buildCharacterFourViewInput,
   buildCharacterEditInput,
   buildFourViewPositive,
+  pickKrea2T2ITemplate,
+  pickFourViewTemplate,
   filterRenderableVersions,
   fourViewNegative
 } from '../src/renderer/src/lib/assetGen.ts'
@@ -985,6 +987,31 @@ ok('文件名：非法字符替换为下划线', () => {
   assert.ok(!/[<>:"/\\|?*]/.test(n), n)
 })
 ok('文件名：空名兜底', () => assert.equal(sanitizeOutputName(''), 'output'))
+
+// ---- 双引擎 ----
+const engTpl = [
+  { id: 'q-t2i', name: 'Qwen-image21-文生图流', kind: 'image', apiJson: {}, mapping: { version: 1 }, createdAt: '', description: '' },
+  { id: 'q-edit', name: '千问图片编辑(全能编辑)', kind: 'image', apiJson: {}, mapping: { version: 1 }, createdAt: '', description: '' },
+  { id: 'k-t2i', name: '02-Krea2-单双采', kind: 'image', apiJson: {}, mapping: { version: 1 }, createdAt: '', description: '' },
+  { id: 'k-4v', name: '04-Krea2-角色资产四视图', kind: 'image', apiJson: {}, mapping: { version: 1 }, createdAt: '', description: '' }
+]
+ok('双引擎：Krea2文生图模板选中单双采', () => assert.equal(pickKrea2T2ITemplate(engTpl).id, 'k-t2i'))
+ok('双引擎：Krea2四视图模板选中04', () => assert.equal(pickFourViewTemplate(engTpl).id, 'k-4v'))
+ok('双引擎：千问四视图带多角度LoRA', () => {
+  const r = buildCharacterFourViewInput(qAsset, engTpl, undefined, 'ref.png', 'qwen')
+  assert.equal(r.templateId, 'q-edit')
+  assert.ok(Array.isArray(r.loras) && r.loras.length === 1)
+  assert.ok(/multiple_angles/.test(r.loras[0].file))
+})
+ok('双引擎：Krea2四视图无LoRA且用04模板', () => {
+  const r = buildCharacterFourViewInput(qAsset, engTpl, undefined, 'ref.png', 'krea2')
+  assert.equal(r.templateId, 'k-4v')
+  assert.ok(!r.loras)
+})
+ok('双引擎：文生图按引擎选模板', () => {
+  assert.equal(buildCharacterT2IInput(qAsset, engTpl, undefined, 'krea2').templateId, 'k-t2i')
+  assert.equal(buildCharacterT2IInput(qAsset, engTpl, undefined, 'qwen').templateId, 'q-t2i')
+})
 
 console.log(`\nselftest: ${pass} passed, ${fail} failed`)
 if (fail > 0) process.exit(1)

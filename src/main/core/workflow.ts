@@ -25,6 +25,8 @@ export interface WorkflowParams {
   rife?: RifeSettings
   /** 参考图（图片编辑/图生图用；视频的参考图走媒体架） */
   refImages?: string[]
+  /** 需要挂载的 LoRA（如千问多角度四视图） */
+  loras?: { file: string; strength: number }[]
 }
 
 type WorkflowNode = { id: string; class_type: string; inputs: Record<string, unknown> }
@@ -413,6 +415,19 @@ export function buildWorkflow(template: Template, params: WorkflowParams): unkno
 
   // 先注入采样器细参（steps/cfg/sampler/scheduler），H3 的 SelfLift 会据此对齐
   applySamplerParams(clone, params)
+
+  // 挂载 LoRA（如千问多角度四视图）——放在所有分支之前，确保各路径都生效
+  if (Array.isArray(params.loras) && params.loras.length > 0) {
+    for (const node of Object.values(clone)) {
+      const ct = String(node.class_type)
+      if (!/BanZhang_LoRA_VramSafe|LoraLoaderModelOnly|LoraLoader/i.test(ct)) continue
+      const first = params.loras[0]
+      if ('LoRA文件' in node.inputs) node.inputs['LoRA文件'] = first.file
+      if ('lora_name' in node.inputs) node.inputs.lora_name = first.file
+      if ('模型强度' in node.inputs) node.inputs['模型强度'] = String(first.strength)
+      if ('strength_model' in node.inputs) node.inputs.strength_model = first.strength
+    }
+  }
 
   const hasQwenEdit = Object.values(clone).some((n) => isQwenEditNode(String(n.class_type)))
   const isH3 = Object.values(clone).some((n) => String(n.class_type).includes('CSGlide'))

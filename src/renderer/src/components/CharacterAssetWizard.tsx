@@ -8,10 +8,14 @@ import { persistProject } from './mutate'
 import {
   pickQwenT2ITemplate,
   pickQwenEditTemplate,
+  pickKrea2T2ITemplate,
+  pickFourViewTemplate,
   buildCharacterT2IInput,
   buildCharacterFourViewInput,
   buildCharacterEditInput,
   filterRenderableVersions,
+  ENGINE_LABEL,
+  type ImageEngine,
   type AssetJobInput
 } from '../lib/assetGen'
 
@@ -57,6 +61,7 @@ export function CharacterAssetWizard({ asset, onClose }: { asset: Asset; onClose
   const templates = project?.templates ?? []
   const versions = filterRenderableVersions(live.images)
 
+  const [engine, setEngine] = useState<ImageEngine>('qwen')
   const [prompt, setPrompt] = useState(live.prompt || live.description || '')
   const [dirty, setDirty] = useState(false)
   const [selected, setSelected] = useState<string | null>(live.coverFile ?? versions[versions.length - 1] ?? null)
@@ -130,7 +135,8 @@ export function CharacterAssetWizard({ asset, onClose }: { asset: Asset; onClose
         width: input.width,
         height: input.height,
         batch: input.batch,
-        refImages: input.refImages && input.refImages.length > 0 ? input.refImages : undefined
+        refImages: input.refImages && input.refImages.length > 0 ? input.refImages : undefined,
+        loras: input.loras && input.loras.length > 0 ? input.loras : undefined
       })
       setStatus(`已提交「${label}」，等待生成…（任务 ${job.id.slice(-6)}）`)
       const outcome = await waitForJob(job.id, setProgress)
@@ -173,7 +179,7 @@ export function CharacterAssetWizard({ asset, onClose }: { asset: Asset; onClose
       }
     }
     const img = await submit(
-      () => buildCharacterT2IInput({ ...live, prompt: prompt.trim() }, templates),
+      () => buildCharacterT2IInput({ ...live, prompt: prompt.trim() }, templates, undefined, engine),
       '生成形象',
       '缺少千问文生图模板，请先在「设置 → 导入工作流」导入千问文生图'
     )
@@ -188,7 +194,7 @@ export function CharacterAssetWizard({ asset, onClose }: { asset: Asset; onClose
       return
     }
     const img = await submit(
-      () => buildCharacterEditInput(live, templates, undefined, selected, instruction),
+      () => buildCharacterEditInput(live, templates, undefined, selected, instruction, engine),
       '局部编辑',
       '缺少千问「全能编辑」工作流模板'
     )
@@ -201,7 +207,7 @@ export function CharacterAssetWizard({ asset, onClose }: { asset: Asset; onClose
   const toFourView = async (): Promise<void> => {
     if (!selected) return
     await submit(
-      () => buildCharacterFourViewInput(live, templates, undefined, selected),
+      () => buildCharacterFourViewInput(live, templates, undefined, selected, engine),
       '转四视图',
       '缺少千问「全能编辑」工作流模板（转四视图需要它 + 参考图）'
     )
@@ -231,8 +237,8 @@ export function CharacterAssetWizard({ asset, onClose }: { asset: Asset; onClose
     window.setTimeout(() => setStatus(null), 2000)
   }
 
-  const hasT2I = Boolean(pickQwenT2ITemplate(templates))
-  const hasEdit = Boolean(pickQwenEditTemplate(templates))
+  const hasT2I = engine === 'krea2' ? Boolean(pickKrea2T2ITemplate(templates)) : Boolean(pickQwenT2ITemplate(templates))
+  const hasEdit = engine === 'krea2' ? Boolean(pickFourViewTemplate(templates)) : Boolean(pickQwenEditTemplate(templates))
 
   return (
     <Modal
@@ -318,6 +324,26 @@ export function CharacterAssetWizard({ asset, onClose }: { asset: Asset; onClose
 
         {/* 右栏 */}
         <div className="space-y-3">
+          {/* 引擎选择 */}
+          <div>
+            <label className="label">生图引擎（千问 / Krea2 并行）</label>
+            <div className="grid grid-cols-2 gap-1 rounded-lg border border-white/5 bg-ink-900 p-1">
+              {(['qwen', 'krea2'] as ImageEngine[]).map((e) => (
+                <button
+                  key={e}
+                  type="button"
+                  disabled={busy}
+                  onClick={() => setEngine(e)}
+                  className={`rounded-md px-3 py-1.5 text-xs transition-colors ${
+                    engine === e ? 'bg-accent-600/25 text-accent-300' : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  {ENGINE_LABEL[e]}
+                </button>
+              ))}
+            </div>
+          </div>
+
           {/* 2. 提示词 */}
           <div>
             <div className="mb-1.5 flex items-center justify-between">

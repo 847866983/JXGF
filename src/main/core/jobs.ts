@@ -136,7 +136,8 @@ export class JobManager {
         h3: params.h3,
         upscale: params.upscale,
         rife: params.rife,
-        refImages: params.refImages
+        refImages: params.refImages,
+        loras: params.loras
       })
 
       // 参考图：分镜引用的资产封面，上传到 ComfyUI 后注入 H3 媒体架（ref2va 素材）。
