@@ -240,6 +240,7 @@ export function CharacterAssetWizard({ asset, onClose }: { asset: Asset; onClose
   return (
     <Modal
       title={`角色资产 · ${live.name}`}
+      size="wide"
       onClose={onClose}
       footer={
         <button className="btn-ghost" onClick={onClose}>
@@ -247,55 +248,107 @@ export function CharacterAssetWizard({ asset, onClose }: { asset: Asset; onClose
         </button>
       }
     >
-      <div className="space-y-4">
-        {/* 1. 大图预览 */}
-        <div className="overflow-hidden rounded-xl border border-white/10 bg-ink-950">
-          {selected ? (
-            <MediaImage
-              src={selected}
-              alt="当前角色图"
-              className="max-h-[420px] w-full object-contain"
-              fallback={
-                <div className="flex h-52 w-full items-center justify-center text-sm text-slate-600">图片加载失败</div>
-              }
-            />
-          ) : (
-            <div className="flex h-52 w-full flex-col items-center justify-center gap-2 text-sm text-slate-600">
-              <ImagePlus size={28} />
-              还没有生成图，先在下面填提示词并生成
-            </div>
-          )}
-        </div>
-
-        {/* 2. 提示词（可编辑 + 保存） */}
-        <div>
-          <div className="mb-1.5 flex items-center justify-between">
-            <label className="label mb-0">提示词（可修改，保存后对全项目生效）</label>
-            <button
-              className={`btn-ghost !px-2.5 !py-1 text-xs ${dirty ? 'text-accent-400' : 'text-slate-500'}`}
-              onClick={() => void savePrompt()}
-              disabled={busy || !dirty}
-              title="把提示词保存到资产"
-            >
-              <Save size={13} />
-              {dirty ? '保存提示词' : '已保存'}
-            </button>
+      {/* 宽屏双栏：左=大图+版本，右=提示词+操作 */}
+      <div className="grid gap-5 lg:grid-cols-[minmax(0,1.35fr)_minmax(320px,1fr)]">
+        {/* 左栏 */}
+        <div className="space-y-4">
+          {/* 1. 大图预览 */}
+          <div className="overflow-hidden rounded-xl border border-white/10 bg-ink-950">
+            {selected ? (
+              <MediaImage
+                src={selected}
+                alt="当前角色图"
+                className="max-h-[560px] min-h-[300px] w-full object-contain"
+                fallback={
+                  <div className="flex h-64 w-full items-center justify-center text-sm text-slate-600">图片加载失败</div>
+                }
+              />
+            ) : (
+              <div className="flex h-64 w-full flex-col items-center justify-center gap-2 text-sm text-slate-600">
+                <ImagePlus size={28} />
+                还没有生成图，先在右侧填提示词并生成
+              </div>
+            )}
           </div>
-          <textarea
-            className="field min-h-[130px] resize-y leading-relaxed"
-            value={prompt}
-            onChange={(e) => {
-              setPrompt(e.target.value)
-              setDirty(true)
-            }}
-            placeholder="描述角色外形 / 服装 / 发型 / 气质…"
-          />
+
+          {/* 4. 版本列表 */}
+          <div>
+            <div className="mb-1.5 text-xs text-slate-500">
+              已保存版本 <span className="text-slate-300">{versions.length}</span> 个（点选一版用于编辑 / 转四视图）
+            </div>
+            {versions.length === 0 ? (
+              <div className="rounded-lg bg-white/[0.03] px-3 py-2 text-[11px] text-slate-500">还没有版本</div>
+            ) : (
+              <div className="grid max-h-[190px] grid-cols-6 gap-2 overflow-y-auto rounded-lg border border-white/5 bg-white/[0.02] p-2 xl:grid-cols-8">
+                {versions.map((img) => {
+                  const active = selected === img
+                  const bound = live.coverFile === img
+                  return (
+                    <div
+                      key={img}
+                      className={`group relative aspect-square overflow-hidden rounded border ${
+                        active ? 'border-accent-500 ring-1 ring-accent-500' : 'border-white/10 hover:border-white/30'
+                      }`}
+                    >
+                      <button type="button" className="h-full w-full" title={img} onClick={() => setSelected(img)}>
+                        <MediaImage
+                          src={img}
+                          alt=""
+                          className="h-full w-full object-cover"
+                          fallback={<div className="h-full w-full bg-ink-800" />}
+                        />
+                      </button>
+                      {bound && (
+                        <span className="pointer-events-none absolute inset-x-0 bottom-0 bg-accent-600/80 text-center text-[9px] text-white">
+                          绑定图
+                        </span>
+                      )}
+                      <button
+                        type="button"
+                        title="删除这一版"
+                        className="absolute right-0.5 top-0.5 hidden h-4 w-4 items-center justify-center rounded bg-black/70 text-[10px] text-white hover:bg-rose-600 group-hover:flex"
+                        onClick={() => void removeVersion(img)}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
         </div>
 
-        {/* 3. 生成新版 */}
-        <div className="grid grid-cols-2 gap-2">
+        {/* 右栏 */}
+        <div className="space-y-3">
+          {/* 2. 提示词 */}
+          <div>
+            <div className="mb-1.5 flex items-center justify-between">
+              <label className="label mb-0">提示词（可修改，保存后生效）</label>
+              <button
+                className={`btn-ghost !px-2.5 !py-1 text-xs ${dirty ? 'text-accent-400' : 'text-slate-500'}`}
+                onClick={() => void savePrompt()}
+                disabled={busy || !dirty}
+                title="把提示词保存到资产"
+              >
+                <Save size={13} />
+                {dirty ? '保存提示词' : '已保存'}
+              </button>
+            </div>
+            <textarea
+              className="field min-h-[220px] resize-y leading-relaxed"
+              value={prompt}
+              onChange={(e) => {
+                setPrompt(e.target.value)
+                setDirty(true)
+              }}
+              placeholder="描述角色外形 / 服装 / 发型 / 气质…"
+            />
+          </div>
+
+          {/* 3. 生成新版 */}
           <button
-            className="btn-primary col-span-2"
+            className="btn-primary w-full"
             disabled={busy || !prompt.trim() || !hasT2I}
             onClick={() => void generateNew()}
             title={hasT2I ? '按提示词生成一版新形象' : '缺少千问文生图模板'}
@@ -303,129 +356,88 @@ export function CharacterAssetWizard({ asset, onClose }: { asset: Asset; onClose
             {busy ? <Loader2 size={15} className="animate-spin" /> : <Wand2 size={15} />}
             生成新版形象
           </button>
-        </div>
-        {!hasT2I && <div className="text-xs text-amber-400/80">缺少千问文生图模板，无法生成形象</div>}
+          {!hasT2I && <div className="text-xs text-amber-400/80">缺少千问文生图模板，无法生成形象</div>}
 
-        {/* 4. 版本列表（每版都保留，可删除、可选中） */}
-        <div>
-          <div className="mb-1.5 flex items-center justify-between">
-            <span className="text-xs text-slate-500">
-              已保存版本 <span className="text-slate-300">{versions.length}</span> 个（点选一版用于编辑 / 转四视图）
-            </span>
-          </div>
-          {versions.length === 0 ? (
-            <div className="rounded-lg bg-white/[0.03] px-3 py-2 text-[11px] text-slate-500">还没有版本</div>
-          ) : (
-            <div className="grid max-h-[180px] grid-cols-5 gap-2 overflow-y-auto rounded-lg border border-white/5 bg-white/[0.02] p-2">
-              {versions.map((img) => {
-                const active = selected === img
-                const bound = live.coverFile === img
-                return (
-                  <div
-                    key={img}
-                    className={`group relative aspect-square overflow-hidden rounded border ${
-                      active ? 'border-accent-500 ring-1 ring-accent-500' : 'border-white/10 hover:border-white/30'
-                    }`}
+          {/* 5. 局部编辑 */}
+          {selected && (
+            <div className="space-y-2 rounded-lg border border-white/5 bg-white/[0.02] p-3">
+              <div className="flex items-center justify-between">
+                <span className="flex items-center gap-1.5 text-xs text-slate-400">
+                  <Pencil size={12} />
+                  局部编辑（基于选中版本修改）
+                </span>
+                {!editOpen && (
+                  <button
+                    className="btn-ghost !px-2 !py-1 text-xs"
+                    disabled={busy || !hasEdit}
+                    onClick={() => setEditOpen(true)}
                   >
-                    <button type="button" className="h-full w-full" title={img} onClick={() => setSelected(img)}>
-                      <MediaImage
-                        src={img}
-                        alt=""
-                        className="h-full w-full object-cover"
-                        fallback={<div className="h-full w-full bg-ink-800" />}
-                      />
-                    </button>
-                    {bound && (
-                      <span className="pointer-events-none absolute inset-x-0 bottom-0 bg-accent-600/80 text-center text-[9px] text-white">
-                        绑定图
-                      </span>
-                    )}
+                    展开
+                  </button>
+                )}
+              </div>
+              {editOpen && (
+                <>
+                  <textarea
+                    className="field min-h-[80px] resize-y"
+                    value={editPrompt}
+                    onChange={(e) => setEditPrompt(e.target.value)}
+                    placeholder="例如：短发改成长发、外套换成黑色、去掉眼镜…"
+                  />
+                  <div className="flex gap-2">
                     <button
-                      type="button"
-                      title="删除这一版"
-                      className="absolute right-0.5 top-0.5 hidden h-4 w-4 items-center justify-center rounded bg-black/70 text-[10px] text-white hover:bg-rose-600 group-hover:flex"
-                      onClick={() => void removeVersion(img)}
+                      className="btn-primary flex-1"
+                      disabled={busy || !editPrompt.trim() || !hasEdit}
+                      onClick={() => void applyEdit()}
                     >
-                      ×
+                      {busy ? <Loader2 size={14} className="animate-spin" /> : <Wand2 size={14} />}
+                      应用编辑
+                    </button>
+                    <button className="btn-ghost" disabled={busy} onClick={() => setEditOpen(false)}>
+                      收起
                     </button>
                   </div>
-                )
-              })}
-            </div>
-          )}
-        </div>
-
-        {/* 5. 局部编辑（针对选中版本） */}
-        {selected && (
-          <div className="space-y-2 rounded-lg border border-white/5 bg-white/[0.02] p-3">
-            <div className="flex items-center justify-between">
-              <span className="flex items-center gap-1.5 text-xs text-slate-400">
-                <Pencil size={12} />
-                局部编辑（基于选中版本修改，不重画整张）
-              </span>
-              {!editOpen && (
-                <button className="btn-ghost !px-2 !py-1 text-xs" disabled={busy || !hasEdit} onClick={() => setEditOpen(true)}>
-                  展开
-                </button>
+                </>
               )}
             </div>
-            {editOpen && (
-              <>
-                <textarea
-                  className="field min-h-[70px] resize-y"
-                  value={editPrompt}
-                  onChange={(e) => setEditPrompt(e.target.value)}
-                  placeholder="例如：短发改成长发、外套换成黑色、去掉眼镜、背景换成深色…"
-                />
-                <div className="flex gap-2">
-                  <button
-                    className="btn-primary flex-1"
-                    disabled={busy || !editPrompt.trim() || !hasEdit}
-                    onClick={() => void applyEdit()}
-                  >
-                    {busy ? <Loader2 size={14} className="animate-spin" /> : <Wand2 size={14} />}
-                    应用编辑（生成新版本）
-                  </button>
-                  <button className="btn-ghost" disabled={busy} onClick={() => setEditOpen(false)}>
-                    收起
-                  </button>
-                </div>
-              </>
-            )}
+          )}
+
+          {/* 6. 确认动作 */}
+          <div className="grid grid-cols-2 gap-2">
+            <button className="btn-ghost" disabled={busy || !selected || !hasEdit} onClick={() => void toFourView()}>
+              <ScanFace size={15} />
+              确定，转四视图
+            </button>
+            <button
+              className="btn-primary"
+              disabled={busy || !selected}
+              onClick={() => selected && void useAsCover(selected)}
+            >
+              <Check size={15} />
+              设为角色图
+            </button>
           </div>
-        )}
+          {!hasEdit && selected && (
+            <div className="text-xs text-amber-400/80">缺少千问「全能编辑」模板，无法编辑或转四视图</div>
+          )}
 
-        {/* 6. 确定 → 转四视图 / 设为绑定图 */}
-        <div className="grid grid-cols-2 gap-2">
-          <button className="btn-ghost" disabled={busy || !selected || !hasEdit} onClick={() => void toFourView()}>
-            <ScanFace size={15} />
-            确定，转四视图
-          </button>
-          <button className="btn-primary" disabled={busy || !selected} onClick={() => selected && void useAsCover(selected)}>
-            <Check size={15} />
-            设为角色图
-          </button>
-        </div>
-        {!hasEdit && selected && (
-          <div className="text-xs text-amber-400/80">缺少千问「全能编辑」模板，无法编辑或转四视图</div>
-        )}
-
-        {/* 状态 / 错误 */}
-        {busy && (
-          <div className="space-y-2 rounded-lg bg-accent-600/10 px-3 py-2.5">
-            <div className="flex items-center gap-2 text-sm text-accent-400">
-              <Loader2 size={15} className="animate-spin" />
-              {status ?? '生成中…'}
-            </div>
-            {progress > 0 && (
-              <div className="h-1.5 overflow-hidden rounded-full bg-white/10">
-                <div className="h-full bg-accent-500 transition-all" style={{ width: `${progress}%` }} />
+          {/* 状态 / 错误 */}
+          {busy && (
+            <div className="space-y-2 rounded-lg bg-accent-600/10 px-3 py-2.5">
+              <div className="flex items-center gap-2 text-sm text-accent-400">
+                <Loader2 size={15} className="animate-spin" />
+                {status ?? '生成中…'}
               </div>
-            )}
-          </div>
-        )}
-        {!busy && status && <div className="text-xs text-emerald-400">{status}</div>}
-        {error && <div className="rounded-lg bg-rose-500/10 px-3 py-2 text-sm text-rose-300">{error}</div>}
+              {progress > 0 && (
+                <div className="h-1.5 overflow-hidden rounded-full bg-white/10">
+                  <div className="h-full bg-accent-500 transition-all" style={{ width: `${progress}%` }} />
+                </div>
+              )}
+            </div>
+          )}
+          {!busy && status && <div className="text-xs text-emerald-400">{status}</div>}
+          {error && <div className="rounded-lg bg-rose-500/10 px-3 py-2 text-sm text-rose-300">{error}</div>}
+        </div>
       </div>
     </Modal>
   )
