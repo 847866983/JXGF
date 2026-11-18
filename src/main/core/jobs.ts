@@ -330,7 +330,18 @@ export class JobManager {
           for (const f of finalFiles.slice(0, 12)) {
             const safeName = sanitizeOutputName(f.filename)
             const ext = path.extname(safeName).slice(1).toLowerCase()
-            const outKind: ShotOutput['kind'] = ['mp4', 'webm', 'mov'].includes(ext) || f.type === 'output' ? 'video' : 'image'
+            // 按扩展名优先判断产物类型：
+            // ComfyUI 的 SaveImage 输出 type 也是 'output'，若用 type 判断会把图片误判成视频，
+            // 进而被 writeAssetOutputs 的 image 过滤掉，表现为"生成成功但图不出现在资产里"。
+            const IMAGE_EXT = ['png', 'jpg', 'jpeg', 'webp', 'bmp', 'gif', 'avif']
+            const VIDEO_EXT = ['mp4', 'webm', 'mov', 'mkv', 'avi', 'm4v']
+            const outKind: ShotOutput['kind'] = IMAGE_EXT.includes(ext)
+              ? 'image'
+              : VIDEO_EXT.includes(ext)
+                ? 'video'
+                : kind === 'video'
+                  ? 'video'
+                  : 'image'
             // 目标文件已存在时加序号，避免同名覆盖导致"新版本没出现"
             let dest = path.join(media, safeName)
             if (await pathExists(dest)) {
