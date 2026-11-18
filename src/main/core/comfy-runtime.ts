@@ -158,6 +158,14 @@ export class ComfyRuntime extends EventEmitter {
     }
     const cur = await this.status()
     if (cur.status === 'running') return cur
+    // 端口已被别的 ComfyUI 占用（可能是上次残留/手动启动）：直接复用，不再重复启动
+    if (await health(Number(cfg.port) || 8188)) {
+      const st = await this.status()
+      if (st.status !== 'running') {
+        return { ...st, status: 'running', root, port: Number(cfg.port) || 8188 }
+      }
+      return st
+    }
 
     const python = cfg.python ?? this.findPython(root)
     const mainPy = this.mainPyOf(root)

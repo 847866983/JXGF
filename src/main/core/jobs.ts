@@ -9,11 +9,25 @@ async function pathExists(p: string): Promise<boolean> {
 }
 
 import fsp from 'node:fs/promises'
+import fs from 'node:fs'
+import os from 'node:os'
 import type { ComfySettings, JobInfo, JobParams, JobStatus, ShotOutput, Template } from '@shared/types'
 import { ComfyClient, makeClient } from './comfy'
 import { buildWorkflow, extractH3Chain, injectH3RefImages, injectH3RefVideos } from './workflow'
 import { uid, now, ProjectStore } from './store'
 import { collectMediaFiles, collectHistoryFiles, pickFinalMedia, sanitizeOutputName, type MediaFile } from './output-files'
+import { buildBuiltinTemplates } from './builtin-workflows'
+
+/** 任务诊断日志（写 userData/logs/jobs.log，便于排查生成失败） */
+function jobLog(msg: string): void {
+  try {
+    const dir = path.join(process.env.APPDATA ?? os.tmpdir(), 'frameforge', 'logs')
+    fs.mkdirSync(dir, { recursive: true })
+    fs.appendFileSync(path.join(dir, 'jobs.log'), `${new Date().toISOString()} ${msg}\n`)
+  } catch {
+    // 日志失败不影响主流程
+  }
+}
 
 interface QueuedJob {
   info: JobInfo
@@ -37,10 +51,12 @@ export class JobManager {
   private running = false
   private client: ComfyClient | null = null
   private readonly emit: Emit
+  private readonly store: ProjectStore
   /** 记录每个 jobId 的原始参数，供失败后一键重试 */
   private jobParams = new Map<string, JobParams>()
 
-  constructor(private readonly store: ProjectStore, emit: Emit) {
+  constructor(store: ProjectStore, emit: Emit) {
+    this.store = store
     this.emit = emit
   }
 
@@ -51,8 +67,18 @@ export class JobManager {
   enqueue(params: JobParams): JobInfo {
     const project = this.store.getCurrent()
     if (!project) throw new Error('请先打开一个项目')
-    const template = project.templates.find((t) => t.id === params.templateId)
-    if (!template) throw new Error('找不到生成模板')
+    let template = project.templates.find((t) => t.id === params.templateId)
+    if (!template) {
+      // 项目模板缺失（老项目 / 无模板项目）：先补内置工作流再重试一次
+      const added = buildBuiltinTemplates(project.templates, uid, now)
+      if (added.length > 0) {
+        project.templates.push(...added)
+        void this.store.flush()
+        template = project.templates.find((t) => t.id === params.templateId)
+      }
+    }
+    jobLog(`enqueue templateId=${params.templateId} assetId=${params.assetId ?? '-'} 模板=${template?.name ?? '未找到'} 项目模板数=${project.templates.length}`)
+    if (!template) throw new Error(`找不到生成模板（id=${params.templateId}，当前项目共 ${project.templates.length} 个模板）`)
     const info: JobInfo = {
       id: uid('job_'),
       kind: template.kind,
@@ -186,6 +212,7 @@ export class JobManager {
       this.emit('job:updated', { job: info })
 
       const outputs = await this.waitForOutput(promptId, template.kind, info, settings)
+      jobLog(`job完成 promptId=${promptId} kind=${template.kind} 产物数=${outputs.length} 文件=${outputs.map((o) => path.basename(o.file)).join(',')}`)
       info.outputs = outputs.map((o) => ({ file: o.file, kind: o.kind }))
       this.writeShotOutputs(params.shotId, outputs)
       await this.writeAssetOutputs(params.assetId, outputs) // 先落盘
@@ -199,6 +226,7 @@ export class JobManager {
       const autoRetry = project2?.settings.autoRetry ?? 1
       // 超时不自动重试：视频往往只是慢/产物在 history 里，重试会重复生成浪费几小时
       const noRetry = (err as RetryableError).noRetry === true
+      jobLog(`job失败 promptId=${info.promptId ?? '-'} kind=${template.kind} 错误=${String((err as Error).message ?? err)}`)
       if (!noRetry && q.attempt < autoRetry) {
         q.attempt += 1
         this.queue.unshift(q)
