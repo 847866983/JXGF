@@ -177,7 +177,7 @@ const KREA2_PACK: CatalogEntry = {
   label: 'Krea2 图片生成（全套）',
   kind: 'pack',
   description:
-    'Krea2 文生图 / 局部编辑 / 四视图所需：Turbo 模型(bf16+fp8)、文本编码器、VAE、4步加速 LoRA、MJ 风格 LoRA、RealVAE。约 68GB。（QuadView 四视图专用 LoRA 无公开源，缺失时自动降级为纯提示词出图）',
+    'Krea2 文生图 / 局部编辑 / 四视图所需：Turbo 模型(bf16+fp8)、文本编码器、VAE、4步加速 LoRA、MJ 风格 LoRA、RealVAE、身材/人像摄影 LoRA(公开替代)。约 68GB。注意：QuadView 四视图专用 LoRA 无公开源，缺失时自动降级为纯提示词出四视图（也可切千问引擎出四视图，效果更稳）。',
   vendor: 'nvidia',
   minVramMB: 6 * 1024,
   files: [
@@ -225,6 +225,18 @@ const KREA2_PACK: CatalogEntry = {
       file: 'loras/krea2-Cc-MJ-风格滤镜.safetensors',
       sizeMB: 327,
       sources: mirrorSources('RunningHubAI/rh-krea2-cc-mj-lora', 'krea2-Cc-MJ-风格滤镜.safetensors')
+    },
+    {
+      // 社区私有「天魔-身材」的公开替代（同为 218MB，功能相近）
+      file: 'loras/krea2-Cc-天魔-身材.safetensors',
+      sizeMB: 218,
+      sources: mirrorSources('uzumix/krea2_realisticSnapshot', 'RealisticSnapshotKrea2.safetensors')
+    },
+    {
+      // 社区私有「美学人像摄影」的公开替代（同为 224MB，功能相近）
+      file: 'loras/krea2-美学人像摄影.safetensors',
+      sizeMB: 224,
+      sources: mirrorSources('thatboymentor/SEEDRAAI-REAL-Natural-Photography-Krea2', 'SeedraAI-REAL-Natural-Photography-v2.safetensors')
     }
   ]
 }
