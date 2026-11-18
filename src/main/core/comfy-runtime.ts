@@ -169,25 +169,33 @@ export class ComfyRuntime extends EventEmitter {
     }
 
     await fsp.mkdir(this.runtimeDir, { recursive: true })
-    const logFd = fs.openSync(this.logPath(), 'a')
-    const args = ['-s', mainPy, '--windows-standalone-build', '--listen', '127.0.0.1', '--port', String(cfg.port || 8188)]
-    // 关键：Windows 下 Python 默认用 GBK 写 stdout，ComfyUI 输出 emoji（如 ✅）会抛
-    // UnicodeEncodeError 直接崩溃 → 表现为「点启动没反应」。强制 UTF-8 输出。
-    const child = spawn(python, args, {
-      cwd: path.dirname(mainPy),
-      detached: true,
-      windowsHide: true,
-      env: {
-        ...process.env,
-        PYTHONIOENCODING: 'utf-8',
-        PYTHONUTF8: '1',
-        PYTHONLEGACYWINDOWSSTDIO: '0'
-      },
-      stdio: ['ignore', logFd, logFd] as ['ignore', number, number]
-    })
-    child.unref()
-    fs.closeSync(logFd)
-    await fsp.writeFile(this.statePath(), JSON.stringify({ pid: child.pid, port: cfg.port || 8188, startedAt: new Date().toISOString() }), 'utf8')
+    const logPath = this.logPath()
+    const port = cfg.port || 8188
+    // Windows 下 python.exe 是控制台程序，直接 spawn 会弹出黑色控制台窗口，
+    // windowsHide 对 detached 子进程无效。改由 PowerShell 的 Start-Process -WindowStyle Hidden
+    // 启动，可彻底隐藏窗口；同时用 -PassThru 回读真实 pid 写入状态文件。
+    const env_prefix =
+      '$env:PYTHONIOENCODING="utf-8";$env:PYTHONUTF8="1";$env:PYTHONLEGACYWINDOWSSTDIO="0";'
+    const psArgs = [
+      '-NoProfile',
+      '-NonInteractive',
+      '-WindowStyle',
+      'Hidden',
+      '-Command',
+      `${env_prefix}$p=Start-Process -FilePath '${python.replace(/'/g, "''")}' ` +
+        `-ArgumentList @('-s','${mainPy.replace(/'/g, "''")}','--windows-standalone-build','--listen','127.0.0.1','--port','${port}') ` +
+        `-WorkingDirectory '${path.dirname(mainPy).replace(/'/g, "''")}' -WindowStyle Hidden -PassThru ` +
+        `-RedirectStandardOutput '${logPath.replace(/'/g, "''")}' -RedirectStandardError '${logPath.replace(/'/g, "''")}.err'; ` +
+        `$p.Id`
+    ]
+    const ps = spawn('powershell.exe', psArgs, { windowsHide: true })
+    let pidText = ''
+    ps.stdout?.on('data', (d: Buffer) => (pidText += d.toString()))
+    const psExit = new Promise<void>((resolve) => ps.on('exit', () => resolve()))
+    // 等 PowerShell 打印 pid（最多 8 秒）
+    await Promise.race([psExit, new Promise((r) => setTimeout(r, 8000))])
+    const startedPid = Number(pidText.trim().split(/\s+/).pop()) || ps.pid || 0
+    await fsp.writeFile(this.statePath(), JSON.stringify({ pid: startedPid, port, startedAt: new Date().toISOString() }), 'utf8')
 
     // 轮询健康检查，最多 90 秒
     for (let i = 0; i < 45; i += 1) {
