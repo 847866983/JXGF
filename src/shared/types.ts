@@ -369,7 +369,7 @@ export interface DownloadRequest {
   dest: string
   sha256?: string
   /** 多文件打包下载（一个工作流一套模型） */
-  files?: { url: string; dest: string; sha256?: string }[]
+  files?: { url: string; dest: string; sha256?: string; mirrors?: string[] }[]
   /** 并行线程数（分块下载），默认 4 */
   parallel?: number
 }

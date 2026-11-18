@@ -1106,5 +1106,46 @@ ok('四视图：提示词含半身特写+正侧背全身', () => {
   assert.ok(/facial features/i.test(p), '缺少脸部细节')
 })
 
+ok('下载引擎：进度事件被节流(不刷爆IPC)', async () => {
+  // 4MB 本地文件，state 事件应远少于未节流的次数
+  const p2 = Buffer.alloc(4 * 1024 * 1024)
+  for (let i = 0; i < p2.length; i++) p2[i] = i % 251
+  const srv = http.createServer((req, res) => {
+    const m = /bytes=(\d+)-(\d*)/.exec(req.headers.range ?? '')
+    const start = m ? Number(m[1]) : 0
+    const end = m && m[2] ? Number(m[2]) : p2.length - 1
+    if (m) { res.writeHead(206, { 'Content-Range': `bytes ${start}-${end}/${p2.length}`, 'Content-Length': end - start + 1 }); res.end(p2.subarray(start, end + 1)) }
+    else { res.writeHead(200, { 'Content-Length': p2.length }); res.end(p2) }
+  })
+  await new Promise<void>((r) => srv.listen(0, '127.0.0.1', () => r()))
+  const pt = (srv.address() as { port: number }).port
+  const dm2 = new DownloadManager()
+  let emits = 0
+  dm2.on('state', () => emits++)
+  const dir2 = await fsp.mkdtemp(path.join(os.tmpdir(), 'ff-thr-'))
+  await new Promise<void>((resolve) => {
+    dm2.once('done', () => resolve())
+    dm2.once('failed', () => resolve())
+    dm2.start({ id: 'thr', label: '节流', url: `http://127.0.0.1:${pt}/f`, dest: path.join(dir2, 'x.bin'), parallel: 4 })
+  })
+  srv.close()
+  await fsp.rm(dir2, { recursive: true, force: true })
+  assert.ok(emits < 40, `事件过多: ${emits} (应被节流)`)
+})
+ok('目录：各工作流包首个源均为 hf-mirror 镜像', () => {
+  for (const e of MODEL_CATALOG) {
+    for (const f of e.files ?? []) {
+      assert.ok(f.sources[0].url.includes('hf-mirror.com'), `${e.id}/${f.file} 首源不是镜像: ${f.sources[0].name}`)
+    }
+  }
+})
+ok('目录：H3 六个文件目标名与工作流一致', () => {
+  const h3 = MODEL_CATALOG.find((e) => e.id === 'pack-h3-video')!
+  const names = h3.files!.map((f) => f.file)
+  assert.ok(names.some((n) => n.endsWith('MiniMax-H3/minimax_h3_hybrid_fl2va_ref2va_b25-49.safetensors')))
+  assert.ok(names.some((n) => n.endsWith('vae/minimax_h3_video_vae_int8_convrot.safetensors')))
+  assert.ok(names.some((n) => n.endsWith('vae_approx/MiniMax-H3-TAE.safetensors')))
+})
+
 console.log(`\nselftest: ${pass} passed, ${fail} failed`)
 if (fail > 0) process.exit(1)

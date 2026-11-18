@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events'
-import { spawn, spawnSync } from 'node:child_process'
+import { spawn, spawnSync, execFile } from 'node:child_process'
 import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
@@ -17,11 +17,24 @@ function exists(p: string): boolean {
   }
 }
 
-function isAlive(pid: number): boolean {
+/** 进程存活探测缓存（避免频繁 tasklist 阻塞；tasklist 改为异步执行不冻结主进程） */
+const aliveCache = new Map<number, { at: number; alive: boolean }>()
+async function isAlive(pid: number): Promise<boolean> {
   if (!pid) return false
+  const cached = aliveCache.get(pid)
+  if (cached && Date.now() - cached.at < 3000) return cached.alive
   try {
-    const r = spawnSync('tasklist', ['/FI', `PID eq ${pid}`, '/NH'], { encoding: 'utf8', timeout: 5000, windowsHide: true })
-    return String(r.stdout ?? '').includes(String(pid))
+    const stdout = await new Promise<string>((resolve) => {
+      execFile(
+        'tasklist',
+        ['/FI', `PID eq ${pid}`, '/NH'],
+        { encoding: 'utf8', timeout: 5000, windowsHide: true },
+        (_err, out) => resolve(String(out ?? ''))
+      )
+    })
+    const alive = stdout.includes(String(pid))
+    aliveCache.set(pid, { at: Date.now(), alive })
+    return alive
   } catch {
     return false
   }
@@ -137,7 +150,7 @@ export class ComfyRuntime extends EventEmitter {
     const roots = this.detectRoots()
     const root = cfg.root ?? roots[0] ?? null
     const port = Number(cfg.port) || 8188
-    const alive = state ? isAlive(state.pid) : false
+    const alive = state ? await isAlive(state.pid) : false
     const online = state ? await health(port) : false
 
     let status: ComfyRuntimeState['status']
@@ -217,7 +230,7 @@ export class ComfyRuntime extends EventEmitter {
 
   async stop(): Promise<ComfyRuntimeState> {
     const state = await this.readState()
-    if (state?.pid && isAlive(state.pid)) {
+    if (state?.pid && (await isAlive(state.pid))) {
       spawnSync('taskkill', ['/PID', String(state.pid), '/T', '/F'], { encoding: 'utf8', timeout: 15000, windowsHide: true })
     }
     await fsp.rm(this.statePath(), { force: true }).catch(() => undefined)

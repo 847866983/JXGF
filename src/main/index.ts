@@ -201,7 +201,10 @@ function registerIpc(): void {
     return { gpu, comfy, models, ffmpeg: detectFfmpeg(), scannedAt: now() }
   })
 
+  // 目录结果短缓存：连续刷新时避免重复扫描文件系统（下载结束会主动刷新，2 秒内复用即可）
+  let catalogCache: { at: number; items: ReturnType<typeof resolveCatalog> } | null = null
   ipcMain.handle(CH.envCatalog, async () => {
+    if (catalogCache && Date.now() - catalogCache.at < 2000) return catalogCache.items
     const report = await getHardware()
     // 若已配置 ComfyUI 根目录，模型直接下到它的 models/，这样 ComfyUI 能直接加载。
     // 根目录可能是「含 ComfyUI 子目录的上级」或「ComfyUI 目录本身」，按实际结构判断。
@@ -212,7 +215,9 @@ function registerIpc(): void {
         ? path.join(st.root, 'ComfyUI', 'models')
         : path.join(st.root, 'models')
     }
-    return resolveCatalog(path.join(app.getPath('userData'), 'runtime'), report.gpu, modelsRoot)
+    const items = resolveCatalog(path.join(app.getPath('userData'), 'runtime'), report.gpu, modelsRoot)
+    catalogCache = { at: Date.now(), items }
+    return items
   })
 
   ipcMain.handle(CH.envExtract, async (_e, payload: { archive: string; dest: string }) => {

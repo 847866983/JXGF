@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Activity, CheckCircle2, Cpu, Download, FolderOpen, Package, PackagePlus, Play, RefreshCw, ServerCog, Square, TriangleAlert } from 'lucide-react'
 import type { CatalogItem, ComfyInstallState, ComfyRuntimeState, DownloadTask, EnvironmentReport } from '@shared/types'
@@ -37,6 +37,8 @@ export default function Environment({ embedded = false }: { embedded?: boolean }
   const [nodePackMsg, setNodePackMsg] = useState<string | null>(null)
   /** 每条下载项的进度快照（id -> task） */
   const [tasks, setTasks] = useState<Record<string, DownloadTask>>({})
+  /** 每条任务上次前端刷新时间（节流用） */
+  const lastTaskUpdate = useRef<Record<string, number>>({})
 
   const refreshNodePack = async (root: string): Promise<void> => {
     if (!root.trim()) return
@@ -83,10 +85,16 @@ export default function Environment({ embedded = false }: { embedded?: boolean }
     if (item.files && item.files.length > 0) {
       const src = item.files[0].sources[srcIdx] ?? item.files[0].sources[0]
       const files = item.files.map((f) => {
-        const use = f.sources[srcIdx] ?? f.sources[0]
-        return { url: use.url, dest: f.dest, sha256: undefined as string | undefined }
+        // 当前选中源优先，其余镜像作为备用自动回退
+        const ordered = [f.sources[srcIdx] ?? f.sources[0], ...f.sources].filter(Boolean)
+        const uniq = [...new Map(ordered.map((s) => [s.url, s])).values()]
+        return {
+          url: uniq[0].url,
+          dest: f.dest,
+          mirrors: uniq.slice(1).map((s) => s.url)
+        }
       })
-      await window.api.downloadStart({ id: item.id, label: item.label, url: src.url, dest: item.dest ?? '', files, parallel: 6 })
+      await window.api.downloadStart({ id: item.id, label: item.label, url: src.url, dest: item.dest ?? '', files, parallel: 4 })
     } else {
       const src = s0
       await window.api.downloadStart({
@@ -94,7 +102,7 @@ export default function Environment({ embedded = false }: { embedded?: boolean }
         label: item.label,
         url: src.url,
         dest: item.dest ?? '',
-        parallel: 6
+        parallel: 4
       })
     }
   }
@@ -185,8 +193,14 @@ export default function Environment({ embedded = false }: { embedded?: boolean }
     return window.api.onEvent((e) => {
       if (e.type === 'download:state') {
         const task = e.task as DownloadTask
+        const finished = task.status === 'done' || task.status === 'failed' || task.status === 'cancelled'
+        const nowMs = Date.now()
+        const last = lastTaskUpdate.current[task.id] ?? 0
+        // 每个任务独立节流 500ms：避免高频进度更新引起整页重渲染卡顿（结束时立即更新）
+        if (!finished && nowMs - last < 500) return
+        lastTaskUpdate.current[task.id] = nowMs
         setTasks((prev) => ({ ...prev, [task.id]: task }))
-        refreshCatalog()
+        if (finished) refreshCatalog()
       }
       if (e.type === 'comfy:runtime') setRuntime(e.state)
       if (e.type === 'comfy:install') {

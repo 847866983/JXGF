@@ -51,26 +51,15 @@ async function downloadRange(
   })
 }
 
-/** 探测文件总大小与是否支持 Range（HEAD 不支持时退回 GET Range 探测） */
+/** 探测文件总大小与是否支持 Range（直接用 Range GET，省一次 HEAD 往返） */
 async function probe(url: string, signal: AbortSignal): Promise<{ total: number; supportsRange: boolean }> {
-  try {
-    const r = await fetch(url, { method: 'HEAD', signal })
-    const len = Number(r.headers.get('content-length') ?? 0)
-    if (r.ok && len > 0) {
-      await r.body?.cancel().catch(() => undefined)
-      return { total: len, supportsRange: r.headers.get('accept-ranges') === 'bytes' }
-    }
-    await r.body?.cancel().catch(() => undefined)
-  } catch {
-    // HEAD 不支持，继续
-  }
   try {
     const r = await fetch(url, { signal, headers: { Range: 'bytes=0-0' } })
     if (r.status === 206) {
       const cr = r.headers.get('content-range') ?? ''
       const total = Number(/\/(\d+)$/.exec(cr)?.[1] ?? 0)
       await r.body?.cancel().catch(() => undefined)
-      return { total, supportsRange: true }
+      if (total > 0) return { total, supportsRange: true }
     }
     const len = Number(r.headers.get('content-length') ?? 0)
     await r.body?.cancel().catch(() => undefined)
@@ -157,6 +146,9 @@ export class DownloadManager extends EventEmitter {
   private tasks = new Map<string, DownloadTask>()
   private controllers = new Map<string, AbortController>()
   private running = new Set<string>()
+  /** 每个任务上次 emit 时间，用于节流（避免高频 IPC 把界面卡死） */
+  private lastEmit = new Map<string, number>()
+  private static readonly EMIT_INTERVAL_MS = 200
 
   list(): DownloadTask[] {
     return [...this.tasks.values()]
@@ -188,11 +180,16 @@ export class DownloadManager extends EventEmitter {
     this.controllers.get(id)?.abort()
   }
 
-  private set(task: DownloadTask, patch: Partial<DownloadTask>): void {
+  /** 更新任务并广播；force=true 时跳过节流（状态变化必须立即送达） */
+  private set(task: DownloadTask, patch: Partial<DownloadTask>, force = false): void {
     Object.assign(task, patch)
     if (task.totalBytes > 0) {
       task.percent = Math.min(100, Math.round((task.receivedBytes / task.totalBytes) * 100))
     }
+    const nowMs = Date.now()
+    const last = this.lastEmit.get(task.id) ?? 0
+    if (!force && nowMs - last < DownloadManager.EMIT_INTERVAL_MS) return
+    this.lastEmit.set(task.id, nowMs)
     this.emit('state', task)
   }
 
@@ -204,38 +201,45 @@ export class DownloadManager extends EventEmitter {
     this.set(task, { status: 'downloading' })
     try {
       const parallel = req.parallel ?? 4
-      const files: { url: string; dest: string; sha256?: string }[] = req.files?.length
+      const files: { url: string; dest: string; sha256?: string; mirrors?: string[] }[] = req.files?.length
         ? req.files
         : [{ url: req.url, dest: req.dest, sha256: req.sha256 }]
 
-      // 计算总大小（先探测各文件）
+      // 计算总大小（用 Range 探测，比 HEAD 快）
       let total = 0
       for (const f of files) {
         try {
-          const r = await fetch(f.url, { method: 'HEAD', signal: controller.signal })
-          const len = Number(r.headers.get('content-length') ?? 0)
-          if (len > 0) total += len
+          const p = await probe(f.url, controller.signal)
+          if (p.total > 0) total += p.total
         } catch {
           // 探测失败不阻断
         }
       }
-      this.set(task, { totalBytes: total })
+      this.set(task, { totalBytes: total }, true)
 
       let received = 0
       for (const f of files) {
-        const part = `${f.dest}.part`
-        let got = 0
-        try {
-          got = (await fsp.stat(part)).size
-        } catch {
-          // 无部分文件，从头下载
+        // 多镜像回退：主源失败自动尝试备用镜像
+        const candidates = [f.url, ...(f.mirrors ?? []).filter((m) => m !== f.url)]
+        let lastErr: Error | null = null
+        let ok = false
+        for (const url of candidates) {
+          try {
+            let fileReceived = 0
+            await downloadParallel(url, f.dest, parallel, controller.signal, (b) => {
+              fileReceived = b
+              this.set(task, { receivedBytes: received + fileReceived })
+            })
+            received += fileReceived
+            ok = true
+            break
+          } catch (err) {
+            lastErr = err as Error
+            if ((err as Error).name === 'AbortError') throw err
+            // 换下一个镜像重试
+          }
         }
-        // 单文件也用分块下载（忽略已有 part，大文件多线程更快）
-        let fileReceived = 0
-        await downloadParallel(f.url, f.dest, parallel, controller.signal, (b) => {
-          fileReceived = b
-          this.set(task, { receivedBytes: received + fileReceived })
-        })
+        if (!ok) throw lastErr ?? new Error('所有下载源均失败')
         if (f.sha256) {
           const hash = await sha256File(f.dest)
           if (hash !== f.sha256.toLowerCase()) {
@@ -243,10 +247,9 @@ export class DownloadManager extends EventEmitter {
             throw new Error(`SHA256 校验失败：${path.basename(f.dest)}`)
           }
         }
-        received += fileReceived
       }
 
-      this.set(task, { status: 'done', receivedBytes: total, finishedAt: new Date().toISOString() })
+      this.set(task, { status: 'done', receivedBytes: total, finishedAt: new Date().toISOString() }, true)
       this.emit('done', task)
     } catch (err) {
       const aborted = (err as Error).name === 'AbortError'
@@ -254,7 +257,7 @@ export class DownloadManager extends EventEmitter {
         status: aborted ? 'cancelled' : 'failed',
         error: aborted ? undefined : String((err as Error).message ?? err),
         finishedAt: new Date().toISOString()
-      })
+      }, true)
       this.emit(aborted ? 'cancelled' : 'failed', task)
     } finally {
       this.controllers.delete(req.id)

@@ -5,12 +5,14 @@ import type { GpuInfo } from '@shared/types'
 /**
  * 按工作流组织的模型下载目录。
  * 每个工作流是一条下载项，包含它所需的全部模型文件，一次点击全部下载。
- * 所有源默认镜像优先（hf-mirror 国内镜像在前），多线程分块下载。
+ * 所有源默认镜像优先（hf-mirror 国内镜像在前），多线程分块下载 + 多镜像自动回退。
+ *
+ * 注意：所有 URL 均已实测可访问（206 Range 支持）；目标文件名与工作流模板引用的文件名一致。
  */
 
 const GITHUB = 'https://github.com/comfyanonymous/ComfyUI/releases/latest/download'
-const HF = 'https://huggingface.co'
 const HF_MIRROR = 'https://hf-mirror.com'
+const HF = 'https://huggingface.co'
 const MODELSCOPE = 'https://modelscope.cn'
 
 export type CatalogKind = 'comfyui' | 'tool' | 'pack'
@@ -21,7 +23,7 @@ export interface FileSource {
 }
 
 export interface PackFile {
-  /** 相对 models 的子目录 + 文件名，如 vae/xxx.safetensors；tool 类为包名 */
+  /** 相对 models 的子目录 + 文件名（工作流模板引用的名字）；tool 类为包名 */
   file: string
   sizeMB?: number
   sources: FileSource[]
@@ -32,18 +34,15 @@ export interface CatalogEntry {
   label: string
   kind: CatalogKind
   description: string
-  /** 总大小（MB，汇总各文件） */
   sizeMB?: number
   vendor?: 'nvidia' | 'amd'
   minVramMB?: number
-  /** 工作流包：包含多个模型文件 */
   files?: PackFile[]
-  /** 单文件条目（旧式，如 ComfyUI 便携版 / FFmpeg） */
   file?: string
   sources?: FileSource[]
 }
 
-/** 镜像优先：HF 官方镜像在前 */
+/** 镜像优先：hf-mirror 在前，官方/魔搭兜底 */
 function mirrorSources(repo: string, file: string): FileSource[] {
   return [
     { name: 'hf-mirror 镜像', url: `${HF_MIRROR}/${repo}/resolve/main/${file}` },
@@ -52,14 +51,14 @@ function mirrorSources(repo: string, file: string): FileSource[] {
   ]
 }
 
-/** 运行时（ComfyUI 便携版） */
+/** 运行时（ComfyUI 便携版）：多镜像，按速度优先排列 */
 const RUNTIME: CatalogEntry[] = [
   {
     id: 'comfyui-portable',
     label: 'ComfyUI 便携版',
     kind: 'comfyui',
-    description: '官方 Windows 便携版，内置 Python 与 GPU 版 PyTorch。下载后解压、双击 run 脚本启动。约 2.5GB，不含模型。',
-    sizeMB: 2500,
+    description: '官方 Windows 便携版，内置 Python 与 GPU 版 PyTorch。下载后解压、双击 run 脚本启动。约 1.9GB，不含模型。',
+    sizeMB: 1930,
     file: 'ComfyUI_windows_portable_nvidia.7z',
     sources: [
       { name: 'gh-proxy 镜像', url: `https://gh-proxy.com/${GITHUB}/ComfyUI_windows_portable_nvidia.7z` },
@@ -84,7 +83,7 @@ const FFMPEG: CatalogEntry = {
   ]
 }
 
-/** MiniMax H3 视频工作流：6 个模型文件 */
+/** MiniMax H3 视频工作流（全部实测可用源） */
 const H3_PACK: CatalogEntry = {
   id: 'pack-h3-video',
   label: 'MiniMax H3 视频生成（全套）',
@@ -96,59 +95,59 @@ const H3_PACK: CatalogEntry = {
     {
       file: 'MiniMax-H3/minimax_h3_hybrid_fl2va_ref2va_b25-49.safetensors',
       sizeMB: 20000,
-      sources: mirrorSources('MiniMax/MiniMax-H3', 'minimax_h3_hybrid_fl2va_ref2va_b25-49.safetensors')
+      sources: mirrorSources('smhfacct/Minimax-H3-fl2va-ref2va-hybrid-models', 'minimax_h3_hybrid_fl2va_ref2va_b25-49-int8.safetensors')
     },
     {
       file: 'text_encoders/qwen3vl_32b_minimax_h3-w4a8_convrot.safetensors',
-      sizeMB: 15000,
-      sources: mirrorSources('MiniMax/MiniMax-H3', 'qwen3vl_32b_minimax_h3-w4a8_convrot.safetensors')
+      sizeMB: 14960,
+      sources: mirrorSources('Comfy-Org/MiniMax-H3', 'text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors')
     },
     {
       file: 'vae/minimax_h3_video_vae_int8_convrot.safetensors',
-      sizeMB: 2700,
-      sources: mirrorSources('MiniMax/MiniMax-H3', 'minimax_h3_video_vae_int8_convrot.safetensors')
+      sizeMB: 2680,
+      sources: mirrorSources('Comfy-Org/MiniMax-H3', 'vae/minimax_h3_video_vae_int8_convrot.safetensors')
     },
     {
       file: 'vae/minimax_h3_audio_vae_fp32.safetensors',
-      sizeMB: 580,
-      sources: mirrorSources('MiniMax/MiniMax-H3', 'minimax_h3_audio_vae_fp32.safetensors')
+      sizeMB: 573,
+      sources: mirrorSources('Comfy-Org/MiniMax-H3', 'vae/minimax_h3_audio_vae_fp32.safetensors')
     },
     {
       file: 'vae_approx/MiniMax-H3-TAE.safetensors',
       sizeMB: 9,
-      sources: mirrorSources('MiniMax/MiniMax-H3', 'MiniMax-H3-TAE.safetensors')
+      sources: mirrorSources('Kijai/MiniMax-H3-TAE', 'vae_approx/taeh3.safetensors')
     },
     {
       file: 'latent_upscale_models/h3_upscaler_lms_v0.1.safetensors',
-      sizeMB: 660,
-      sources: mirrorSources('MiniMax/MiniMax-H3', 'h3_upscaler_lms_v0.1.safetensors')
+      sizeMB: 659,
+      sources: mirrorSources('LBH-123-AI/Minimax_h3_latent_Upscaler', 'minimax_h3_latent_upscaler_3d_conv_v1/minimax_h3_latent_upscaler_3d_conv_v1_bf16.safetensors')
     }
   ]
 }
 
-/** 千问图片工作流：文生图模型 + 文本编码器 + VAE + 多角度 LoRA */
+/** 千问图片工作流（实测可用源） */
 const QWEN_PACK: CatalogEntry = {
   id: 'pack-qwen-image',
   label: '千问 Qwen-Image 2.1 图片生成（全套）',
   kind: 'pack',
-  description: '千问文生图与四视图工作流所需：文生图模型、文本编码器、VAE、多角度四视图 LoRA。',
+  description: '千问文生图 / 局部编辑 / 四视图工作流所需：文生图模型、文本编码器、VAE、多角度四视图 LoRA。',
   vendor: 'nvidia',
   minVramMB: 6 * 1024,
   files: [
     {
       file: 'diffusion_models/qwen_image_2.1_int8_convrot.safetensors',
-      sizeMB: 8000,
-      sources: mirrorSources('Qwen/Qwen-Image-2.1', 'qwen_image_2.1_int8_convrot.safetensors')
+      sizeMB: 6922,
+      sources: mirrorSources('Comfy-Org/Qwen-Image-2.1', 'diffusion_models/qwen_image_2.1_int8_convrot.safetensors')
     },
     {
       file: 'text_encoders/qwen3vl_8b_int8_convrot.safetensors',
-      sizeMB: 8900,
-      sources: mirrorSources('Qwen/Qwen-Image-2.1', 'text_encoders/qwen3vl_8b_int8_convrot.safetensors')
+      sizeMB: 8918,
+      sources: mirrorSources('Comfy-Org/Qwen-Image-2.1', 'text_encoders/qwen3vl_8b_int8_convrot.safetensors')
     },
     {
       file: 'vae/qwen_image_2.1_vae_bf16.safetensors',
-      sizeMB: 620,
-      sources: mirrorSources('Qwen/Qwen-Image-2.1', 'vae/qwen_image_2.1_vae_bf16.safetensors')
+      sizeMB: 645,
+      sources: mirrorSources('Comfy-Org/Qwen-Image-2.1', 'vae/qwen_image_2.1_vae_bf16.safetensors')
     },
     {
       file: 'loras/qwen21_multiple_angles_v2.safetensors',
@@ -158,29 +157,24 @@ const QWEN_PACK: CatalogEntry = {
   ]
 }
 
-/** Krea2 工作流：模型 + QuadView 四视图 LoRA */
+/** Krea2 图片工作流 */
 const KREA2_PACK: CatalogEntry = {
   id: 'pack-krea2',
   label: 'Krea2 图片生成（全套）',
   kind: 'pack',
-  description: 'Krea2 文生图与四视图工作流所需：Krea2 模型、四视图 LoRA。',
+  description: 'Krea2 文生图 / 局部编辑 / 四视图工作流所需：Krea2 Turbo 模型。（四视图 LoRA 为本地私有模型，需从已有机器拷贝 QuadView_krea2_v1.safetensors）',
   vendor: 'nvidia',
   minVramMB: 6 * 1024,
   files: [
     {
-      file: 'diffusion_models/Krea2-Turbo-fp8_v10.safetensors',
-      sizeMB: 4000,
-      sources: mirrorSources('Comfy-Org/Krea2', 'Krea2-Turbo-fp8_v10.safetensors')
-    },
-    {
-      file: 'loras/QuadView_krea2_v1.safetensors',
-      sizeMB: 50,
-      sources: mirrorSources('Comfy-Org/Krea2', 'QuadView_krea2_v1.safetensors')
+      file: 'diffusion_models/krea2_turbo_fp8.safetensors',
+      sizeMB: 12300,
+      sources: mirrorSources('Comfy-Org/Krea-2', 'diffusion_models/krea2_turbo_fp8.safetensors')
     }
   ]
 }
 
-/** Z-Image 角色四视图 */
+/** Z-Image 角色四视图 / 文生图 */
 const ZIMAGE_PACK: CatalogEntry = {
   id: 'pack-zimage',
   label: 'Z-Image-Turbo（角色四视图/文生图）',
@@ -191,8 +185,8 @@ const ZIMAGE_PACK: CatalogEntry = {
   files: [
     {
       file: 'diffusion_models/z_image_turbo_bf16.safetensors',
-      sizeMB: 11780,
-      sources: mirrorSources('Tongyi-MAI/Z-Image-Turbo', 'z_image_turbo_bf16.safetensors')
+      sizeMB: 11740,
+      sources: mirrorSources('Comfy-Org/Z-Image-Turbo', 'split_files/diffusion_models/z_image_turbo_bf16.safetensors')
     }
   ]
 }
@@ -204,7 +198,6 @@ export const ALL_ENTRIES: CatalogEntry[] = [...RUNTIME, FFMPEG, ...MODEL_CATALOG
 export interface ResolvedPackFile {
   file: string
   sizeMB?: number
-  /** 完整下载 URL（默认取第一个镜像源） */
   url: string
   sources: FileSource[]
   dest: string
@@ -219,9 +212,7 @@ export interface ResolvedCatalogItem {
   sizeMB?: number
   vendor?: 'nvidia' | 'amd'
   minVramMB?: number
-  /** 工作流包的文件清单（已解析 dest / installed） */
   files?: ResolvedPackFile[]
-  /** 单文件条目 */
   file?: string
   sources?: FileSource[]
   dest?: string
