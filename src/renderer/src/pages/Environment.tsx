@@ -135,12 +135,15 @@ export default function Environment({ embedded = false }: { embedded?: boolean }
       })
       await window.api.downloadStart({ id: item.id, label: item.label, url: src.url, dest: item.dest ?? '', files, parallel: 4 })
     } else {
-      const src = s0
+      // 单文件也把所有源都传给主进程：主源失败自动切换下一个镜像
+      const all = [...new Map((item.sources ?? []).map((s) => [s.url, s])).values()]
+      const primary = all[srcIdx] ?? all[0] ?? s0
       await window.api.downloadStart({
         id: item.id,
         label: item.label,
-        url: src.url,
+        url: primary.url,
         dest: item.dest ?? '',
+        mirrors: all.map((s) => s.url).filter((u) => u !== primary.url),
         parallel: 4
       })
     }
@@ -575,7 +578,8 @@ export default function Environment({ embedded = false }: { embedded?: boolean }
                   <div className="min-w-0">
                     <div className="text-sm font-medium text-white">一键安装 ComfyUI（推荐）</div>
                     <div className="mt-0.5 text-[11px] text-slate-400">
-                      自动下载官方便携版并解压、配置、启动。约 2.5GB，**不含模型**（模型到下方「模型库/环境安装」按需下载）。
+                      自动下载官方便携版并解压、配置、启动。约 1.93GB，<b className="text-slate-300">不含模型</b>（模型到下方「模型库」按需下载）。
+                      下载支持断点续传，中断后重新点会接着下。若长时间无速度，可点「下载源」切换，或手动下载后在上方「ComfyUI 根目录」指定已有安装。
                     </div>
                   </div>
                   <button

@@ -373,6 +373,8 @@ export interface DownloadRequest {
   sha256?: string
   /** 多文件打包下载（一个工作流一套模型） */
   files?: { url: string; dest: string; sha256?: string; mirrors?: string[] }[]
+  /** 备用镜像地址（主源失败自动回退，单文件下载用） */
+  mirrors?: string[]
   /** 并行线程数（分块下载），默认 4 */
   parallel?: number
 }

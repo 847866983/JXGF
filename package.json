@@ -1,6 +1,6 @@
 {
   "name": "frameforge",
-  "version": "1.4.3",
+  "version": "1.5.0",
   "description": "镜序工坊 - 本地 AI 视频生成工作台（资产库 / 剧本分镜 / 导演台，后端 ComfyUI）",
   "main": "./out/main/index.js",
   "author": "镜序工坊",

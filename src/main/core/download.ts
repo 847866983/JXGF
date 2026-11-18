@@ -15,14 +15,15 @@ async function sha256File(file: string): Promise<string> {
   })
 }
 
-/** 单个 Range 分块：下载 [start,end] 写入临时文件，回调已收字节 */
+/** 单个 Range 分块：下载 [start,end] 写入临时文件，回调已收字节；append=true 时追加（断点续传） */
 async function downloadRange(
   url: string,
   start: number,
   end: number,
   tmpFile: string,
   signal: AbortSignal,
-  onBytes: (n: number) => void
+  onBytes: (n: number) => void,
+  append = false
 ): Promise<void> {
   const res = await fetch(url, {
     headers: { Range: `bytes=${start}-${end}` },
@@ -32,7 +33,7 @@ async function downloadRange(
     throw new Error(`HTTP ${res.status}`)
   }
   await fsp.mkdir(path.dirname(tmpFile), { recursive: true })
-  const ws = fs.createWriteStream(tmpFile)
+  const ws = fs.createWriteStream(tmpFile, { flags: append ? 'a' : 'w' })
   let received = 0
   const reader = (res.body as unknown as ReadableStream<Uint8Array>).getReader()
   for (;;) {
@@ -69,7 +70,7 @@ async function probe(url: string, signal: AbortSignal): Promise<{ total: number;
   }
 }
 
-/** 多线程分块下载：按并行度切 Range，每块写独立临时文件，最后拼接 */
+/** 多线程分块下载：按并行度切 Range，每块独立临时文件，支持断点续传，最后按序拼接 */
 async function downloadParallel(
   url: string,
   dest: string,
@@ -81,20 +82,44 @@ async function downloadParallel(
   if (supportsRange && total > 0) {
     const n = Math.max(1, Math.min(parallel, 8))
     const chunkSize = Math.ceil(total / n)
-    const tasks: Promise<void>[] = []
+    const ranges: { start: number; end: number; tmp: string }[] = []
     for (let i = 0; i < n; i++) {
-      const start = i * chunkSize
-      const end = Math.min(total - 1, (i + 1) * chunkSize - 1)
-      if (start > end) break
-      const tmp = `${dest}.chunk${i}.part`
-      tasks.push(downloadRange(url, start, end, tmp, signal, (b) => onBytes(b)))
+      const startB = i * chunkSize
+      const endB = Math.min(total - 1, (i + 1) * chunkSize - 1)
+      if (startB > endB) break
+      ranges.push({ start: startB, end: endB, tmp: `${dest}.chunk${i}.part` })
+    }
+    // 每块已收字节（全局进度汇总，避免多块互相覆盖）
+    const progress = new Array(ranges.length).fill(0)
+    const report = (): void => onBytes(progress.reduce((s, v) => s + v, 0))
+    const tasks: Promise<void>[] = []
+    for (let i = 0; i < ranges.length; i++) {
+      const { start: s0, end: e0, tmp } = ranges[i]
+      const expect = e0 - s0 + 1
+      let have = 0
+      try {
+        have = (await fsp.stat(tmp)).size
+      } catch {
+        have = 0
+      }
+      if (have >= expect) {
+        progress[i] = expect
+        report()
+        continue
+      }
+      progress[i] = have
+      report()
+      tasks.push(
+        downloadRange(url, s0 + have, e0, tmp, signal, (b) => {
+          progress[i] = have + b
+          report()
+        }, have > 0)
+      )
     }
     await Promise.all(tasks)
-    // 拼接分块（按顺序串接到目标文件）
     await fsp.mkdir(path.dirname(dest), { recursive: true })
     const out = fs.createWriteStream(dest)
-    for (let i = 0; i < n; i++) {
-      const tmp = `${dest}.chunk${i}.part`
+    for (const { tmp } of ranges) {
       if (!fs.existsSync(tmp)) continue
       await new Promise<void>((resolve, reject) => {
         const rs = fs.createReadStream(tmp)
@@ -114,6 +139,7 @@ async function downloadParallel(
   // 服务器不支持 Range：退回单流下载
   await singleStream(url, dest, signal, onBytes)
 }
+
 
 async function singleStream(url: string, dest: string, signal: AbortSignal, onBytes: (n: number) => void): Promise<void> {
   const res = await fetch(url, { signal })
@@ -203,7 +229,7 @@ export class DownloadManager extends EventEmitter {
       const parallel = req.parallel ?? 4
       const files: { url: string; dest: string; sha256?: string; mirrors?: string[] }[] = req.files?.length
         ? req.files
-        : [{ url: req.url, dest: req.dest, sha256: req.sha256 }]
+        : [{ url: req.url, dest: req.dest, sha256: req.sha256, mirrors: req.mirrors }]
 
       // 计算总大小（用 Range 探测，比 HEAD 快）
       let total = 0

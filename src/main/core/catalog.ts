@@ -64,8 +64,9 @@ const RUNTIME: CatalogEntry[] = [
     sizeMB: 1930,
     file: 'ComfyUI_windows_portable_nvidia.7z',
     sources: [
-      { name: 'gh-proxy 镜像', url: `https://gh-proxy.com/${GITHUB}/ComfyUI_windows_portable_nvidia.7z` },
-      { name: 'GitHub 官方', url: `${GITHUB}/ComfyUI_windows_portable_nvidia.7z` }
+      { name: 'gh-proxy 加速(固定版本 v0.45.0，最快)', url: `https://gh-proxy.com/https://github.com/comfyanonymous/ComfyUI/releases/download/v0.45.0/ComfyUI_windows_portable_nvidia.7z` },
+      { name: 'gh-proxy 加速(最新版)', url: `https://gh-proxy.com/${GITHUB}/ComfyUI_windows_portable_nvidia.7z` },
+      { name: 'GitHub 官方(需代理)', url: `https://github.com/comfyanonymous/ComfyUI/releases/download/v0.45.0/ComfyUI_windows_portable_nvidia.7z` }
     ]
   }
 ]
