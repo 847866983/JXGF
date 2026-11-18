@@ -205,7 +205,6 @@ export default function Assets(): React.JSX.Element {
                 key={asset.id}
                 asset={asset}
                 onClick={() => openAsset(asset)}
-                onEdit={asset.kind === 'character' ? () => openEdit(asset) : undefined}
               />
             ))}
           </div>
@@ -320,13 +319,8 @@ export default function Assets(): React.JSX.Element {
         <CharacterAssetWizard
           asset={wizardAsset}
           onClose={() => {
-            // 工作台关闭后，用最新资产重开编辑弹窗，提示词/图片都是最新的
-            const fresh = freshAsset(wizardAsset.id)
+            // 角色编辑已整合进工作台，关闭即回列表（不再弹旧编辑框）
             setWizardAsset(null)
-            if (fresh) {
-              setEditing(fresh)
-              setFormOpen(true)
-            }
           }}
         />
       )}
