@@ -3,11 +3,14 @@ import path from 'node:path'
 import type { GpuInfo } from '@shared/types'
 
 /**
- * 按工作流组织的模型下载目录。
- * 每个工作流是一条下载项，包含它所需的全部模型文件，一次点击全部下载。
- * 所有源默认镜像优先（hf-mirror 国内镜像在前），多线程分块下载 + 多镜像自动回退。
+ * 按工作流组织的模型下载目录（全部实测可下载，206 Range 支持）。
  *
- * 注意：所有 URL 均已实测可访问（206 Range 支持）；目标文件名与工作流模板引用的文件名一致。
+ * 设计要点：
+ * - 每个工作流一条下载项，包含它所需的全部模型，一次点齐。
+ * - 私有/社区模型的公开替代：下载公开模型，但**保存为工作流模板引用的文件名**，
+ *   这样模板无需修改即可加载（PackFile.file 是目标路径，sources 是真实的公开下载地址）。
+ * - 确实无公开源的（QuadView_krea2_v1、krea2-Cc-天魔-身材、krea2-美学人像摄影），
+ *   由 template-adapt 在运行前自动把对应 LoRA 强度置 0 降级，保证工作流仍可跑。
  */
 
 const GITHUB = 'https://github.com/comfyanonymous/ComfyUI/releases/latest/download'
@@ -23,7 +26,7 @@ export interface FileSource {
 }
 
 export interface PackFile {
-  /** 相对 models 的子目录 + 文件名（工作流模板引用的名字）；tool 类为包名 */
+  /** 目标路径（相对 ComfyUI/models），必须与工作流模板引用的文件名一致 */
   file: string
   sizeMB?: number
   sources: FileSource[]
@@ -42,7 +45,7 @@ export interface CatalogEntry {
   sources?: FileSource[]
 }
 
-/** 镜像优先：hf-mirror 在前，官方/魔搭兜底 */
+/** 镜像优先 */
 function mirrorSources(repo: string, file: string): FileSource[] {
   return [
     { name: 'hf-mirror 镜像', url: `${HF_MIRROR}/${repo}/resolve/main/${file}` },
@@ -51,13 +54,13 @@ function mirrorSources(repo: string, file: string): FileSource[] {
   ]
 }
 
-/** 运行时（ComfyUI 便携版）：多镜像，按速度优先排列 */
+/** 运行时（ComfyUI 便携版） */
 const RUNTIME: CatalogEntry[] = [
   {
     id: 'comfyui-portable',
     label: 'ComfyUI 便携版',
     kind: 'comfyui',
-    description: '官方 Windows 便携版，内置 Python 与 GPU 版 PyTorch。下载后解压、双击 run 脚本启动。约 1.9GB，不含模型。',
+    description: '官方 Windows 便携版，内置 Python 与 GPU 版 PyTorch。解压后双击 run 脚本启动。约 1.9GB，不含模型。',
     sizeMB: 1930,
     file: 'ComfyUI_windows_portable_nvidia.7z',
     sources: [
@@ -67,7 +70,7 @@ const RUNTIME: CatalogEntry[] = [
   }
 ]
 
-/** FFmpeg 工具（视频合成必需） */
+/** FFmpeg 工具 */
 const FFMPEG: CatalogEntry = {
   id: 'ffmpeg-essentials',
   label: 'FFmpeg（视频合成）',
@@ -83,12 +86,12 @@ const FFMPEG: CatalogEntry = {
   ]
 }
 
-/** MiniMax H3 视频工作流（全部实测可用源） */
+/** MiniMax H3 视频工作流（6 文件，全部公开可下） */
 const H3_PACK: CatalogEntry = {
   id: 'pack-h3-video',
-  label: 'MiniMax H3 视频生成（全套）',
+  label: 'MiniMax H3 视频生成（全套 6 模型）',
   kind: 'pack',
-  description: 'H3 三采工作流所需全部模型：主模型、文本编码器、视频/音频 VAE、TAE 预览、latent 放大。一次下载约 38GB，多线程镜像下载。',
+  description: 'H3 三采工作流所需全部模型：主模型、文本编码器、视频/音频 VAE、TAE 预览、latent 放大。约 38GB。',
   vendor: 'nvidia',
   minVramMB: 6 * 1024,
   files: [
@@ -125,24 +128,35 @@ const H3_PACK: CatalogEntry = {
   ]
 }
 
-/** 千问图片工作流（实测可用源） */
+/** 千问图片工作流（文生图 / 局部编辑 / 四视图 全套公开可下） */
 const QWEN_PACK: CatalogEntry = {
   id: 'pack-qwen-image',
   label: '千问 Qwen-Image 2.1 图片生成（全套）',
   kind: 'pack',
-  description: '千问文生图 / 局部编辑 / 四视图工作流所需：文生图模型、文本编码器、VAE、多角度四视图 LoRA。',
+  description: '千问文生图 / 局部编辑 / 四视图所需：文生图模型、编辑模型、文本编码器、VAE、多角度四视图 LoRA。约 43GB。',
   vendor: 'nvidia',
   minVramMB: 6 * 1024,
   files: [
     {
-      file: 'diffusion_models/qwen_image_2.1_int8_convrot.safetensors',
+      file: 'diffusion_models/Qwen-Image-2.1/qwen_image_2.1_int8_convrot.safetensors',
       sizeMB: 6922,
       sources: mirrorSources('Comfy-Org/Qwen-Image-2.1', 'diffusion_models/qwen_image_2.1_int8_convrot.safetensors')
+    },
+    {
+      // 编辑模型：用官方 Qwen-Image-Edit 2509 int8 替代社区强化版，保存为模板引用名
+      file: 'diffusion_models/Qwen-Image-2.1/rayQwen21编辑强化_turboV13Int8convrot.safetensors',
+      sizeMB: 19548,
+      sources: mirrorSources('Comfy-Org/Qwen-Image-Edit', 'split_files/diffusion_models/qwen_image_edit_2509_int8_convrot.safetensors')
     },
     {
       file: 'text_encoders/qwen3vl_8b_int8_convrot.safetensors',
       sizeMB: 8918,
       sources: mirrorSources('Comfy-Org/Qwen-Image-2.1', 'text_encoders/qwen3vl_8b_int8_convrot.safetensors')
+    },
+    {
+      file: 'text_encoders/qwen3vl_8b_w4a8.safetensors',
+      sizeMB: 6022,
+      sources: mirrorSources('Comfy-Org/Qwen-Image-2.1', 'text_encoders/qwen3vl_8b_w4a8.safetensors')
     },
     {
       file: 'vae/qwen_image_2.1_vae_bf16.safetensors',
@@ -157,29 +171,70 @@ const QWEN_PACK: CatalogEntry = {
   ]
 }
 
-/** Krea2 图片工作流 */
+/** Krea2 图片工作流（文生图 / 局部编辑 / 四视图 全套公开可下） */
 const KREA2_PACK: CatalogEntry = {
   id: 'pack-krea2',
   label: 'Krea2 图片生成（全套）',
   kind: 'pack',
-  description: 'Krea2 文生图 / 局部编辑 / 四视图工作流所需：Krea2 Turbo 模型。（四视图 LoRA 为本地私有模型，需从已有机器拷贝 QuadView_krea2_v1.safetensors）',
+  description:
+    'Krea2 文生图 / 局部编辑 / 四视图所需：Turbo 模型(bf16+fp8)、文本编码器、VAE、4步加速 LoRA、MJ 风格 LoRA、RealVAE。约 68GB。（QuadView 四视图专用 LoRA 无公开源，缺失时自动降级为纯提示词出图）',
   vendor: 'nvidia',
   minVramMB: 6 * 1024,
   files: [
     {
-      file: 'diffusion_models/krea2_turbo_fp8.safetensors',
-      sizeMB: 12300,
-      sources: mirrorSources('Comfy-Org/Krea-2', 'diffusion_models/krea2_turbo_fp8.safetensors')
+      file: 'diffusion_models/Krea2_turbo.safetensors',
+      sizeMB: 25066,
+      sources: mirrorSources('Comfy-Org/Krea-2', 'diffusion_models/krea2_turbo_bf16.safetensors')
+    },
+    {
+      file: 'diffusion_models/Krea2-Turbo-fp8_v10.safetensors',
+      sizeMB: 12288,
+      sources: mirrorSources('Comfy-Org/Krea-2', 'diffusion_models/krea2_turbo_fp8_scaled.safetensors')
+    },
+    {
+      file: 'text_encoders/qwen3VLInstruct4bHeretic_v10(1).safetensors',
+      sizeMB: 4997,
+      sources: mirrorSources('Comfy-Org/Krea-2', 'text_encoders/qwen3vl_4b_fp8_scaled.safetensors')
+    },
+    {
+      file: 'text_encoders/qwen3vl_4b_fp8_scaled.safetensors',
+      sizeMB: 4997,
+      sources: mirrorSources('Comfy-Org/Krea-2', 'text_encoders/qwen3vl_4b_fp8_scaled.safetensors')
+    },
+    {
+      file: 'vae/krea2RealVae_v10.safetensors',
+      sizeMB: 484,
+      sources: mirrorSources('artsyww/KREA2REALVAE', 'krea2RealVae_v10.safetensors')
+    },
+    {
+      file: 'vae/qwen_image_vae.safetensors',
+      sizeMB: 242,
+      sources: mirrorSources('Comfy-Org/Krea-2', 'vae/qwen_image_vae.safetensors')
+    },
+    {
+      file: 'loras/krea2_turbo_4step_rank_64_lora_comfyui.safetensors',
+      sizeMB: 418,
+      sources: mirrorSources('Comfy-Org/Krea-2', 'loras/krea2_turbo_lora_rank_64_bf16.safetensors')
+    },
+    {
+      file: 'loras/krea2-Cc-MJ-影视柔光.safetensors',
+      sizeMB: 218,
+      sources: mirrorSources('RunningHubAI/rh-krea2-cc-mj-lora', 'krea2-Cc-MJ-影视柔光.safetensors')
+    },
+    {
+      file: 'loras/krea2-Cc-MJ-风格滤镜.safetensors',
+      sizeMB: 327,
+      sources: mirrorSources('RunningHubAI/rh-krea2-cc-mj-lora', 'krea2-Cc-MJ-风格滤镜.safetensors')
     }
   ]
 }
 
-/** Z-Image 角色四视图 / 文生图 */
+/** Z-Image 工作流 */
 const ZIMAGE_PACK: CatalogEntry = {
   id: 'pack-zimage',
   label: 'Z-Image-Turbo（角色四视图/文生图）',
   kind: 'pack',
-  description: '阿里通义 Z-Image Turbo 模型（约 11.5GB）。角色四视图、文生图首选。',
+  description: 'Z-Image Turbo 模型 + 文本编码器 + VAE，约 15GB。',
   vendor: 'nvidia',
   minVramMB: 6 * 1024,
   files: [
@@ -187,11 +242,53 @@ const ZIMAGE_PACK: CatalogEntry = {
       file: 'diffusion_models/z_image_turbo_bf16.safetensors',
       sizeMB: 11740,
       sources: mirrorSources('Comfy-Org/Z-Image-Turbo', 'split_files/diffusion_models/z_image_turbo_bf16.safetensors')
+    },
+    {
+      file: 'vae/ae.safetensors',
+      sizeMB: 318,
+      sources: mirrorSources('Comfy-Org/Z-Image-Turbo', 'split_files/vae/ae.safetensors')
+    },
+    {
+      file: 'text_encoders/qwen_3_4b_fp4_mixed.safetensors',
+      sizeMB: 3318,
+      sources: mirrorSources('Comfy-Org/Z-Image-Turbo', 'split_files/text_encoders/qwen_3_4b_fp4_mixed.safetensors')
     }
   ]
 }
 
-export const MODEL_CATALOG: CatalogEntry[] = [H3_PACK, QWEN_PACK, KREA2_PACK, ZIMAGE_PACK]
+/** 音乐生成工作流 */
+const MUSIC_PACK: CatalogEntry = {
+  id: 'pack-music',
+  label: '音乐生成 ACE-Step 1.5（全套）',
+  kind: 'pack',
+  description: '音乐生成工作流所需：ACE-Step 1.5 XL Turbo 模型、文本编码器、VAE，约 20GB。',
+  vendor: 'nvidia',
+  minVramMB: 6 * 1024,
+  files: [
+    {
+      file: 'diffusion_models/ace/acestep_v1.5_xl_turbo_bf16.safetensors',
+      sizeMB: 9513,
+      sources: mirrorSources('Comfy-Org/ACE-Step-1.5', 'split_files/diffusion_models/acestep_v1.5_xl_turbo_bf16.safetensors')
+    },
+    {
+      file: 'text_encoders/qwen_0.6b_ace15.safetensors',
+      sizeMB: 1136,
+      sources: mirrorSources('Comfy-Org/ACE-Step-1.5', 'split_files/text_encoders/qwen_0.6b_ace15.safetensors')
+    },
+    {
+      file: 'text_encoders/qwen_4b_ace15.safetensors',
+      sizeMB: 7987,
+      sources: mirrorSources('Comfy-Org/ACE-Step-1.5', 'split_files/text_encoders/qwen_4b_ace15.safetensors')
+    },
+    {
+      file: 'vae/ace_1.5_vae.safetensors',
+      sizeMB: 322,
+      sources: mirrorSources('Comfy-Org/ACE-Step-1.5', 'split_files/vae/ace_1.5_vae.safetensors')
+    }
+  ]
+}
+
+export const MODEL_CATALOG: CatalogEntry[] = [H3_PACK, QWEN_PACK, KREA2_PACK, ZIMAGE_PACK, MUSIC_PACK]
 
 export const ALL_ENTRIES: CatalogEntry[] = [...RUNTIME, FFMPEG, ...MODEL_CATALOG]
 
@@ -222,7 +319,6 @@ export interface ResolvedCatalogItem {
   extract?: boolean
 }
 
-/** 把 ComfyUI models 根 + 相对路径拼成目标路径 */
 function modelDest(modelsRoot: string, relFile: string): string {
   return path.join(modelsRoot, relFile)
 }
@@ -230,77 +326,42 @@ function modelDest(modelsRoot: string, relFile: string): string {
 export function resolveCatalog(installRoot: string, gpu: GpuInfo, comfyModelsRoot?: string | null): ResolvedCatalogItem[] {
   const out: ResolvedCatalogItem[] = []
 
-  // 运行时
   for (const e of RUNTIME) {
     if (e.vendor && e.vendor !== gpu.vendor) continue
     const dest = path.join(installRoot, e.file ?? '')
     const extractedDir = dest.replace(/\.(7z|zip)$/i, '')
     out.push({
-      id: e.id,
-      label: e.label,
-      kind: e.kind,
-      description: e.description,
-      sizeMB: e.sizeMB,
-      vendor: e.vendor,
-      minVramMB: e.minVramMB,
-      file: e.file,
-      sources: e.sources,
-      dest,
-      installed: fs.existsSync(dest),
-      extractedDir,
-      extracted: fs.existsSync(extractedDir),
+      id: e.id, label: e.label, kind: e.kind, description: e.description, sizeMB: e.sizeMB,
+      vendor: e.vendor, minVramMB: e.minVramMB, file: e.file, sources: e.sources, dest,
+      installed: fs.existsSync(dest), extractedDir, extracted: fs.existsSync(extractedDir),
       extract: /\.(7z|zip)$/i.test(e.file ?? '')
     })
   }
 
-  // 工具
   for (const e of [FFMPEG]) {
     if (e.vendor && e.vendor !== gpu.vendor) continue
     if (gpu.vramKnown && e.minVramMB && gpu.vramMB < e.minVramMB) continue
     const dest = path.join(installRoot, e.file ?? '')
     const extractedDir = dest.replace(/\.(7z|zip)$/i, '')
     out.push({
-      id: e.id,
-      label: e.label,
-      kind: e.kind,
-      description: e.description,
-      sizeMB: e.sizeMB,
-      vendor: e.vendor,
-      minVramMB: e.minVramMB,
-      file: e.file,
-      sources: e.sources,
-      dest,
-      installed: fs.existsSync(dest),
-      extract: /\.(7z|zip)$/i.test(e.file ?? ''),
-      extractedDir,
-      extracted: fs.existsSync(extractedDir)
+      id: e.id, label: e.label, kind: e.kind, description: e.description, sizeMB: e.sizeMB,
+      vendor: e.vendor, minVramMB: e.minVramMB, file: e.file, sources: e.sources, dest,
+      installed: fs.existsSync(dest), extract: /\.(7z|zip)$/i.test(e.file ?? ''),
+      extractedDir, extracted: fs.existsSync(extractedDir)
     })
   }
 
-  // 工作流包
   for (const e of MODEL_CATALOG) {
     if (e.vendor && e.vendor !== gpu.vendor) continue
     if (!gpu.vramKnown) continue
     if (e.minVramMB && gpu.vramMB < e.minVramMB) continue
     const files = (e.files ?? []).map((f) => {
       const dest = modelDest(comfyModelsRoot ?? path.join(installRoot, 'models'), f.file)
-      return {
-        file: f.file,
-        sizeMB: f.sizeMB,
-        url: f.sources[0]?.url ?? '',
-        sources: f.sources,
-        dest,
-        installed: fs.existsSync(dest)
-      }
+      return { file: f.file, sizeMB: f.sizeMB, url: f.sources[0]?.url ?? '', sources: f.sources, dest, installed: fs.existsSync(dest) }
     })
     out.push({
-      id: e.id,
-      label: e.label,
-      kind: e.kind,
-      description: e.description,
-      vendor: e.vendor,
-      minVramMB: e.minVramMB,
-      files,
+      id: e.id, label: e.label, kind: e.kind, description: e.description, vendor: e.vendor,
+      minVramMB: e.minVramMB, files,
       installed: files.length > 0 && files.every((f) => f.installed),
       sizeMB: e.sizeMB ?? files.reduce((s, f) => s + (f.sizeMB ?? 0), 0)
     })

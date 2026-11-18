@@ -38,7 +38,7 @@ import { AiAssistant } from '../src/main/core/ai-assistant.ts'
 import { explainError } from '../src/renderer/src/lib/errorHelp.ts'
 import { ComfyRuntime } from '../src/main/core/comfy-runtime.ts'
 import { detectWorkflowKind, isUiWorkflow } from '../src/main/core/workflow-convert.ts'
-import { adaptTemplateForGpu } from '../src/main/core/template-adapt.ts'
+import { adaptTemplateForGpu, degradeMissingLoras } from '../src/main/core/template-adapt.ts'
 import { listBuiltinWorkflows, loadBuiltinWorkflow, buildBuiltinTemplates } from '../src/main/core/builtin-workflows.ts'
 import { collectModelRefs } from '../src/main/core/model-pack.ts'
 
@@ -1163,6 +1163,23 @@ ok('模型搬家：忽略非模型文件', () => {
   const proj = { templates: [{ name: 'T', apiJson: { a: { class_type: 'X', inputs: { text: 'hello.png.txt', note: 'abc' } } } }] }
   const refs = collectModelRefs(proj as never)
   assert.equal(refs.size, 0)
+})
+
+// ---- 缺失模型降级 ----
+ok('缺失降级：不存在的LoRA强度置0', () => {
+  const api = { a: { class_type: 'LoraLoaderModelOnly', inputs: { lora_name: 'NOT_EXIST_zzz.safetensors', strength_model: 1 } } }
+  const out = degradeMissingLoras(api, tmp2) as typeof api
+  assert.equal(out.a.inputs.strength_model, 0)
+})
+ok('缺失降级：BanZhang LoRA文件缺失置空', () => {
+  const api = { a: { class_type: 'BanZhang_LoRA_VramSafe', inputs: { 'LoRA文件': 'NOT_EXIST_yyy.safetensors' } } }
+  const out = degradeMissingLoras(api, tmp2) as typeof api
+  assert.equal(out.a.inputs['LoRA文件'], '')
+})
+ok('缺失降级：无modelsRoot时不动', () => {
+  const api = { a: { class_type: 'LoraLoaderModelOnly', inputs: { lora_name: 'x.safetensors', strength_model: 1 } } }
+  const out = degradeMissingLoras(api, null) as typeof api
+  assert.equal(out.a.inputs.strength_model, 1)
 })
 
 console.log(`\nselftest: ${pass} passed, ${fail} failed`)

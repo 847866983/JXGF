@@ -26,7 +26,7 @@ import { extractArchive } from './core/extract'
 import { ComfyRuntime } from './core/comfy-runtime'
 import { ComfyInstaller } from './core/comfy-installer'
 import { isUiWorkflow, convertUiToApi, detectWorkflowKind } from './core/workflow-convert'
-import { adaptTemplateForGpu } from './core/template-adapt'
+import { adaptTemplateForGpu, degradeMissingLoras } from './core/template-adapt'
 import { buildBuiltinTemplates } from './core/builtin-workflows'
 import { listReferencedModels, exportModelPack, importModelPack, find7z } from './core/model-pack'
 import { listMemory, readMemory, writeMemory, appendMemory } from './core/memory'
@@ -343,6 +343,26 @@ function registerIpc(): void {
       if (changed) await store.flush()
     } catch {
       // 适配失败不阻断打开
+    }
+    // 缺失 LoRA 自动降级（私有/社区 LoRA 无公开源时，置 0 强度保证工作流可跑）
+    try {
+      const st2 = await comfyRuntime.status()
+      if (st2.root) {
+        const modelsRoot = fs.existsSync(path.join(st2.root, 'ComfyUI', 'models'))
+          ? path.join(st2.root, 'ComfyUI', 'models')
+          : path.join(st2.root, 'models')
+        let changed2 = false
+        for (const tpl of project.templates) {
+          const d = degradeMissingLoras(tpl.apiJson, modelsRoot)
+          if (d !== tpl.apiJson) {
+            tpl.apiJson = d
+            changed2 = true
+          }
+        }
+        if (changed2) await store.flush()
+      }
+    } catch {
+      // 降级失败不阻断打开
     }
     // 补全内置工作流（老项目缺失的图片/视频工作流，跟随软件自动补齐）
     await seedBuiltinTemplates(project)
