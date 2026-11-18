@@ -24,7 +24,6 @@ export default function Environment({ embedded = false }: { embedded?: boolean }
   const [report, setReport] = useState<EnvironmentReport | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [tasks, setTasks] = useState<DownloadTask[]>([])
   const [catalog, setCatalog] = useState<CatalogItem[]>([])
   const [sourceIndex, setSourceIndex] = useState<Record<string, number>>({})
   const [extractingId, setExtractingId] = useState<string | null>(null)
@@ -36,6 +35,8 @@ export default function Environment({ embedded = false }: { embedded?: boolean }
   const [nodePack, setNodePack] = useState<{ installed: boolean } | null>(null)
   const [nodePackBusy, setNodePackBusy] = useState(false)
   const [nodePackMsg, setNodePackMsg] = useState<string | null>(null)
+  /** 每条下载项的进度快照（id -> task） */
+  const [tasks, setTasks] = useState<Record<string, DownloadTask>>({})
 
   const refreshNodePack = async (root: string): Promise<void> => {
     if (!root.trim()) return
@@ -71,6 +72,33 @@ export default function Environment({ embedded = false }: { embedded?: boolean }
     }
   }
 
+  /** 下载某条：单文件或工作流包，多线程镜像下载，进度归到本条 */
+  const downloadItem = async (item: CatalogItem): Promise<void> => {
+    const idx = sourceIndex[item.id] ?? 0
+    const srcIdx = (item.files?.[0]?.sources ?? item.sources ?? [])[idx] ? idx : 0
+    const pickSource = (i: number): { name: string; url: string } | undefined =>
+      (item.files?.[0]?.sources ?? item.sources ?? [])[i]
+    const s0 = pickSource(srcIdx) ?? { name: '', url: '' }
+
+    if (item.files && item.files.length > 0) {
+      const src = item.files[0].sources[srcIdx] ?? item.files[0].sources[0]
+      const files = item.files.map((f) => {
+        const use = f.sources[srcIdx] ?? f.sources[0]
+        return { url: use.url, dest: f.dest, sha256: undefined as string | undefined }
+      })
+      await window.api.downloadStart({ id: item.id, label: item.label, url: src.url, dest: item.dest ?? '', files, parallel: 6 })
+    } else {
+      const src = s0
+      await window.api.downloadStart({
+        id: item.id,
+        label: item.label,
+        url: src.url,
+        dest: item.dest ?? '',
+        parallel: 6
+      })
+    }
+  }
+
   const scan = (): void => {
     setLoading(true)
     setError(null)
@@ -88,6 +116,7 @@ export default function Environment({ embedded = false }: { embedded?: boolean }
   const doExtract = async (item: CatalogItem): Promise<void> => {
     setExtractingId(item.id)
     try {
+      if (!item.dest || !item.extractedDir) throw new Error('缺少解压路径')
       await window.api.envExtract({ archive: item.dest, dest: item.extractedDir })
       refreshCatalog()
     } catch (err) {
@@ -148,10 +177,15 @@ export default function Environment({ embedded = false }: { embedded?: boolean }
   }, [])
 
   useEffect(() => {
-    void window.api.downloadList().then(setTasks)
+    void window.api.downloadList().then((list) => {
+      const m: Record<string, DownloadTask> = {}
+      for (const t of list) m[t.id] = t
+      setTasks(m)
+    })
     return window.api.onEvent((e) => {
       if (e.type === 'download:state') {
-        void window.api.downloadList().then(setTasks)
+        const task = e.task as DownloadTask
+        setTasks((prev) => ({ ...prev, [task.id]: task }))
         refreshCatalog()
       }
       if (e.type === 'comfy:runtime') setRuntime(e.state)
@@ -333,60 +367,7 @@ export default function Environment({ embedded = false }: { embedded?: boolean }
               </ul>
             </section>
 
-            {/* 5 下载任务 */}
-            <section className="panel p-5">
-              <div className="mb-3 flex items-center gap-2 text-sm font-medium text-white">
-                <Download size={15} className="text-accent-400" />
-                5 · 下载任务
-              </div>
-              {tasks.length === 0 ? (
-                <div className="text-sm text-slate-500">
-                  暂无下载任务。一键下载 ComfyUI 便携版与模型的目录将在后续版本接入此列表（支持断点续传与 SHA256 校验）。
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {tasks.map((t) => (
-                    <div key={t.id} className="rounded-lg bg-white/[0.03] px-3 py-2.5">
-                      <div className="flex items-center gap-2 text-sm">
-                        <span className="min-w-0 flex-1 truncate text-slate-200">{t.label}</span>
-                        <span
-                          className={`shrink-0 text-xs ${
-                            t.status === 'done'
-                              ? 'text-emerald-400'
-                              : t.status === 'failed'
-                                ? 'text-rose-400'
-                                : t.status === 'cancelled'
-                                  ? 'text-slate-500'
-                                  : 'text-accent-400'
-                          }`}
-                        >
-                          {t.status === 'done'
-                            ? '完成'
-                            : t.status === 'failed'
-                              ? '失败'
-                              : t.status === 'cancelled'
-                                ? '已取消'
-                                : `${t.percent}%`}
-                        </span>
-                        {(t.status === 'downloading' || t.status === 'queued') && (
-                          <button className="btn-ghost shrink-0 !px-2 !py-1 text-xs" onClick={() => void window.api.downloadCancel(t.id)}>
-                            取消
-                          </button>
-                        )}
-                      </div>
-                      {(t.status === 'downloading' || t.status === 'queued') && (
-                        <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white/10">
-                          <div className="h-full bg-accent-500 transition-all" style={{ width: `${t.percent}%` }} />
-                        </div>
-                      )}
-                      {t.error && <div className="mt-1 text-xs text-rose-400">{t.error}</div>}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </section>
-
-            {/* 6 环境安装 */}
+            {/* 5 环境安装（下载进度归到每条卡片内） */}
             <section className="panel p-5">
               <div className="mb-3 flex items-center gap-2 text-sm font-medium text-white">
                 <PackagePlus size={15} className="text-accent-400" />
@@ -400,7 +381,13 @@ export default function Environment({ embedded = false }: { embedded?: boolean }
                 <div className="space-y-3">
                   {catalog.map((item) => {
                     const idx = sourceIndex[item.id] ?? 0
-                    const source = item.sources[idx] ?? item.sources[0]
+                    const task = tasks[item.id]
+                    const downloading = task?.status === 'downloading' || task?.status === 'queued'
+                    const packFiles = item.files ?? []
+                    const srcList = packFiles[0]?.sources ?? item.sources ?? []
+                    const src = srcList[idx] ?? srcList[0]
+                    const installedAll = packFiles.length === 0 ? item.installed : packFiles.every((f) => f.installed)
+                    const missing = packFiles.filter((f) => !f.installed).length
                     return (
                       <div key={item.id} className="rounded-lg bg-white/[0.03] px-3 py-3">
                         <div className="flex items-center gap-2 text-sm">
@@ -410,84 +397,77 @@ export default function Environment({ embedded = false }: { embedded?: boolean }
                               <span className="ml-2 text-xs text-slate-500">约 {(item.sizeMB / 1024).toFixed(1)} GB</span>
                             ) : null}
                           </span>
-                          {!item.extract ? (
-                            item.installed ? (
-                              <>
-                                <span className="flex items-center gap-1 text-xs text-emerald-400">
-                                  <CheckCircle2 size={13} />
-                                  已下载
-                                </span>
-                                <button
-                                  className="btn-ghost shrink-0 !px-3 !py-1.5 text-xs"
-                                  onClick={() => void window.api.openPath(item.dest.replace(/[\\/][^\\/]+$/, ''))}
-                                >
-                                  <FolderOpen size={13} />
-                                  打开目录
-                                </button>
-                              </>
-                            ) : (
-                              <button
-                                className="btn-primary shrink-0 !px-3 !py-1.5 text-xs"
-                                onClick={() =>
-                                  void window.api.downloadStart({
-                                    id: item.id,
-                                    label: item.label,
-                                    url: source.url,
-                                    dest: item.dest
-                                  })
-                                }
-                              >
-                                <Download size={13} />
-                                下载
-                              </button>
-                            )
-                          ) : item.extracted ? (
-                            <>
-                              <span className="flex items-center gap-1 text-xs text-emerald-400">
-                                <CheckCircle2 size={13} />
-                                已解压
+                          {item.kind === 'pack' ? (
+                            packFiles.length > 0 ? (
+                              <span className={`shrink-0 text-xs ${missing === 0 ? 'text-emerald-400' : missing < packFiles.length ? 'text-amber-400' : 'text-slate-500'}`}>
+                                {missing === 0 ? `全部 ${packFiles.length} 项已就绪` : `${packFiles.length - missing}/${packFiles.length} 项已就绪`}
                               </span>
-                              <button
-                                className="btn-ghost shrink-0 !px-3 !py-1.5 text-xs"
-                                onClick={() => void window.api.openPath(item.extractedDir)}
-                              >
-                                <FolderOpen size={13} />
-                                打开目录
-                              </button>
-                            </>
-                          ) : item.installed ? (
-                            <>
-                              <span className="flex items-center gap-1 text-xs text-emerald-400">
-                                <CheckCircle2 size={13} />
-                                已下载
-                              </span>
-                              <button
-                                className="btn-primary shrink-0 !px-3 !py-1.5 text-xs"
-                                disabled={extractingId === item.id}
-                                onClick={() => void doExtract(item)}
-                              >
-                                {extractingId === item.id ? '解压中…' : '解压'}
-                              </button>
-                            </>
-                          ) : (
+                            ) : null
+                          ) : installedAll ? (
+                            <span className="flex items-center gap-1 text-xs text-emerald-400">
+                              <CheckCircle2 size={13} />
+                              已下载
+                            </span>
+                          ) : null}
+                          {installedAll && (
+                            <button
+                              className="btn-ghost shrink-0 !px-3 !py-1.5 text-xs"
+                              onClick={() => {
+                                const target = item.files ? (packFiles[0]?.dest ?? item.dest) : item.dest
+                                void window.api.openPath(target ? target.replace(/[\\/][^\\/]+$/, '') : '')
+                              }}
+                            >
+                              <FolderOpen size={13} />
+                              打开目录
+                            </button>
+                          )}
+                          {!installedAll && !downloading && (
                             <button
                               className="btn-primary shrink-0 !px-3 !py-1.5 text-xs"
-                              onClick={() =>
-                                void window.api.downloadStart({
-                                  id: item.id,
-                                  label: item.label,
-                                  url: source.url,
-                                  dest: item.dest
-                                })
-                              }
+                              onClick={() => void downloadItem(item)}
                             >
                               <Download size={13} />
                               下载
                             </button>
                           )}
+                          {downloading && (
+                            <button className="btn-ghost shrink-0 !px-3 !py-1.5 text-xs" onClick={() => void window.api.downloadCancel(item.id)}>
+                              取消
+                            </button>
+                          )}
                         </div>
                         <div className="mt-1 text-xs text-slate-500">{item.description}</div>
-                        {!item.installed && item.sources.length > 1 && (
+
+                        {/* 内联进度条 */}
+                        {downloading && (
+                          <div className="mt-2">
+                            <div className="flex items-center justify-between text-[11px] text-slate-400">
+                              <span>{task?.label ?? item.label} 下载中（多线程镜像）</span>
+                              <span>{task?.percent ?? 0}%</span>
+                            </div>
+                            <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-white/10">
+                              <div className="h-full bg-accent-500 transition-all" style={{ width: `${task?.percent ?? 0}%` }} />
+                            </div>
+                            {task?.error && <div className="mt-1 text-xs text-rose-400">{task.error}</div>}
+                          </div>
+                        )}
+
+                        {/* 工作流包：文件清单 */}
+                        {item.kind === 'pack' && packFiles.length > 0 && (
+                          <div className="mt-2 space-y-1">
+                            {packFiles.map((f) => (
+                              <div key={f.file} className="flex items-center gap-2 text-[11px]">
+                                <span className={f.installed ? 'text-emerald-400' : 'text-slate-500'}>
+                                  {f.installed ? '✓' : '○'}
+                                </span>
+                                <span className="min-w-0 flex-1 truncate text-slate-400">{f.file}</span>
+                                {f.sizeMB ? <span className="text-slate-600">{(f.sizeMB / 1024).toFixed(1)} GB</span> : null}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {!installedAll && srcList.length > 1 && (
                           <div className="mt-2 flex items-center gap-2">
                             <span className="text-[11px] text-slate-600">下载源</span>
                             <select
@@ -497,12 +477,25 @@ export default function Environment({ embedded = false }: { embedded?: boolean }
                                 setSourceIndex((prev) => ({ ...prev, [item.id]: Number(e.target.value) }))
                               }
                             >
-                              {item.sources.map((s, i) => (
+                              {srcList.map((s, i) => (
                                 <option key={s.name} value={i}>
                                   {s.name}
                                 </option>
                               ))}
                             </select>
+                          </div>
+                        )}
+
+                        {/* 压缩包解压 */}
+                        {item.extract && item.installed && !item.extracted && (
+                          <div className="mt-2">
+                            <button
+                              className="btn-primary shrink-0 !px-3 !py-1.5 text-xs"
+                              disabled={extractingId === item.id}
+                              onClick={() => void doExtract(item)}
+                            >
+                              {extractingId === item.id ? '解压中…' : '解压'}
+                            </button>
                           </div>
                         )}
                       </div>
@@ -511,7 +504,7 @@ export default function Environment({ embedded = false }: { embedded?: boolean }
                 </div>
               )}
               <div className="mt-3 text-[11px] text-slate-600">
-                下载使用断点续传，失败后可直接重新点击继续；大文件下载到「用户数据/runtime」目录，不随应用安装包走。
+                下载为多线程镜像下载，支持断点续传；大文件下载到「用户数据/runtime」或 ComfyUI 的 models 目录，不随应用安装包走。
               </div>
             </section>
 

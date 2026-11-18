@@ -89,27 +89,36 @@ export class ComfyInstaller extends EventEmitter {
 
       await fsp.mkdir(this.runtimeDir, { recursive: true })
 
+      const rtDest = rt.dest
+      const rtExtractDir = rt.extractedDir
+      if (!rtDest || !rtExtractDir) {
+        const s: ComfyInstallState = { phase: 'error', percent: 0, message: 'ComfyUI 安装包路径缺失', error: 'no_dest' }
+        this.emitState(s)
+        return s
+      }
+
       // 1. 下载（若已存在则跳过）
-      if (!fs.existsSync(rt.dest)) {
+      if (!fs.existsSync(rtDest)) {
         this.emitState({ phase: 'downloading', percent: 0, message: `正在下载 ${rt.label}（约 ${Math.round((rt.sizeMB ?? 0) / 1024 * 10) / 10} GB）…` })
-        const source = rt.sources[0]
-        await this.downloadingWithProgress(rt.id, rt.label, source.url, rt.dest)
+        const source = (rt.sources ?? [])[0]
+        if (!source) throw new Error('没有可用的下载源')
+        await this.downloadingWithProgress(rt.id, rt.label, source.url, rtDest)
       } else {
         this.emitState({ phase: 'downloading', percent: 100, message: '安装包已存在，跳过下载' })
       }
 
       // 2. 解压
-      if (!fs.existsSync(rt.extractedDir) || findComfyRoot(rt.extractedDir) === null) {
+      if (!fs.existsSync(rtExtractDir) || findComfyRoot(rtExtractDir) === null) {
         this.emitState({ phase: 'extracting', percent: 0, message: '正在解压 ComfyUI（首次较久，请耐心）…' })
         const seven = find7z(this.resourcesPath, this.appPath) ?? undefined
-        await extractArchive(rt.dest, rt.extractedDir, seven)
+        await extractArchive(rtDest, rtExtractDir, seven)
       } else {
         this.emitState({ phase: 'extracting', percent: 100, message: '已解压，跳过' })
       }
 
       // 3. 找根目录并写入运行时配置
       this.emitState({ phase: 'configuring', percent: 50, message: '正在配置运行时…' })
-      const comfyRoot = findComfyRoot(rt.extractedDir) ?? rt.extractedDir
+      const comfyRoot = findComfyRoot(rtExtractDir) ?? rtExtractDir
       const cfg = await this.runtime.getConfig()
       await this.runtime.setConfig({ ...cfg, root: comfyRoot, port: cfg.port || 8188, python: null })
 

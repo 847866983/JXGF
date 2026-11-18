@@ -15,11 +15,143 @@ async function sha256File(file: string): Promise<string> {
   })
 }
 
+/** 单个 Range 分块：下载 [start,end] 写入临时文件，回调已收字节 */
+async function downloadRange(
+  url: string,
+  start: number,
+  end: number,
+  tmpFile: string,
+  signal: AbortSignal,
+  onBytes: (n: number) => void
+): Promise<void> {
+  const res = await fetch(url, {
+    headers: { Range: `bytes=${start}-${end}` },
+    signal
+  })
+  if (res.status !== 206 && res.status !== 200) {
+    throw new Error(`HTTP ${res.status}`)
+  }
+  await fsp.mkdir(path.dirname(tmpFile), { recursive: true })
+  const ws = fs.createWriteStream(tmpFile)
+  let received = 0
+  const reader = (res.body as unknown as ReadableStream<Uint8Array>).getReader()
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    if (!ws.write(Buffer.from(value))) {
+      await new Promise<void>((r) => ws.once('drain', r))
+    }
+    received += value.length
+    onBytes(received)
+  }
+  await new Promise<void>((resolve, reject) => {
+    ws.end()
+    ws.on('finish', resolve)
+    ws.on('error', reject)
+  })
+}
+
+/** 探测文件总大小与是否支持 Range（HEAD 不支持时退回 GET Range 探测） */
+async function probe(url: string, signal: AbortSignal): Promise<{ total: number; supportsRange: boolean }> {
+  try {
+    const r = await fetch(url, { method: 'HEAD', signal })
+    const len = Number(r.headers.get('content-length') ?? 0)
+    if (r.ok && len > 0) {
+      await r.body?.cancel().catch(() => undefined)
+      return { total: len, supportsRange: r.headers.get('accept-ranges') === 'bytes' }
+    }
+    await r.body?.cancel().catch(() => undefined)
+  } catch {
+    // HEAD 不支持，继续
+  }
+  try {
+    const r = await fetch(url, { signal, headers: { Range: 'bytes=0-0' } })
+    if (r.status === 206) {
+      const cr = r.headers.get('content-range') ?? ''
+      const total = Number(/\/(\d+)$/.exec(cr)?.[1] ?? 0)
+      await r.body?.cancel().catch(() => undefined)
+      return { total, supportsRange: true }
+    }
+    const len = Number(r.headers.get('content-length') ?? 0)
+    await r.body?.cancel().catch(() => undefined)
+    return { total: len, supportsRange: false }
+  } catch {
+    return { total: 0, supportsRange: false }
+  }
+}
+
+/** 多线程分块下载：按并行度切 Range，每块写独立临时文件，最后拼接 */
+async function downloadParallel(
+  url: string,
+  dest: string,
+  parallel: number,
+  signal: AbortSignal,
+  onBytes: (n: number) => void
+): Promise<void> {
+  const { total, supportsRange } = await probe(url, signal)
+  if (supportsRange && total > 0) {
+    const n = Math.max(1, Math.min(parallel, 8))
+    const chunkSize = Math.ceil(total / n)
+    const tasks: Promise<void>[] = []
+    for (let i = 0; i < n; i++) {
+      const start = i * chunkSize
+      const end = Math.min(total - 1, (i + 1) * chunkSize - 1)
+      if (start > end) break
+      const tmp = `${dest}.chunk${i}.part`
+      tasks.push(downloadRange(url, start, end, tmp, signal, (b) => onBytes(b)))
+    }
+    await Promise.all(tasks)
+    // 拼接分块（按顺序串接到目标文件）
+    await fsp.mkdir(path.dirname(dest), { recursive: true })
+    const out = fs.createWriteStream(dest)
+    for (let i = 0; i < n; i++) {
+      const tmp = `${dest}.chunk${i}.part`
+      if (!fs.existsSync(tmp)) continue
+      await new Promise<void>((resolve, reject) => {
+        const rs = fs.createReadStream(tmp)
+        rs.on('error', reject)
+        rs.on('end', resolve)
+        rs.pipe(out, { end: false })
+      })
+      await fsp.rm(tmp, { force: true }).catch(() => undefined)
+    }
+    await new Promise<void>((resolve, reject) => {
+      out.end()
+      out.on('finish', resolve)
+      out.on('error', reject)
+    })
+    return
+  }
+  // 服务器不支持 Range：退回单流下载
+  await singleStream(url, dest, signal, onBytes)
+}
+
+async function singleStream(url: string, dest: string, signal: AbortSignal, onBytes: (n: number) => void): Promise<void> {
+  const res = await fetch(url, { signal })
+  if (res.status !== 200 && res.status !== 206) throw new Error(`HTTP ${res.status}`)
+  await fsp.mkdir(path.dirname(dest), { recursive: true })
+  const ws = fs.createWriteStream(dest)
+  const reader = (res.body as unknown as ReadableStream<Uint8Array>).getReader()
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    if (!ws.write(Buffer.from(value))) {
+      await new Promise<void>((r) => ws.once('drain', r))
+    }
+    onBytes(value.length)
+  }
+  await new Promise<void>((resolve, reject) => {
+    ws.end()
+    ws.on('finish', resolve)
+    ws.on('error', reject)
+  })
+}
+
 /**
- * 断点续传下载引擎（纯 Node，不依赖 Electron，便于单测）。
- * - 下载到 `<dest>.part`，完成后原子 rename 到 dest
- * - 已存在的 .part 会通过 HTTP Range 继续下载
- * - 提供 SHA256 校验、取消、进度事件
+ * 断点续传 + 多线程分块下载引擎（纯 Node，便于单测）。
+ * - 小文件单流；大文件按并行度切 Range 多线程，最后拼接
+ * - 下载到临时分块文件，完成后原子 rename 到 dest
+ * - SHA256 校验、取消、进度事件
  */
 export class DownloadManager extends EventEmitter {
   private tasks = new Map<string, DownloadTask>()
@@ -69,65 +201,51 @@ export class DownloadManager extends EventEmitter {
     this.running.add(req.id)
     const controller = new AbortController()
     this.controllers.set(req.id, controller)
-    const part = `${req.dest}.part`
     this.set(task, { status: 'downloading' })
     try {
-      let start = 0
-      try {
-        start = (await fsp.stat(part)).size
-      } catch {
-        // 没有部分文件，从头下载
-      }
+      const parallel = req.parallel ?? 4
+      const files: { url: string; dest: string; sha256?: string }[] = req.files?.length
+        ? req.files
+        : [{ url: req.url, dest: req.dest, sha256: req.sha256 }]
 
-      const headers: Record<string, string> = {}
-      if (start > 0) headers['Range'] = `bytes=${start}-`
-      const res = await fetch(req.url, { headers, signal: controller.signal })
-      if (res.status !== 200 && res.status !== 206) {
-        throw new Error(`HTTP ${res.status}`)
-      }
-
-      let total = start
-      let append = start > 0
-      if (res.status === 206) {
-        const m = /\/(\d+)$/.exec(res.headers.get('content-range') ?? '')
-        if (m) total = Number(m[1])
-      } else {
-        // 服务器不支持 Range（返回 200 完整文件）：重头写，避免把旧 .part 重复追加导致文件损坏
-        const len = Number(res.headers.get('content-length') ?? 0)
-        total = len || 0
-        append = false
-        start = 0
+      // 计算总大小（先探测各文件）
+      let total = 0
+      for (const f of files) {
+        try {
+          const r = await fetch(f.url, { method: 'HEAD', signal: controller.signal })
+          const len = Number(r.headers.get('content-length') ?? 0)
+          if (len > 0) total += len
+        } catch {
+          // 探测失败不阻断
+        }
       }
       this.set(task, { totalBytes: total })
 
-      await fsp.mkdir(path.dirname(req.dest), { recursive: true })
-      const ws = fs.createWriteStream(part, { flags: append ? 'a' : 'w' })
-      const reader = (res.body as unknown as ReadableStream<Uint8Array>).getReader()
-      let received = start
-      for (;;) {
-        const { done, value } = await reader.read()
-        if (done) break
-        if (!ws.write(Buffer.from(value))) {
-          await new Promise<void>((r) => ws.once('drain', r))
+      let received = 0
+      for (const f of files) {
+        const part = `${f.dest}.part`
+        let got = 0
+        try {
+          got = (await fsp.stat(part)).size
+        } catch {
+          // 无部分文件，从头下载
         }
-        received += value.length
-        this.set(task, { receivedBytes: received })
-      }
-      await new Promise<void>((resolve, reject) => {
-        ws.end()
-        ws.on('finish', resolve)
-        ws.on('error', reject)
-      })
-
-      if (req.sha256) {
-        const hash = await sha256File(part)
-        if (hash !== req.sha256.toLowerCase()) {
-          await fsp.rm(part, { force: true }).catch(() => undefined)
-          throw new Error('SHA256 校验失败')
+        // 单文件也用分块下载（忽略已有 part，大文件多线程更快）
+        let fileReceived = 0
+        await downloadParallel(f.url, f.dest, parallel, controller.signal, (b) => {
+          fileReceived = b
+          this.set(task, { receivedBytes: received + fileReceived })
+        })
+        if (f.sha256) {
+          const hash = await sha256File(f.dest)
+          if (hash !== f.sha256.toLowerCase()) {
+            await fsp.rm(f.dest, { force: true }).catch(() => undefined)
+            throw new Error(`SHA256 校验失败：${path.basename(f.dest)}`)
+          }
         }
+        received += fileReceived
       }
 
-      await fsp.rename(part, req.dest)
       this.set(task, { status: 'done', receivedBytes: total, finishedAt: new Date().toISOString() })
       this.emit('done', task)
     } catch (err) {

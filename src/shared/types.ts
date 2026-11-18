@@ -368,6 +368,10 @@ export interface DownloadRequest {
   url: string
   dest: string
   sha256?: string
+  /** 多文件打包下载（一个工作流一套模型） */
+  files?: { url: string; dest: string; sha256?: string }[]
+  /** 并行线程数（分块下载），默认 4 */
+  parallel?: number
 }
 
 export interface DownloadTask {
@@ -386,19 +390,36 @@ export interface DownloadTask {
 
 // ---------- 组件目录 ----------
 
+export interface CatalogFileSource {
+  name: string
+  url: string
+}
+
+export interface CatalogPackFile {
+  file: string
+  sizeMB?: number
+  url: string
+  sources: CatalogFileSource[]
+  dest: string
+  installed: boolean
+}
+
 export interface CatalogItem {
   id: string
   label: string
-  kind: 'comfyui' | 'tool' | 'model'
+  kind: 'comfyui' | 'tool' | 'pack'
   description: string
   sizeMB?: number
-  file: string
-  sources: { name: string; url: string }[]
-  dest: string
+  /** 工作流包：多文件清单 */
+  files?: CatalogPackFile[]
+  /** 单文件条目 */
+  file?: string
+  sources?: CatalogFileSource[]
+  dest?: string
   installed: boolean
-  extractedDir: string
-  extracted: boolean
-  extract: boolean
+  extractedDir?: string
+  extracted?: boolean
+  extract?: boolean
 }
 
 // ---------- 内置 ComfyUI 运行管理 ----------

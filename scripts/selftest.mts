@@ -29,7 +29,7 @@ import {
 } from '../src/renderer/src/lib/assetGen.ts'
 import { buildChatUrl, normalizeAiConfig, defaultAiConfig } from '../src/shared/ai.ts'
 import { DownloadManager } from '../src/main/core/download.ts'
-import { CATALOG, MODEL_CATALOG, resolveCatalog } from '../src/main/core/catalog.ts'
+import { ALL_ENTRIES, MODEL_CATALOG, resolveCatalog } from '../src/main/core/catalog.ts'
 import { extractArchive } from '../src/main/core/extract.ts'
 import { ProjectStore, uid, now } from '../src/main/core/store.ts'
 import { listMemory, readMemory, writeMemory, appendMemory } from '../src/main/core/memory.ts'
@@ -215,15 +215,16 @@ let rangeSeen = false
 const server = http.createServer((req, res) => {
   if (req.url === '/file') {
     if (req.headers.range) rangeSeen = true
-    const m = /bytes=(\d+)-/.exec(req.headers.range ?? '')
+    const m = /bytes=(\d+)-(\d*)/.exec(req.headers.range ?? '')
     const start = m ? Number(m[1]) : 0
+    const end = m && m[2] ? Number(m[2]) : payload.length - 1
     if (m) {
       res.writeHead(206, {
-        'Content-Range': `bytes ${start}-${payload.length - 1}/${payload.length}`,
-        'Content-Length': payload.length - start,
+        'Content-Range': `bytes ${start}-${end}/${payload.length}`,
+        'Content-Length': end - start + 1,
         'Accept-Ranges': 'bytes'
       })
-      res.end(payload.subarray(start))
+      res.end(payload.subarray(start, end + 1))
     } else {
       res.writeHead(200, { 'Content-Length': payload.length, 'Accept-Ranges': 'bytes' })
       res.end(payload)
@@ -315,58 +316,70 @@ const nvLowGpu = { vendor: 'nvidia' as const, name: 'GTX 960', vramMB: 4096, vra
 const amdGpu = { vendor: 'amd' as const, name: 'RX 7800', vramMB: 16384, vramKnown: true, driver: '', cudaAvailable: false, raw: '' }
 const intelGpu = { vendor: 'intel' as const, name: 'Arc', vramMB: 8192, vramKnown: true, driver: '', cudaAvailable: false, raw: '' }
 
-ok('目录：NVIDIA 解析出便携版 + 多个推荐模型', () => {
+ok('目录：NVIDIA 解析出便携版 + 工作流包', () => {
   const items = resolveCatalog(tmp2, nvGpu)
   assert.ok(items.length >= 2)
-  assert.equal(items[0].id, 'comfyui-portable-nvidia')
-  assert.ok(items.some((i) => i.id === 'wan21-t2v-13b'))
-  assert.ok(items.some((i) => i.id === 'z-image-turbo'))
+  assert.equal(items[0].id, 'comfyui-portable')
+  assert.ok(items.some((i) => i.id === 'pack-h3-video'))
+  assert.ok(items.some((i) => i.id === 'pack-qwen-image'))
 })
-ok('目录：NVIDIA 低显存只给便携版（模型被档位过滤）', () => {
+ok('目录：NVIDIA 低显存只给便携版', () => {
   const items = resolveCatalog(tmp2, nvLowGpu)
   assert.equal(items.length, 1)
-  assert.equal(items[0].id, 'comfyui-portable-nvidia')
+  assert.equal(items[0].id, 'comfyui-portable')
 })
-ok('目录：AMD 只解析出 AMD 便携版', () => {
+ok('目录：AMD 只解析出便携版', () => {
   const items = resolveCatalog(tmp2, amdGpu)
   assert.equal(items.length, 1)
-  assert.equal(items[0].id, 'comfyui-portable-amd')
+  assert.equal(items[0].id, 'comfyui-portable')
 })
-ok('目录：Intel 无可下载组件', () => {
-  assert.equal(resolveCatalog(tmp2, intelGpu).length, 0)
+ok('目录：Intel 只解析出便携版', () => {
+  const items = resolveCatalog(tmp2, intelGpu)
+  assert.equal(items.length, 1)
+  assert.equal(items[0].id, 'comfyui-portable')
 })
 ok('目录：dest 落在安装根目录下且未安装', () => {
   const items = resolveCatalog(tmp2, nvGpu)
-  assert.ok(items[0].dest.startsWith(tmp2))
+  assert.ok(items[0].dest!.startsWith(tmp2))
   assert.equal(items[0].installed, false)
 })
-ok('目录：模型 dest 落在 models 子目录', () => {
+ok('目录：H3 包模型 dest 落在正确子目录', () => {
   const items = resolveCatalog(tmp2, nvGpu)
-  const wan = items.find((i) => i.id === 'wan21-t2v-13b')!
-  assert.ok(wan.dest.includes(path.join('models', 'wan2.1_t2v_1.3B_fp16.safetensors')))
-  assert.equal(wan.extract, false)
+  const h3 = items.find((i) => i.id === 'pack-h3-video')!
+  assert.equal(h3.files!.length, 6)
+  const unet = h3.files!.find((f) => f.file.includes('minimax_h3_hybrid'))!
+  assert.ok(unet.dest.includes(path.join('MiniMax-H3', 'minimax_h3_hybrid_fl2va_ref2va_b25-49.safetensors')))
+  const tae = h3.files!.find((f) => f.file.includes('TAE'))!
+  assert.ok(tae.dest.includes('vae_approx'))
+})
+ok('目录：镜像优先（hf-mirror 在前）', () => {
+  const items = resolveCatalog(tmp2, nvGpu)
+  const h3 = items.find((i) => i.id === 'pack-h3-video')!
+  assert.ok(/mirror|hf-mirror/.test(h3.files![0].sources[0].name + h3.files![0].sources[0].url))
 })
 ok('目录：传 comfyModelsRoot 时模型下到 ComfyUI 的 models', () => {
   const items = resolveCatalog(tmp2, nvGpu, 'X:/ComfyUI/models')
-  const z = items.find((i) => i.id === 'z-image-turbo')!
-  assert.ok(z.dest.toLowerCase().includes('comfyui') && z.dest.includes('z_image_turbo_bf16.safetensors'))
+  const h3 = items.find((i) => i.id === 'pack-h3-video')!
+  assert.ok(h3.files![0].dest.toLowerCase().includes('comfyui'))
 })
 ok('目录：便携版需要解压', () => {
   const items = resolveCatalog(tmp2, nvGpu)
   assert.equal(items[0].extract, true)
 })
 ok('目录：全部 id 唯一且源为 https', () => {
-  const ids = new Set([...CATALOG, ...MODEL_CATALOG].map((e) => e.id))
-  assert.equal(ids.size, CATALOG.length + MODEL_CATALOG.length)
-  for (const e of [...CATALOG, ...MODEL_CATALOG]) {
-    assert.ok(e.sources.length > 0)
-    for (const s of e.sources) assert.ok(s.url.startsWith('https://'), `${e.id} 源非 https`)
+  const ids = new Set(ALL_ENTRIES.map((e) => e.id))
+  assert.equal(ids.size, ALL_ENTRIES.length)
+  for (const e of ALL_ENTRIES) {
+    const srcs = e.files?.length ? e.files.flatMap((f) => f.sources) : (e.sources ?? [])
+    assert.ok(srcs.length > 0, `${e.id} 无下载源`)
+    for (const s of srcs) assert.ok(s.url.startsWith('https://'), `${e.id} 源非 https`)
   }
 })
-ok('目录：Wan 模型三个下载源齐全', () => {
-  const m = MODEL_CATALOG.find((e) => e.id === 'wan21-t2v-13b')
-  assert.ok(m)
-  assert.equal(m.sources.length, 3)
+ok('目录：H3 包每个文件三个下载源齐全', () => {
+  const h3 = MODEL_CATALOG.find((e) => e.id === 'pack-h3-video')
+  assert.ok(h3)
+  assert.equal(h3.files!.length, 6)
+  for (const f of h3.files!) assert.ok(f.sources.length >= 3, `${f.file} 源不足`)
 })
 await fsp.rm(tmp2, { recursive: true, force: true })
 
@@ -1014,18 +1027,21 @@ ok('双引擎：文生图按引擎选模板', () => {
 })
 
 // ---- H3 模型目录 ----
-ok('目录：NVIDIA 8GB 解析出 H3 全套模型', () => {
+ok('目录：NVIDIA 8GB 解析出 H3 全套模型（打包）', () => {
   const items = resolveCatalog(tmp2, nvGpu)
-  for (const id of ['h3-unet','h3-clip','h3-video-vae','h3-audio-vae','h3-tae','h3-upscaler']) {
-    assert.ok(items.some((i) => i.id === id), '缺少 ' + id)
+  const h3 = items.find((i) => i.id === 'pack-h3-video')
+  assert.ok(h3, '缺少 H3 工作流包')
+  for (const key of ['minimax_h3_hybrid', 'qwen3vl_32b_minimax', 'video_vae', 'audio_vae', 'TAE', 'h3_upscaler']) {
+    assert.ok(h3.files!.some((f) => f.file.includes(key)), '缺少 ' + key)
   }
 })
 ok('目录：H3 模型 dest 指向正确子目录', () => {
   const items = resolveCatalog(tmp2, nvGpu)
-  const unet = items.find((i) => i.id === 'h3-unet')
+  const h3 = items.find((i) => i.id === 'pack-h3-video')!
+  const unet = h3.files!.find((f) => f.file.includes('minimax_h3_hybrid'))!
   assert.ok(unet.dest.includes(path.join('MiniMax-H3', 'minimax_h3_hybrid_fl2va_ref2va_b25-49.safetensors')))
-  const tae = items.find((i) => i.id === 'h3-tae')
-  assert.ok(tae.dest.includes(path.join('vae_approx', 'MiniMax-H3-TAE.safetensors')))
+  const tae = h3.files!.find((f) => f.file.includes('TAE'))!
+  assert.ok(tae.dest.includes('vae_approx'))
 })
 ok('目录：FFmpeg 工具存在', () => {
   const items = resolveCatalog(tmp2, nvGpu)
