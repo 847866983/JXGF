@@ -1,0 +1,58 @@
+[
+  {
+    "id": "tpl_b3b9dfcc4239",
+    "name": "01 Z-Image-Turbo",
+    "kind": "image",
+    "file": "tpl_b3b9dfcc4239.json",
+    "bytes": 3573
+  },
+  {
+    "id": "tpl_28091eeff783",
+    "name": "02-Krea2-单双采",
+    "kind": "image",
+    "file": "tpl_28091eeff783.json",
+    "bytes": 4276
+  },
+  {
+    "id": "tpl_2c2d1cd7e8f4",
+    "name": "Qwen-image21-文生图流",
+    "kind": "image",
+    "file": "tpl_2c2d1cd7e8f4.json",
+    "bytes": 2545
+  },
+  {
+    "id": "tpl_9a06ccc22cf3",
+    "name": "🎵音乐生成",
+    "kind": "image",
+    "file": "tpl_9a06ccc22cf3.json",
+    "bytes": 16861
+  },
+  {
+    "id": "tpl_c88763d84b38",
+    "name": "04-Krea2-角色资产四视图",
+    "kind": "image",
+    "file": "tpl_c88763d84b38.json",
+    "bytes": 4218
+  },
+  {
+    "id": "tpl_f8b2f036a387",
+    "name": "image_qwen_image_2_1_t2i",
+    "kind": "image",
+    "file": "tpl_f8b2f036a387.json",
+    "bytes": 840
+  },
+  {
+    "id": "tpl_82b5ef461e09",
+    "name": "千问图片编辑(全能编辑)",
+    "kind": "image",
+    "file": "tpl_82b5ef461e09.json",
+    "bytes": 2781
+  },
+  {
+    "id": "tpl_e3ba3710e3b0",
+    "name": "MiniMax H3 三采",
+    "kind": "video",
+    "file": "tpl_e3ba3710e3b0.json",
+    "bytes": 6970
+  }
+]

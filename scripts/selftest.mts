@@ -38,6 +38,7 @@ import { explainError } from '../src/renderer/src/lib/errorHelp.ts'
 import { ComfyRuntime } from '../src/main/core/comfy-runtime.ts'
 import { detectWorkflowKind, isUiWorkflow } from '../src/main/core/workflow-convert.ts'
 import { adaptTemplateForGpu } from '../src/main/core/template-adapt.ts'
+import { listBuiltinWorkflows, loadBuiltinWorkflow, buildBuiltinTemplates } from '../src/main/core/builtin-workflows.ts'
 
 const execFileAsync = promisify(execFile)
 
@@ -1046,6 +1047,30 @@ ok('目录：H3 模型 dest 指向正确子目录', () => {
 ok('目录：FFmpeg 工具存在', () => {
   const items = resolveCatalog(tmp2, nvGpu)
   assert.ok(items.some((i) => i.id === 'ffmpeg-essentials'))
+})
+
+// ---- 内置工作流 ----
+ok('内置工作流：清单非空且含图片+视频', () => {
+  const list = listBuiltinWorkflows()
+  assert.ok(list.length >= 1, '内置工作流为空')
+  assert.ok(list.some((w) => w.kind === 'video'), '缺少视频工作流')
+  assert.ok(list.some((w) => w.kind === 'image'), '缺少图片工作流')
+})
+ok('内置工作流：能加载 apiJson', () => {
+  const list = listBuiltinWorkflows()
+  const wf = loadBuiltinWorkflow(list[0].file)
+  assert.ok(wf && wf.apiJson && typeof wf.apiJson === 'object')
+})
+ok('内置工作流：空模板列表时全部补入', () => {
+  let seq = 0
+  const added = buildBuiltinTemplates([], (p) => p + (++seq), () => 'now')
+  assert.equal(added.length, listBuiltinWorkflows().length)
+})
+ok('内置工作流：已存在的同名不重复补', () => {
+  const list = listBuiltinWorkflows()
+  const existing = [{ id: 'x', name: list[0].name, kind: list[0].kind, apiJson: {}, mapping: { version: 1 }, createdAt: '' } as never]
+  const added = buildBuiltinTemplates(existing, (p) => p + Math.random(), () => 'now')
+  assert.equal(added.length, listBuiltinWorkflows().length - 1)
 })
 
 console.log(`\nselftest: ${pass} passed, ${fail} failed`)

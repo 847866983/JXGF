@@ -28,6 +28,11 @@ extraResources:
     to: comfy-nodes
     filter:
       - '**/*'
+  # 内置图片/视频工作流，随软件分发，打开/新建项目时自动注入
+  - from: resources/workflows
+    to: workflows
+    filter:
+      - '**/*'
 win:
   target:
     - target: nsis

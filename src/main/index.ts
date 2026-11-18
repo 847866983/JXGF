@@ -27,6 +27,7 @@ import { ComfyRuntime } from './core/comfy-runtime'
 import { ComfyInstaller } from './core/comfy-installer'
 import { isUiWorkflow, convertUiToApi, detectWorkflowKind } from './core/workflow-convert'
 import { adaptTemplateForGpu } from './core/template-adapt'
+import { buildBuiltinTemplates } from './core/builtin-workflows'
 import { listMemory, readMemory, writeMemory, appendMemory } from './core/memory'
 import { AiAssistant } from './core/ai-assistant'
 import { defaultAiConfig, normalizeAiConfig, type AiConfig } from '../shared/ai'
@@ -243,7 +244,26 @@ function registerIpc(): void {
   })
 
   ipcMain.handle(CH.projectList, () => store.list())
-  ipcMain.handle(CH.projectCreate, async (_e, name: string) => store.create(name))
+  /** 把内置图片/视频工作流补进项目模板（按 name 去重，缺则补）。跟随软件走，无需手动导入。 */
+  async function seedBuiltinTemplates(project: Project): Promise<void> {
+    try {
+      const added = buildBuiltinTemplates(project.templates, uid, now)
+      if (added.length === 0) return
+      // 按本机显存适配后加入
+      const hw = await getHardware()
+      for (const tpl of added) tpl.apiJson = adaptTemplateForGpu(tpl.apiJson, hw.gpu)
+      project.templates.push(...added)
+      await store.flush()
+    } catch {
+      // 内置工作流加载失败不阻断项目打开
+    }
+  }
+
+  ipcMain.handle(CH.projectCreate, async (_e, name: string) => {
+    const project = await store.create(name)
+    await seedBuiltinTemplates(project)
+    return project
+  })
   ipcMain.handle(CH.projectOpen, async (_e, id: string) => {
     const project = await store.open(id)
     // 打开旧项目时按本机显存适配模板（修 12GB 放大模型在 6GB 卡上的 OOM）
@@ -261,6 +281,8 @@ function registerIpc(): void {
     } catch {
       // 适配失败不阻断打开
     }
+    // 补全内置工作流（老项目缺失的图片/视频工作流，跟随软件自动补齐）
+    await seedBuiltinTemplates(project)
     return project
   })
   ipcMain.handle(CH.projectSave, (_e, project: Project) => store.save(project))
