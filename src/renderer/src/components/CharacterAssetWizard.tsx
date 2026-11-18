@@ -9,6 +9,7 @@ import {
   pickQwenT2ITemplate,
   pickQwenEditTemplate,
   pickKrea2T2ITemplate,
+  pickKrea2EditTemplate,
   pickFourViewTemplate,
   buildCharacterT2IInput,
   buildCharacterFourViewInput,
@@ -263,7 +264,10 @@ export function CharacterAssetWizard({ asset, onClose }: { asset: Asset; onClose
   }
 
   const hasT2I = engine === 'krea2' ? Boolean(pickKrea2T2ITemplate(templates)) : Boolean(pickQwenT2ITemplate(templates))
-  const hasEdit = engine === 'krea2' ? Boolean(pickFourViewTemplate(templates)) : Boolean(pickQwenEditTemplate(templates))
+  const hasEdit =
+    engine === 'krea2'
+      ? Boolean(pickKrea2EditTemplate(templates) ?? pickQwenEditTemplate(templates))
+      : Boolean(pickQwenEditTemplate(templates))
 
   return (
     <Modal

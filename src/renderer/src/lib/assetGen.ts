@@ -73,8 +73,14 @@ const FOUR_VIEW_STRUCT_NEG =
  * 四视图固定提示词（用户指定，原样发送，不拼接风格/描述）。
  * 用千问编辑模板 + 角色参考图，让模型把参考图转成四视图角色设定表。
  */
+/** 四视图提示词（Krea2）：正面半身特写(脸部细节) + 正面/侧面/背面全身 */
 export const FOUR_VIEW_PROMPT =
-  'Convert the character in the image to a Character Sheet showing a face close-up, front full body, side full body and back full body views. Every full-body view shows the complete figure from head to feet, nothing cropped, whole body visible with feet on the ground. Arrange the views side by side on a plain pure white background, each figure fully opaque with sharp clean edges, crisp outlines, no fading, no ghosting.'
+  'Convert the character in the image to a Character Sheet with four views arranged side by side on a plain pure white background: ' +
+  'first a front upper-body half-body portrait showing the face clearly with detailed realistic facial features; ' +
+  'then three full-body standing views — front view, side view and back view. ' +
+  'Every full-body view shows the complete figure from head to feet, nothing cropped, whole body visible. ' +
+  'Same character, same hairstyle, same outfit and colors in every view. ' +
+  'Each figure fully opaque with sharp clean edges, crisp outlines, no fading, no ghosting.'
 
 /** 兼容旧调用：四视图正向提示词固定为 FOUR_VIEW_PROMPT */
 export function buildFourViewPositive(_desc?: string, _styleId?: string): string {
@@ -168,7 +174,12 @@ export const QWEN_QUADVIEW_LORA = 'qwen21_multiple_angles_v2.safetensors'
 
 /** 千问四视图提示词：<mva> 触发 + 四视图描述（配合多角度 LoRA） */
 export const QWEN_QUADVIEW_PROMPT =
-  '<mva> Convert the character in the image to a Character Sheet showing a face close-up, front full body, side full body and back full body views. Arrange the four views side by side in one horizontal row on a plain pure white background, each figure fully opaque with sharp clean edges, crisp outlines, no fading, no ghosting.'
+  '<mva> Convert the character in the image to a Character Sheet with four views arranged side by side on a plain pure white background: ' +
+  'first a front upper-body half-body portrait showing the face clearly with detailed realistic facial features; ' +
+  'then three full-body standing views — front view, side view and back view. ' +
+  'Every full-body view shows the complete figure from head to feet, nothing cropped, whole body visible. ' +
+  'Same character, same hairstyle, same outfit and colors in every view. ' +
+  'Each figure fully opaque with sharp clean edges, crisp outlines, no fading, no ghosting.'
 
 /** 过滤出可用于展示的版本图（去空、去重，保持生成顺序） */
 export function filterRenderableVersions(images: string[] | undefined): string[] {
@@ -190,6 +201,15 @@ export function pickFourViewTemplate(templates: Template[]): Template | undefine
     imgs.find((t) => /四视图/i.test(t.name) && /Krea2/i.test(t.name)) ||
     imgs.find((t) => /Krea2/i.test(t.name) && /四视图|QuadView/i.test(t.name)) ||
     imgs.find((t) => /四视图/i.test(t.name))
+  )
+}
+
+/** Krea2 图片编辑模板（与四视图同族的 Edit 模型，但无 QuadView LoRA） */
+export function pickKrea2EditTemplate(templates: Template[]): Template | undefined {
+  const imgs = templates.filter((t) => t.kind === 'image')
+  return (
+    imgs.find((t) => /Krea2/i.test(t.name) && /图片编辑|编辑/i.test(t.name) && !/四视图/i.test(t.name)) ||
+    imgs.find((t) => /Krea2/i.test(t.name) && /edit/i.test(t.name) && !/四视图/i.test(t.name))
   )
 }
 
@@ -294,21 +314,10 @@ export function buildCharacterEditInput(
 ): AssetJobInput | null {
   const prompt = (editPrompt || '').trim()
   if (!prompt || !refImage) return null
-  if (engine === 'krea2') {
-    // Krea2 用其四视图/编辑模板做图生图修改（grounded encode 承载指令）
-    const template = pickFourViewTemplate(templates)
-    if (!template) return null
-    return {
-      templateId: template.id,
-      positive: prompt,
-      negative: undefined,
-      width: 0,
-      height: 0,
-      batch: 1,
-      refImages: [refImage]
-    }
-  }
-  const template = pickQwenEditTemplate(templates)
+  // 按引擎选对应的编辑工作流（两套各自独立、功能对齐）：
+  //   千问 → 千问图片编辑(全能编辑)
+  //   Krea2 → 05-Krea2-图片编辑（Krea2 Edit 模型，无 QuadView LoRA，不会出四视图）
+  const template = engine === 'krea2' ? pickKrea2EditTemplate(templates) ?? pickQwenEditTemplate(templates) : pickQwenEditTemplate(templates)
   if (!template) return null
   return {
     templateId: template.id,

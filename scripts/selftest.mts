@@ -23,6 +23,7 @@ import {
   buildCharacterEditInput,
   buildFourViewPositive,
   pickKrea2T2ITemplate,
+  pickKrea2EditTemplate,
   pickFourViewTemplate,
   filterRenderableVersions,
   fourViewNegative
@@ -1071,6 +1072,38 @@ ok('内置工作流：已存在的同名不重复补', () => {
   const existing = [{ id: 'x', name: list[0].name, kind: list[0].kind, apiJson: {}, mapping: { version: 1 }, createdAt: '' } as never]
   const added = buildBuiltinTemplates(existing, (p) => p + Math.random(), () => 'now')
   assert.equal(added.length, listBuiltinWorkflows().length - 1)
+})
+
+// ---- 双引擎各自完整的编辑/四视图 ----
+ok('双引擎：Krea2有独立编辑模板', () => {
+  const list = [
+    { id: 'k-edit', name: '05-Krea2-图片编辑', kind: 'image' as const, apiJson: {}, mapping: { version: 1 }, createdAt: '', description: '' },
+    { id: 'k-4v', name: '04-Krea2-角色资产四视图', kind: 'image' as const, apiJson: {}, mapping: { version: 1 }, createdAt: '', description: '' }
+  ]
+  assert.equal(pickKrea2EditTemplate(list).id, 'k-edit', '编辑模板不应选中四视图')
+})
+ok('双引擎：Krea2编辑走Krea2编辑模板(非四视图)', () => {
+  const list = [
+    { id: 'k-edit', name: '05-Krea2-图片编辑', kind: 'image' as const, apiJson: {}, mapping: { version: 1 }, createdAt: '', description: '' },
+    { id: 'k-4v', name: '04-Krea2-角色资产四视图', kind: 'image' as const, apiJson: {}, mapping: { version: 1 }, createdAt: '', description: '' },
+    { id: 'q-edit', name: '千问图片编辑(全能编辑)', kind: 'image' as const, apiJson: {}, mapping: { version: 1 }, createdAt: '', description: '' }
+  ]
+  const r = buildCharacterEditInput(qAsset, list, undefined, 'ref.png', '加红围巾', 'krea2')
+  assert.equal(r.templateId, 'k-edit')
+})
+ok('双引擎：千问编辑走千问编辑模板', () => {
+  const list = [
+    { id: 'k-edit', name: '05-Krea2-图片编辑', kind: 'image' as const, apiJson: {}, mapping: { version: 1 }, createdAt: '', description: '' },
+    { id: 'q-edit', name: '千问图片编辑(全能编辑)', kind: 'image' as const, apiJson: {}, mapping: { version: 1 }, createdAt: '', description: '' }
+  ]
+  const r = buildCharacterEditInput(qAsset, list, undefined, 'ref.png', '加红围巾', 'qwen')
+  assert.equal(r.templateId, 'q-edit')
+})
+ok('四视图：提示词含半身特写+正侧背全身', () => {
+  const p = buildFourViewPositive()
+  assert.ok(/upper-body half-body portrait/i.test(p), '缺少半身特写')
+  assert.ok(/front view, side view and back view/i.test(p), '缺少正侧背全身')
+  assert.ok(/facial features/i.test(p), '缺少脸部细节')
 })
 
 console.log(`\nselftest: ${pass} passed, ${fail} failed`)

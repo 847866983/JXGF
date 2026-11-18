@@ -54,5 +54,11 @@
     "kind": "video",
     "file": "tpl_e3ba3710e3b0.json",
     "bytes": 6970
+  },
+  {
+    "id": "tpl_krea2_edit_05",
+    "name": "05-Krea2-图片编辑",
+    "kind": "image",
+    "file": "tpl_krea2_edit_05.json"
   }
 ]
