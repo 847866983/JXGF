@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Activity, CheckCircle2, Cpu, Download, FolderOpen, Package, PackagePlus, Play, RefreshCw, ServerCog, Square, TriangleAlert } from 'lucide-react'
+import { Activity, CheckCircle2, Cpu, Download, FileUp, FolderOpen, Package, PackagePlus, Play, RefreshCw, ServerCog, Square, TriangleAlert } from 'lucide-react'
 import type { CatalogItem, ComfyInstallState, ComfyRuntimeState, DownloadTask, EnvironmentReport } from '@shared/types'
 import { PageHeader } from '../components/ui'
 
@@ -39,6 +39,45 @@ export default function Environment({ embedded = false }: { embedded?: boolean }
   const [tasks, setTasks] = useState<Record<string, DownloadTask>>({})
   /** 每条任务上次前端刷新时间（节流用） */
   const lastTaskUpdate = useRef<Record<string, number>>({})
+  /** 模型搬家：模板引用的模型清单 */
+  const [modelList, setModelList] = useState<{ name: string; relativePath: string; absPath: string | null; sizeMB: number; exists: boolean; usedBy: string[] }[]>([])
+  const [selectedModels, setSelectedModels] = useState<Record<string, boolean>>({})
+  const [modelMsg, setModelMsg] = useState<string | null>(null)
+  const [modelBusy, setModelBusy] = useState(false)
+
+  const loadModels = async (): Promise<void> => {
+    try {
+      const list = (await window.api.modelPackList()) as typeof modelList
+      setModelList(list)
+      setSelectedModels(Object.fromEntries(list.filter((m) => m.exists).map((m) => [m.name, true])))
+    } catch (err) {
+      setModelMsg(String((err as Error).message ?? err))
+    }
+  }
+
+  const doExportModels = async (): Promise<void> => {
+    const items = modelList.filter((m) => m.exists && selectedModels[m.name] && m.absPath).map((m) => ({ absPath: m.absPath as string, relativePath: m.relativePath }))
+    if (items.length === 0) { setModelMsg('请先勾选要导出的模型'); return }
+    setModelBusy(true); setModelMsg(null)
+    try {
+      const r = (await window.api.modelPackExport(items)) as { canceled: boolean; file?: string }
+      setModelMsg(r.canceled ? '已取消' : '导出完成：' + r.file)
+    } catch (err) { setModelMsg('导出失败：' + String((err as Error).message ?? err)) } finally { setModelBusy(false) }
+  }
+
+  const doImportModels = async (): Promise<void> => {
+    setModelBusy(true)
+    setModelMsg(null)
+    try {
+      const r = (await window.api.modelPackImport()) as { canceled: boolean; file?: string }
+      setModelMsg(r.canceled ? '\u5df2\u53d6\u6d88' : '\u5bfc\u5165\u5b8c\u6210\uff1a' + r.file)
+      await loadModels()
+    } catch (err) {
+      setModelMsg('\u5bfc\u5165\u5931\u8d25\uff1a' + String((err as Error).message ?? err))
+    } finally {
+      setModelBusy(false)
+    }
+  }
 
   const refreshNodePack = async (root: string): Promise<void> => {
     if (!root.trim()) return
@@ -202,6 +241,7 @@ export default function Environment({ embedded = false }: { embedded?: boolean }
         setTasks((prev) => ({ ...prev, [task.id]: task }))
         if (finished) refreshCatalog()
       }
+      if (e.type === 'model-pack:progress') setModelMsg((e as { message?: string }).message ?? null)
       if (e.type === 'comfy:runtime') setRuntime(e.state)
       if (e.type === 'comfy:install') {
         setInstall(e.state)
@@ -662,6 +702,69 @@ export default function Environment({ embedded = false }: { embedded?: boolean }
                 <pre className="mt-3 max-h-40 overflow-auto rounded-lg bg-ink-950/70 p-3 font-mono text-[11px] leading-relaxed text-slate-400">
                   {runtime.logTail}
                 </pre>
+              )}
+            </section>
+
+            {/* 8 · 模型搬家（社区/私有模型从已有机器拷贝） */}
+            <section className="panel p-5">
+              <div className="mb-3 flex items-center gap-2 text-sm font-medium text-white">
+                <FolderOpen size={15} className="text-accent-400" />
+                8 · 模型搬家（官网下不到的模型）
+              </div>
+              <div className="mb-3 text-xs text-slate-500">
+                有些模型是社区/私有版本（如 QuadView_krea2_v1、rayQwen21编辑强化、krea2 系 LoRA），官方站点下载不到。
+                可在<b className="text-slate-300">有模型的电脑</b>上导出为模型包，再在<b className="text-slate-300">新电脑</b>上导入，
+                自动解压到 ComfyUI/models 对应目录。
+              </div>
+              <div className="mb-2 flex flex-wrap gap-2">
+                <button className="btn-ghost !px-3 !py-1.5 text-xs" onClick={() => void loadModels()}>
+                  <RefreshCw size={13} />
+                  扫描模板引用的模型
+                </button>
+                <button
+                  className="btn-primary !px-3 !py-1.5 text-xs"
+                  disabled={modelBusy || !modelList.some((m) => m.exists)}
+                  onClick={() => void doExportModels()}
+                >
+                  <Package size={13} />
+                  {modelBusy ? '处理中…' : '导出选中模型'}
+                </button>
+                <button className="btn-ghost !px-3 !py-1.5 text-xs" disabled={modelBusy} onClick={() => void doImportModels()}>
+                  <FileUp size={13} />
+                  导入模型包
+                </button>
+                <button
+                  className="btn-ghost !px-3 !py-1.5 text-xs"
+                  onClick={() => {
+                    const all = Object.fromEntries(modelList.filter((m) => m.exists).map((m) => [m.name, true]))
+                    setSelectedModels(all)
+                  }}
+                >
+                  全选
+                </button>
+                <button className="btn-ghost !px-3 !py-1.5 text-xs" onClick={() => setSelectedModels({})}>
+                  清空
+                </button>
+              </div>
+              {modelMsg && <div className="mb-2 rounded bg-white/[0.04] px-3 py-1.5 text-xs text-slate-300">{modelMsg}</div>}
+              {modelList.length === 0 ? (
+                <div className="text-xs text-slate-500">点「扫描模板引用的模型」列出当前项目用到的全部模型。</div>
+              ) : (
+                <div className="max-h-[320px] space-y-1 overflow-y-auto rounded-lg border border-white/5 bg-white/[0.02] p-2">
+                  {modelList.map((m) => (
+                    <label key={m.name} className="flex cursor-pointer items-center gap-2 rounded px-1.5 py-1 text-[11px] hover:bg-white/[0.04]">
+                      <input
+                        type="checkbox"
+                        disabled={!m.exists}
+                        checked={Boolean(selectedModels[m.name])}
+                        onChange={(e) => setSelectedModels((prev) => ({ ...prev, [m.name]: e.target.checked }))}
+                      />
+                      <span className={m.exists ? 'text-slate-300' : 'text-rose-400'}>{m.name}</span>
+                      <span className="ml-auto shrink-0 text-slate-500">{m.exists ? m.sizeMB + 'MB' : '缺失'}</span>
+                      <span className="w-40 shrink-0 truncate text-slate-600" title={m.relativePath}>{m.relativePath || '-'}</span>
+                    </label>
+                  ))}
+                </div>
               )}
             </section>
           </>

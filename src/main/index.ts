@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, shell, protocol } from 'electron'
+import { app, BrowserWindow, ipcMain, shell, protocol, dialog } from 'electron'
 import path from 'node:path'
 import fs from 'node:fs'
 import fsp from 'node:fs/promises'
@@ -28,6 +28,7 @@ import { ComfyInstaller } from './core/comfy-installer'
 import { isUiWorkflow, convertUiToApi, detectWorkflowKind } from './core/workflow-convert'
 import { adaptTemplateForGpu } from './core/template-adapt'
 import { buildBuiltinTemplates } from './core/builtin-workflows'
+import { listReferencedModels, exportModelPack, importModelPack, find7z } from './core/model-pack'
 import { listMemory, readMemory, writeMemory, appendMemory } from './core/memory'
 import { AiAssistant } from './core/ai-assistant'
 import { defaultAiConfig, normalizeAiConfig, type AiConfig } from '../shared/ai'
@@ -246,6 +247,63 @@ function registerIpc(): void {
   ipcMain.handle(CH.nodePackInstall, async (_e, comfyRoot: string) => {
     const { installNodePack } = await import('./core/node-pack')
     return installNodePack(comfyRoot)
+  })
+
+  // ---- 模型搬家（社区/私有模型从已有机器拷贝）----
+  /** 取当前 ComfyUI 的 models 根目录 */
+  async function currentModelsRoot(): Promise<string> {
+    const st = await comfyRuntime.status()
+    if (!st.root) throw new Error('请先配置 ComfyUI 根目录')
+    return fs.existsSync(path.join(st.root, 'ComfyUI', 'models'))
+      ? path.join(st.root, 'ComfyUI', 'models')
+      : path.join(st.root, 'models')
+  }
+  ipcMain.handle(CH.modelPackList, async () => {
+    const project = store.getCurrent()
+    if (!project) throw new Error('请先打开一个项目')
+    return listReferencedModels(project, await currentModelsRoot())
+  })
+  ipcMain.handle(CH.modelPackExport, async (e, items: { absPath: string; relativePath: string }[]) => {
+    const win = BrowserWindow.fromWebContents(e.sender)
+    const save = await dialog.showSaveDialog(win!, {
+      title: '导出模型包',
+      defaultPath: path.join(app.getPath('downloads'), '镜序工坊-模型包.7z'),
+      filters: [{ name: '7z 压缩包', extensions: ['7z'] }]
+    })
+    if (save.canceled || !save.filePath) return { canceled: true }
+    const modelsRoot = await currentModelsRoot()
+    const seven = find7z(process.resourcesPath, app.getAppPath())
+    if (!seven) throw new Error('未找到 7za.exe')
+    await exportModelPack(items, save.filePath, modelsRoot, seven, (msg) => {
+      push({ type: 'model-pack:progress', message: msg } as never)
+    })
+    return { canceled: false, file: save.filePath }
+  })
+  ipcMain.handle(CH.modelPackImport, async (e) => {
+    const win = BrowserWindow.fromWebContents(e.sender)
+    const open = await dialog.showOpenDialog(win!, {
+      title: '导入模型包',
+      properties: ['openFile'],
+      filters: [{ name: '7z 压缩包', extensions: ['7z'] }]
+    })
+    if (open.canceled || open.filePaths.length === 0) return { canceled: true }
+    const modelsRoot = await currentModelsRoot()
+    const seven = find7z(process.resourcesPath, app.getAppPath())
+    if (!seven) throw new Error('未找到 7za.exe')
+    await importModelPack(open.filePaths[0], modelsRoot, seven, (msg) => {
+      push({ type: 'model-pack:progress', message: msg } as never)
+    })
+    return { canceled: false, file: open.filePaths[0] }
+  })
+  ipcMain.handle(CH.modelPackPickSave, async (e) => {
+    const win = BrowserWindow.fromWebContents(e.sender)
+    const r = await dialog.showSaveDialog(win!, { title: '选择保存位置', defaultPath: '镜序工坊-模型清单.txt', filters: [{ name: '文本', extensions: ['txt'] }] })
+    return r.canceled ? null : r.filePath
+  })
+  ipcMain.handle(CH.modelPackPickOpen, async (e) => {
+    const win = BrowserWindow.fromWebContents(e.sender)
+    const r = await dialog.showOpenDialog(win!, { title: '选择模型包', properties: ['openFile'], filters: [{ name: '7z', extensions: ['7z'] }] })
+    return r.canceled ? null : r.filePaths[0]
   })
 
   ipcMain.handle(CH.projectList, () => store.list())

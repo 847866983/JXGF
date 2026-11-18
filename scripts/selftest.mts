@@ -40,6 +40,7 @@ import { ComfyRuntime } from '../src/main/core/comfy-runtime.ts'
 import { detectWorkflowKind, isUiWorkflow } from '../src/main/core/workflow-convert.ts'
 import { adaptTemplateForGpu } from '../src/main/core/template-adapt.ts'
 import { listBuiltinWorkflows, loadBuiltinWorkflow, buildBuiltinTemplates } from '../src/main/core/builtin-workflows.ts'
+import { collectModelRefs } from '../src/main/core/model-pack.ts'
 
 const execFileAsync = promisify(execFile)
 
@@ -1145,6 +1146,23 @@ ok('目录：H3 六个文件目标名与工作流一致', () => {
   assert.ok(names.some((n) => n.endsWith('MiniMax-H3/minimax_h3_hybrid_fl2va_ref2va_b25-49.safetensors')))
   assert.ok(names.some((n) => n.endsWith('vae/minimax_h3_video_vae_int8_convrot.safetensors')))
   assert.ok(names.some((n) => n.endsWith('vae_approx/MiniMax-H3-TAE.safetensors')))
+})
+
+ok('模型搬家：从模板解析引用模型', () => {
+  const proj = {
+    templates: [
+      { name: 'T1', apiJson: { a: { class_type: 'UNETLoader', inputs: { unet_name: 'aaa.safetensors' } }, b: { class_type: 'LoraLoader', inputs: { lora_name: 'sub/bbb.safetensors' } } } }
+    ]
+  }
+  const refs = collectModelRefs(proj as never)
+  assert.equal(refs.size, 2)
+  assert.ok(refs.has('aaa.safetensors'))
+  assert.ok(refs.has('bbb.safetensors'), '应取 basename')
+})
+ok('模型搬家：忽略非模型文件', () => {
+  const proj = { templates: [{ name: 'T', apiJson: { a: { class_type: 'X', inputs: { text: 'hello.png.txt', note: 'abc' } } } }] }
+  const refs = collectModelRefs(proj as never)
+  assert.equal(refs.size, 0)
 })
 
 console.log(`\nselftest: ${pass} passed, ${fail} failed`)

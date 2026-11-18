@@ -47,6 +47,12 @@ const api = {
     ipcRenderer.invoke(CH.comfyRuntimeSetConfig, cfg),
   comfyInstallStart: (): Promise<ComfyRuntimeState | import('../shared/types').ComfyInstallState> =>
     ipcRenderer.invoke(CH.comfyInstallStart),
+  modelPackList: (): Promise<unknown> => ipcRenderer.invoke(CH.modelPackList),
+  modelPackExport: (paths: { absPath: string; relativePath: string }[]): Promise<unknown> =>
+    ipcRenderer.invoke(CH.modelPackExport, paths),
+  modelPackImport: (): Promise<unknown> => ipcRenderer.invoke(CH.modelPackImport),
+  modelPackPickSave: (): Promise<string | null> => ipcRenderer.invoke(CH.modelPackPickSave),
+  modelPackPickOpen: (): Promise<string | null> => ipcRenderer.invoke(CH.modelPackPickOpen),
   nodePackStatus: (comfyRoot: string): Promise<unknown> => ipcRenderer.invoke(CH.nodePackStatus, comfyRoot),
   nodePackInstall: (comfyRoot: string): Promise<unknown> => ipcRenderer.invoke(CH.nodePackInstall, comfyRoot),
 

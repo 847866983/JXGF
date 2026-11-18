@@ -16,6 +16,11 @@ export const CH = {
   comfyRuntimeSetConfig: 'runtime:set-config',
   comfyInstallStart: 'comfy-install:start',
   comfyInstallState: 'comfy-install:state',
+  modelPackList: 'model-pack:list',
+  modelPackExport: 'model-pack:export',
+  modelPackImport: 'model-pack:import',
+  modelPackPickSave: 'model-pack:pick-save',
+  modelPackPickOpen: 'model-pack:pick-open',
   nodePackStatus: 'node-pack:status',
   nodePackInstall: 'node-pack:install',
   projectList: 'project:list',
@@ -62,6 +67,7 @@ export type PushEvent =
   | { type: 'download:state'; task: import('./types').DownloadTask }
   | { type: 'comfy:runtime'; state: import('./types').ComfyRuntimeState }
   | { type: 'comfy:install'; state: import('./types').ComfyInstallState }
+  | { type: 'model-pack:progress'; message: string }
   | { type: 'ai:status'; text: string }
   | { type: 'ai:tool'; name: string; args: Record<string, unknown>; summary?: string }
   | { type: 'ai:done'; changed: boolean }
