@@ -365,6 +365,17 @@ export interface EnvironmentReport {
 
 export type DownloadStatus = 'queued' | 'downloading' | 'done' | 'failed' | 'cancelled'
 
+/** 网络与镜像设置（对齐绘世启动器的 network_preference） */
+export interface NetworkSettings {
+  /** HTTP(S) 代理地址，如 http://127.0.0.1:7890；留空表示直连 */
+  proxyAddress: string
+  mirrorPypi: boolean
+  mirrorGit: boolean
+  mirrorHuggingface: boolean
+  mirrorExtensionList: boolean
+  githubAcceleration: boolean
+}
+
 export interface DownloadRequest {
   id: string
   label: string

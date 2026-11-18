@@ -10,6 +10,8 @@ export const CH = {
   envScan: 'env:scan',
   envCatalog: 'env:catalog',
   envExtract: 'env:extract',
+  networkGet: 'network:get',
+  networkSave: 'network:save',
   comfyRuntimeStatus: 'runtime:status',
   comfyRuntimeStart: 'runtime:start',
   comfyRuntimeStop: 'runtime:stop',

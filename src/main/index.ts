@@ -22,6 +22,7 @@ import { ProjectStore, uid, now } from './core/store'
 import { JobManager } from './core/jobs'
 import { DownloadManager } from './core/download'
 import { resolveCatalog } from './core/catalog'
+import { applyMirrors, getNetworkSettings, loadNetworkSettings, saveNetworkSettings, type NetworkSettings } from './core/network'
 import { extractArchive } from './core/extract'
 import { ComfyRuntime } from './core/comfy-runtime'
 import { ComfyInstaller } from './core/comfy-installer'
@@ -204,6 +205,21 @@ function registerIpc(): void {
 
   // 目录结果短缓存：连续刷新时避免重复扫描文件系统（下载结束会主动刷新，2 秒内复用即可）
   let catalogCache: { at: number; items: ReturnType<typeof resolveCatalog> } | null = null
+
+  // 按网络设置给每个下载源做镜像改写（GitHub 加速 / HuggingFace 镜像）
+  function withMirrors(items: ReturnType<typeof resolveCatalog>): ReturnType<typeof resolveCatalog> {
+    const net = getNetworkSettings()
+    for (const it of items) {
+      if (it.sources) it.sources = applyMirrors(it.sources, net)
+      if (it.files) {
+        for (const f of it.files) {
+          if (f.sources) f.sources = applyMirrors(f.sources, net)
+        }
+      }
+    }
+    return items
+  }
+
   ipcMain.handle(CH.envCatalog, async () => {
     if (catalogCache && Date.now() - catalogCache.at < 2000) return catalogCache.items
     const report = await getHardware()
@@ -216,7 +232,7 @@ function registerIpc(): void {
         ? path.join(st.root, 'ComfyUI', 'models')
         : path.join(st.root, 'models')
     }
-    const items = resolveCatalog(path.join(app.getPath('userData'), 'runtime'), report.gpu, modelsRoot)
+    const items = withMirrors(resolveCatalog(path.join(app.getPath('userData'), 'runtime'), report.gpu, modelsRoot))
     catalogCache = { at: Date.now(), items }
     return items
   })
@@ -229,6 +245,14 @@ function registerIpc(): void {
       throw new Error('解压目标必须在应用运行时目录内')
     }
     return extractArchive(archive, dest)
+  })
+
+  // 网络与镜像设置：读取 / 保存（保存后清目录缓存，让镜像改写立即生效）
+  ipcMain.handle(CH.networkGet, () => getNetworkSettings())
+  ipcMain.handle(CH.networkSave, (_e, patch: Partial<NetworkSettings>) => {
+    const saved = saveNetworkSettings(patch)
+    catalogCache = null
+    return saved
   })
 
   ipcMain.handle(CH.comfyRuntimeStatus, () => comfyRuntime.status())
@@ -553,6 +577,9 @@ function registerIpc(): void {
 }
 
 app.whenReady().then(() => {
+  // 加载网络与镜像设置，应用全局代理（空地址则直连）
+  loadNetworkSettings()
+
   // 自定义协议：本地图片/视频预览（避开 file:// 的 web 安全限制，支持中文路径）
   // 用法：appmedia:///C:/path/to/file.png  → 读取该绝对路径文件
   protocol.handle('appmedia', async (request) => {

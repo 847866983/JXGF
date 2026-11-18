@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ChangeEvent } from 'react'
-import { Copy, Download, FileUp, Plug, RefreshCw, RotateCw, Save, ShieldCheck, Sparkles, Workflow } from 'lucide-react'
-import type { ComfySettings } from '@shared/types'
+import { Copy, Download, FileUp, Globe, Plug, RefreshCw, RotateCw, Save, ShieldCheck, Sparkles, Workflow } from 'lucide-react'
+import type { ComfySettings, NetworkSettings } from '@shared/types'
 import { useApp } from '../store/app'
 import { PageHeader } from '../components/ui'
 import { AiSettings } from '../components/AiSettings'
@@ -37,7 +37,7 @@ export default function Settings(): React.JSX.Element {
     note: string
   } | null>(null)
   const [copied, setCopied] = useState(false)
-  const [tab, setTab] = useState<'general' | 'env'>('general')
+  const [tab, setTab] = useState<'general' | 'env' | 'network'>('general')
 
   useEffect(() => {
     void window.api.appInfo().then((info) => setMcp(info.mcp))
@@ -117,7 +117,8 @@ export default function Settings(): React.JSX.Element {
   /** 设置内容分类 */
   const TABS = [
     { id: 'general' as const, label: '常规设置' },
-    { id: 'env' as const, label: '环境检测' }
+    { id: 'env' as const, label: '环境检测' },
+    { id: 'network' as const, label: '下载源' }
   ]
 
   const tabsBar = (
@@ -343,6 +344,125 @@ export default function Settings(): React.JSX.Element {
     </div>
   )
 
+  // 网络与下载源设置（对齐绘世启动器的网络设置面板）
+  const [net, setNet] = useState<NetworkSettings | null>(null)
+  const [netProxy, setNetProxy] = useState('')
+  const [netSaved, setNetSaved] = useState(false)
+
+  useEffect(() => {
+    void window.api.networkGet().then((s) => {
+      setNet(s)
+      setNetProxy(s.proxyAddress)
+    })
+  }, [])
+
+  const NetworkPanel = (
+    <div className="panel p-5">
+      <div className="mb-3 flex items-center gap-2 text-sm font-medium text-white">
+        <Globe size={15} className="text-accent-400" />
+        网络与下载源
+      </div>
+      <div className="text-[11px] leading-relaxed text-slate-500">
+        下载失败或极慢时，在这里调整下载源与代理。设置保存后立即生效，下载会按新的镜像规则重新选源。
+      </div>
+
+      {/* 代理设置 */}
+      <div className="mt-4 rounded-lg border border-white/5 bg-ink-950/40 p-3">
+        <div className="mb-2 flex items-center gap-2 text-xs font-medium text-slate-300">
+          <ShieldCheck size={13} className="text-accent-400" />
+          代理设置
+        </div>
+        <div className="flex items-center gap-2">
+          <input
+            className="field"
+            value={netProxy}
+            onChange={(e) => setNetProxy(e.target.value)}
+            placeholder="http://127.0.0.1:7890（留空则直连）"
+          />
+          <button
+            className="btn-primary shrink-0"
+            disabled={!net}
+            onClick={async () => {
+              const s = await window.api.networkSave({ proxyAddress: netProxy })
+              setNet(s)
+              setNetSaved(true)
+              setTimeout(() => setNetSaved(false), 2000)
+            }}
+          >
+            <Save size={13} />
+            保存
+          </button>
+        </div>
+        <div className="mt-1 text-[11px] text-slate-500">
+          填入本地代理（如 Clash 的 7890 端口）后，所有下载请求会走该代理。留空则直连。
+        </div>
+      </div>
+
+      {/* 镜像开关 */}
+      <div className="mt-4 space-y-2">
+        <div className="mb-1 text-xs font-medium text-slate-300">镜像与加速</div>
+        {[
+          { key: 'githubAcceleration' as const, label: 'GitHub 加速', desc: 'GitHub 下载自动走 gh-proxy 加速镜像（ComfyUI 便携版等）' },
+          { key: 'mirrorHuggingface' as const, label: 'HuggingFace 国内镜像', desc: 'huggingface.co 自动改用 hf-mirror.com，模型下载更快' },
+          { key: 'mirrorPypi' as const, label: 'PyPI 国内镜像', desc: '环境安装依赖时使用国内 PyPI 源' },
+          { key: 'mirrorGit' as const, label: 'Git 国内镜像', desc: 'Git 克隆走国内镜像，避免 GitHub 拉取失败' },
+          { key: 'mirrorExtensionList' as const, label: '替换扩展列表链接', desc: '扩展列表使用国内加速链接' }
+        ].map((row) => (
+          <label
+            key={row.key}
+            className="flex cursor-pointer items-center justify-between gap-3 rounded-lg border border-white/5 bg-ink-950/30 px-3 py-2.5"
+          >
+            <div className="min-w-0">
+              <div className="text-sm text-slate-200">{row.label}</div>
+              <div className="mt-0.5 text-[11px] text-slate-500">{row.desc}</div>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={net ? net[row.key] : false}
+              disabled={!net}
+              onClick={async () => {
+                if (!net) return
+                const next = !net[row.key]
+                const s = await window.api.networkSave({ [row.key]: next })
+                setNet(s)
+              }}
+              className={`relative h-5 w-10 shrink-0 rounded-full transition-colors ${
+                net && net[row.key] ? 'bg-accent-600' : 'bg-white/15'
+              } disabled:opacity-40`}
+            >
+              <span
+                className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-transform ${
+                  net && net[row.key] ? 'translate-x-5' : 'translate-x-0.5'
+                }`}
+              />
+            </button>
+          </label>
+        ))}
+      </div>
+
+      <div className="mt-4 flex items-center justify-between">
+        <span className="text-[11px] text-slate-500">
+          {netSaved ? '已保存，下载将使用新设置' : '设置自动保存于应用数据目录'}
+        </span>
+        <button
+          className="btn-primary"
+          disabled={!net}
+          onClick={async () => {
+            if (!net) return
+            const s = await window.api.networkSave(net)
+            setNet(s)
+            setNetSaved(true)
+            setTimeout(() => setNetSaved(false), 2000)
+          }}
+        >
+          <Save size={14} />
+          保存全部
+        </button>
+      </div>
+    </div>
+  )
+
   const AboutPanel = (
     <div className="panel p-5">
       <div className="mb-3 flex items-center gap-2 text-sm font-medium text-white">
@@ -408,6 +528,18 @@ export default function Settings(): React.JSX.Element {
         <PageHeader title="设置 · 环境检测" desc="ComfyUI 安装、模型下载与节点包" />
         {tabsBar}
         <Environment embedded />
+      </div>
+    )
+  }
+
+  if (tab === 'network') {
+    return (
+      <div>
+        <PageHeader title="设置 · 下载源" desc="代理、镜像与加速，解决下载失败或极慢" />
+        {tabsBar}
+        <div className="px-8 pb-8">
+          {net ? NetworkPanel : <div className="panel p-5 text-sm text-slate-400">加载中…</div>}
+        </div>
       </div>
     )
   }

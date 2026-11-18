@@ -355,10 +355,11 @@ ok('目录：H3 包模型 dest 落在正确子目录', () => {
   const tae = h3.files!.find((f) => f.file.includes('TAE'))!
   assert.ok(tae.dest.includes('vae_approx'))
 })
-ok('目录：镜像优先（hf-mirror 在前）', () => {
+ok('目录：模型源为原始官方地址（镜像由网络设置改写）', () => {
   const items = resolveCatalog(tmp2, nvGpu)
   const h3 = items.find((i) => i.id === 'pack-h3-video')!
-  assert.ok(/mirror|hf-mirror/.test(h3.files![0].sources[0].name + h3.files![0].sources[0].url))
+  const first = h3.files![0].sources[0]
+  assert.ok(first.url.includes('huggingface.co'), `首源应为官方原始地址: ${first.url}`)
 })
 ok('目录：传 comfyModelsRoot 时模型下到 ComfyUI 的 models', () => {
   const items = resolveCatalog(tmp2, nvGpu, 'X:/ComfyUI/models')
@@ -1133,12 +1134,40 @@ ok('下载引擎：进度事件被节流(不刷爆IPC)', async () => {
   await fsp.rm(dir2, { recursive: true, force: true })
   assert.ok(emits < 40, `事件过多: ${emits} (应被节流)`)
 })
-ok('目录：各工作流包首个源均为 hf-mirror 镜像', () => {
+ok('目录：各工作流包源均含官方与镜像两种', () => {
   for (const e of MODEL_CATALOG) {
     for (const f of e.files ?? []) {
-      assert.ok(f.sources[0].url.includes('hf-mirror.com'), `${e.id}/${f.file} 首源不是镜像: ${f.sources[0].name}`)
+      const urls = f.sources.map((s) => s.url)
+      assert.ok(urls.some((u) => u.includes('huggingface.co')), `${e.id}/${f.file} 缺官方源`)
+      assert.ok(urls.some((u) => u.includes('hf-mirror.com')), `${e.id}/${f.file} 缺镜像源`)
     }
   }
+})
+ok('网络：applyMirrors 开启 GitHub 加速时加 gh-proxy 前缀', async () => {
+  const { applyMirrors } = await import('../src/main/core/network-mirrors.ts')
+  const src = [{ name: 'GitHub 官方', url: 'https://github.com/a/b/releases/download/v1/x.7z' }]
+  const on = applyMirrors(src, { proxyAddress: '', mirrorPypi: true, mirrorGit: true, mirrorHuggingface: true, mirrorExtensionList: true, githubAcceleration: true })
+  assert.ok(on[0].url.startsWith('https://gh-proxy.com/https://github.com/'), `应加加速前缀: ${on[0].url}`)
+  const off = applyMirrors(src, { proxyAddress: '', mirrorPypi: true, mirrorGit: true, mirrorHuggingface: true, mirrorExtensionList: true, githubAcceleration: false })
+  assert.equal(off[0].url, 'https://github.com/a/b/releases/download/v1/x.7z', '关闭加速时应保持直连')
+})
+ok('网络：applyMirrors 开启 HF 镜像时把 huggingface.co 改写为 hf-mirror', async () => {
+  const { applyMirrors } = await import('../src/main/core/network-mirrors.ts')
+  const src = [{ name: 'HuggingFace 官方', url: 'https://huggingface.co/r/m/resolve/main/x.safetensors' }]
+  const on = applyMirrors(src, { proxyAddress: '', mirrorPypi: true, mirrorGit: true, mirrorHuggingface: true, mirrorExtensionList: true, githubAcceleration: true })
+  assert.ok(on[0].url.includes('hf-mirror.com'), `应改写为镜像: ${on[0].url}`)
+  const off = applyMirrors(src, { proxyAddress: '', mirrorPypi: true, mirrorGit: true, mirrorHuggingface: false, mirrorExtensionList: true, githubAcceleration: true })
+  assert.ok(off[0].url.includes('huggingface.co'), '关闭镜像时应保持官方')
+})
+ok('网络：applyMirrors 去重且不重复加 gh-proxy', async () => {
+  const { applyMirrors } = await import('../src/main/core/network-mirrors.ts')
+  const src = [
+    { name: 'GitHub 官方', url: 'https://github.com/a/b/x.7z' },
+    { name: 'gh-proxy 加速', url: 'https://gh-proxy.com/https://github.com/a/b/x.7z' }
+  ]
+  const out = applyMirrors(src, { proxyAddress: '', mirrorPypi: true, mirrorGit: true, mirrorHuggingface: true, mirrorExtensionList: true, githubAcceleration: true })
+  assert.equal(out.length, 1, `应去重为 1 个，实际 ${out.length}`)
+  assert.ok(out[0].url.startsWith('https://gh-proxy.com/'))
 })
 ok('目录：H3 六个文件目标名与工作流一致', () => {
   const h3 = MODEL_CATALOG.find((e) => e.id === 'pack-h3-video')!

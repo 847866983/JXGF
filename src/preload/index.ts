@@ -11,7 +11,8 @@ import type {
   JobParams,
   Project,
   ComfySettings,
-  UpdateInfo
+  UpdateInfo,
+  NetworkSettings
 } from '../shared/types'
 
 const api = {
@@ -39,6 +40,9 @@ const api = {
   envCatalog: (): Promise<CatalogItem[]> => ipcRenderer.invoke(CH.envCatalog),
   envExtract: (payload: { archive: string; dest: string }): Promise<{ dest: string }> =>
     ipcRenderer.invoke(CH.envExtract, payload),
+  networkGet: (): Promise<NetworkSettings> => ipcRenderer.invoke(CH.networkGet),
+  networkSave: (patch: Partial<NetworkSettings>): Promise<NetworkSettings> =>
+    ipcRenderer.invoke(CH.networkSave, patch),
 
   comfyRuntimeStatus: (): Promise<ComfyRuntimeState> => ipcRenderer.invoke(CH.comfyRuntimeStatus),
   comfyRuntimeStart: (): Promise<ComfyRuntimeState> => ipcRenderer.invoke(CH.comfyRuntimeStart),

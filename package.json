@@ -1,6 +1,6 @@
 {
   "name": "frameforge",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "description": "镜序工坊 - 本地 AI 视频生成工作台（资产库 / 剧本分镜 / 导演台，后端 ComfyUI）",
   "main": "./out/main/index.js",
   "author": "镜序工坊",
@@ -22,6 +22,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.2",
     "electron-updater": "^6.6.2",
+    "undici": "^6.29.1",
     "ws": "^8.18.0",
     "zod": "^4.6.7"
   },

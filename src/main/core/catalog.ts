@@ -45,11 +45,11 @@ export interface CatalogEntry {
   sources?: FileSource[]
 }
 
-/** 镜像优先 */
+/** 镜像优先（原始地址，实际改写由网络设置的 applyMirrors 统一处理） */
 function mirrorSources(repo: string, file: string): FileSource[] {
   return [
-    { name: 'hf-mirror 镜像', url: `${HF_MIRROR}/${repo}/resolve/main/${file}` },
     { name: 'HuggingFace 官方', url: `${HF}/${repo}/resolve/main/${file}` },
+    { name: 'hf-mirror 镜像', url: `${HF_MIRROR}/${repo}/resolve/main/${file}` },
     { name: 'ModelScope 魔搭', url: `${MODELSCOPE}/models/${repo}/resolve/master/${file}` }
   ]
 }
@@ -64,9 +64,8 @@ const RUNTIME: CatalogEntry[] = [
     sizeMB: 1930,
     file: 'ComfyUI_windows_portable_nvidia.7z',
     sources: [
-      { name: 'gh-proxy 加速(固定版本 v0.45.0，最快)', url: `https://gh-proxy.com/https://github.com/comfyanonymous/ComfyUI/releases/download/v0.45.0/ComfyUI_windows_portable_nvidia.7z` },
-      { name: 'gh-proxy 加速(最新版)', url: `https://gh-proxy.com/${GITHUB}/ComfyUI_windows_portable_nvidia.7z` },
-      { name: 'GitHub 官方(需代理)', url: `https://github.com/comfyanonymous/ComfyUI/releases/download/v0.45.0/ComfyUI_windows_portable_nvidia.7z` }
+      { name: 'GitHub 官方（固定版本 v0.45.0，最快）', url: 'https://github.com/comfyanonymous/ComfyUI/releases/download/v0.45.0/ComfyUI_windows_portable_nvidia.7z' },
+      { name: 'GitHub 官方（最新版）', url: `${GITHUB}/ComfyUI_windows_portable_nvidia.7z` }
     ]
   }
 ]
@@ -82,7 +81,6 @@ const FFMPEG: CatalogEntry = {
   minVramMB: 6 * 1024,
   file: 'ffmpeg-release-essentials.zip',
   sources: [
-    { name: 'gh-proxy 镜像', url: 'https://gh-proxy.com/https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip' },
     { name: 'gyan.dev 官方', url: 'https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip' }
   ]
 }
