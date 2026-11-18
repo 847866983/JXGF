@@ -174,12 +174,13 @@ export const QWEN_QUADVIEW_LORA = 'qwen21_multiple_angles_v2.safetensors'
 
 /** 千问四视图提示词：<mva> 触发 + 四视图描述（配合多角度 LoRA） */
 export const QWEN_QUADVIEW_PROMPT =
-  '<mva> Convert the character in the image to a Character Sheet with four views arranged side by side on a plain pure white background: ' +
-  'first a front upper-body half-body portrait showing the face clearly with detailed realistic facial features; ' +
-  'then three full-body standing views — front view, side view and back view. ' +
-  'Every full-body view shows the complete figure from head to feet, nothing cropped, whole body visible. ' +
-  'Same character, same hairstyle, same outfit and colors in every view. ' +
-  'Each figure fully opaque with sharp clean edges, crisp outlines, no fading, no ghosting.'
+  '<mva> Character reference sheet, exactly 4 panels in one horizontal row on a plain pure white background, all showing the same character: ' +
+  'Panel 1 (leftmost): front-facing upper-body HALF-BODY portrait, waist up, face large and clearly visible with detailed realistic facial features, sharp focus on the face. ' +
+  'Panel 2: full-body front view, complete figure from head to toe. ' +
+  'Panel 3: full-body side view, complete figure from head to toe. ' +
+  'Panel 4: full-body back view, complete figure from head to toe. ' +
+  'All four panels are separate figures side by side, not overlapping. Same hairstyle, outfit and colors in every panel. ' +
+  'Each figure fully opaque with sharp clean edges, crisp outlines, no fading, no ghosting, no cropping.'
 
 /** 过滤出可用于展示的版本图（去空、去重，保持生成顺序） */
 export function filterRenderableVersions(images: string[] | undefined): string[] {
@@ -293,8 +294,8 @@ export function buildCharacterFourViewInput(
     templateId: template.id,
     positive: QWEN_QUADVIEW_PROMPT,
     negative: fourViewNegative(),
-    // 与 Krea2 对齐：2000x1200、8 步（清晰度足够，6GB 可跑）
-    width: 2000,
+    // 与 Krea2 对齐但更宽：4 个 panel（半身特写 + 三全身）需要更足横向空间
+    width: 2400,
     height: 1200,
     batch: 1,
     steps: 8,
