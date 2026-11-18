@@ -6,7 +6,7 @@ type Emit = (payload: { type: 'update:state'; info: UpdateInfo }) => void
 /**
  * 在线自动更新：基于 electron-updater。
  * 发布到 GitHub Releases（见 electron-builder.yml 的 publish 段）。
- * 在开发模式（未打包）下自动禁用，避免干扰调试。
+ * 开发模式（未打包）下自动禁用，避免干扰调试。
  */
 export class Updater {
   private current: UpdateInfo = { available: false }
@@ -16,8 +16,9 @@ export class Updater {
   constructor() {
     this.current = {
       available: false,
+      currentVersion: app.getVersion(),
       version: app.getVersion(),
-      releaseNotes: app.isPackaged ? '' : '开发模式：自动更新未启用'
+      releaseNotes: app.isPackaged ? '' : '开发模式：自动更新未启用（打包后生效）'
     }
   }
 
@@ -30,7 +31,8 @@ export class Updater {
   }
 
   private set(info: Partial<UpdateInfo>): void {
-    this.current = { ...this.current, ...info }
+    // currentVersion 永远是本机真实版本，绝不被远端版本号覆盖
+    this.current = { ...this.current, currentVersion: app.getVersion(), ...info }
     this.emit?.({ type: 'update:state', info: this.current })
   }
 
@@ -50,12 +52,12 @@ export class Updater {
         autoUpdater.autoDownload = false
         autoUpdater.autoInstallOnAppQuit = true
         autoUpdater.on('update-available', (info: { version: string; releaseName?: string }) => {
-          this.set({ available: true, version: info.version, releaseName: info.releaseName ?? undefined })
+          this.set({ available: true, version: info.version, releaseName: info.releaseName ?? undefined, downloaded: false })
         })
-        autoUpdater.on('update-not-available', () => this.set({ available: false }))
+        autoUpdater.on('update-not-available', () => this.set({ available: false, version: app.getVersion() }))
         autoUpdater.on('download-progress', (p: { percent: number }) => this.set({ percent: Math.round(p.percent) }))
         autoUpdater.on('update-downloaded', (info: { version: string }) =>
-          this.set({ available: true, version: info.version, downloaded: true })
+          this.set({ available: true, version: info.version, downloaded: true, percent: 100 })
         )
         autoUpdater.on('error', (err: { message?: string }) => this.set({ error: String(err?.message ?? err) }))
       }
@@ -68,7 +70,7 @@ export class Updater {
     }
   }
 
-  /** 与 check() 相同的兼容解构：electron-updater 是 CJS，可能挂在 default 下 */
+  /** 与 check() 相同的兼容解析：electron-updater 是 CJS，可能挂在 default 上 */
   private async loadAutoUpdater(): Promise<unknown> {
     const mod = (await import('electron-updater')) as unknown as {
       autoUpdater?: unknown
@@ -84,6 +86,7 @@ export class Updater {
         this.set({ error: '自动更新组件未加载（electron-updater 未正确打包）' })
         return this.current
       }
+      this.set({ percent: 0, error: undefined })
       await autoUpdater.downloadUpdate()
       return this.current
     } catch (err) {

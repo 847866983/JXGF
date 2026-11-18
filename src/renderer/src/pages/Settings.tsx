@@ -25,6 +25,7 @@ export default function Settings(): React.JSX.Element {
   const [savedFlag, setSavedFlag] = useState(false)
   const [testResult, setTestResult] = useState<{ ok: boolean; version: string; error: string | null } | null>(null)
   const [checking, setChecking] = useState(false)
+  const [downloading, setDownloading] = useState(false)
   const [importError, setImportError] = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const [mcp, setMcp] = useState<{
@@ -71,6 +72,16 @@ export default function Settings(): React.JSX.Element {
     await saveProject(next)
     setSavedFlag(true)
     setTimeout(() => setSavedFlag(false), 2000)
+  }
+
+  const downloadUpdate = (): void => {
+    setDownloading(true)
+    void window.api
+      .updateDownload()
+      .then((info) => {
+        useApp.setState({ update: info })
+      })
+      .finally(() => setDownloading(false))
   }
 
   const checkUpdate = (): void => {
@@ -341,38 +352,55 @@ export default function Settings(): React.JSX.Element {
       <div className="mb-4 space-y-2 text-sm text-slate-300">
         <div className="flex justify-between">
           <span className="text-slate-500">当前版本</span>
-          <span>{update?.version ?? '—'}</span>
+          <span className="text-slate-200">{update?.currentVersion ?? '—'}</span>
         </div>
         {update?.available && (
           <div className="flex justify-between">
-            <span className="text-slate-500">可用版本</span>
+            <span className="text-slate-500">发现新版本</span>
             <span className="text-accent-400">{update.version}</span>
           </div>
         )}
-        {typeof update?.percent === 'number' && update.percent > 0 && (
-          <div className="h-1.5 overflow-hidden rounded-full bg-white/10">
-            <div className="h-full bg-accent-500" style={{ width: `${update.percent}%` }} />
+        {typeof update?.percent === 'number' && update.percent > 0 && !update.downloaded && (
+          <div>
+            <div className="mb-1 flex justify-between text-xs text-slate-400">
+              <span>正在下载更新…</span>
+              <span>{update.percent}%</span>
+            </div>
+            <div className="h-1.5 overflow-hidden rounded-full bg-white/10">
+              <div className="h-full bg-accent-500 transition-all" style={{ width: `${update.percent}%` }} />
+            </div>
+          </div>
+        )}
+        {update?.downloaded && (
+          <div className="rounded bg-emerald-500/10 px-3 py-2 text-xs text-emerald-300">
+            更新已下载完成（{update.version}），点下方按钮重启安装
           </div>
         )}
       </div>
-      <div className="flex gap-2">
+      <div className="flex flex-wrap gap-2">
         <button className="btn-ghost" disabled={checking} onClick={checkUpdate}>
           <RefreshCw size={15} className={checking ? 'animate-spin' : ''} />
-          检查更新
+          {checking ? '检查中…' : '检查更新'}
         </button>
+        {update?.available && !update.downloaded && (
+          <button className="btn-primary" disabled={downloading} onClick={downloadUpdate}>
+            <Download size={15} className={downloading ? 'animate-pulse' : ''} />
+            {downloading ? '下载中…' : '下载更新'}
+          </button>
+        )}
         {update?.downloaded && (
           <button className="btn-primary" onClick={() => void window.api.updateInstall()}>
             重启并安装
           </button>
         )}
       </div>
-      {update?.error && (
-        <div className="mt-3 text-xs text-slate-500">
-          自动更新暂不可用（需正式发布到 GitHub Release 后生效）
-        </div>
+      {update?.error && <div className="mt-3 text-xs text-rose-400">更新出错：{update.error}</div>}
+      {!update?.error && !update?.available && update?.releaseNotes && (
+        <div className="mt-3 text-xs text-slate-500">{update.releaseNotes}</div>
       )}
     </div>
   )
+
 
   if (tab === 'env') {
     return (

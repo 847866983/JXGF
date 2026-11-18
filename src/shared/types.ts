@@ -328,6 +328,9 @@ export interface JobInfo {
 
 export interface UpdateInfo {
   available: boolean
+  /** 本机真实当前版本（永远取 app.getVersion()） */
+  currentVersion?: string
+  /** 远端最新版本（仅在发现更新时才有意义） */
   version?: string
   releaseName?: string
   releaseNotes?: string
