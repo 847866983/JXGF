@@ -96,10 +96,13 @@ export class ComfyRuntime extends EventEmitter {
 
   private findPython(root: string): string | null {
     const candidates = [
-      path.join(root, 'python_embeded', 'python.exe'),
+      // venv 优先：整合包常把完整依赖（torch 等）装在 venv，而 python_embeded/python 可能是精简解释器
       path.join(root, 'venv', 'Scripts', 'python.exe'),
       path.join(root, 'ComfyUI', '.venv', 'Scripts', 'python.exe'),
-      path.join(root, '.venv', 'Scripts', 'python.exe')
+      path.join(root, '.venv', 'Scripts', 'python.exe'),
+      path.join(root, 'python_embeded', 'python.exe'),
+      path.join(root, 'python', 'python.exe'),
+      path.join(root, 'ComfyUI', 'python_embeded', 'python.exe')
     ]
     for (const c of candidates) if (exists(c)) return c
     return 'python' // 回退到 PATH
@@ -168,10 +171,18 @@ export class ComfyRuntime extends EventEmitter {
     await fsp.mkdir(this.runtimeDir, { recursive: true })
     const logFd = fs.openSync(this.logPath(), 'a')
     const args = ['-s', mainPy, '--windows-standalone-build', '--listen', '127.0.0.1', '--port', String(cfg.port || 8188)]
+    // 关键：Windows 下 Python 默认用 GBK 写 stdout，ComfyUI 输出 emoji（如 ✅）会抛
+    // UnicodeEncodeError 直接崩溃 → 表现为「点启动没反应」。强制 UTF-8 输出。
     const child = spawn(python, args, {
       cwd: path.dirname(mainPy),
       detached: true,
       windowsHide: true,
+      env: {
+        ...process.env,
+        PYTHONIOENCODING: 'utf-8',
+        PYTHONUTF8: '1',
+        PYTHONLEGACYWINDOWSSTDIO: '0'
+      },
       stdio: ['ignore', logFd, logFd] as ['ignore', number, number]
     })
     child.unref()
