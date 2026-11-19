@@ -7,3 +7,10 @@ dist/
 .DS_Store
 Thumbs.db
 .vite/
+
+# 临时调试文件
+_*.txt
+_*.mjs
+_*.cjs
+_*.mts
+_*.png
