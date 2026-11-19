@@ -15,6 +15,8 @@ export interface WorkflowParams {
   cfg?: number
   samplerName?: string
   scheduler?: string
+  /** 采样参数与模板一致时为 true：不重算 SelfLift 分段步数，保留作者原配 */
+  keepTemplateSampler?: boolean
   /** 生成模式：t2v（文生视频）/ fl2va（首尾帧）/ ref2va（参考图生视频） */
   mode?: 't2v' | 'fl2va' | 'ref2va'
   /** 分段导演台：覆盖 h3_data 的字段（ratio、pin_head、ref_* 、bridge_* 、cont、push_whole、chain） */
@@ -478,11 +480,13 @@ function applyRifeParams(clone: Workflow, rife: RifeSettings): void {
 }
 
 /**
- * H3 参数一致性修正（实测必需，否则 SelfLift 报错）：
+ * H3 参数一致性修正：
  * 1. SelfLift「分段步数」合计必须等于 KSampler 的 steps，否则 ValueError。
+ *    —— 但模板作者填的值（如 4 步配 3,3）是刻意配的，合计不等于 steps 也能跑，
+ *    所以只在**用户改了 steps** 导致明显错配时才按新 steps 重算，否则原样保留。
  * 2. 无效调度器名（如 bong_tangent）会导致 calculate_sigmas 报错，改成 simple。
  */
-function fixH3Params(clone: Workflow): void {
+function fixH3Params(clone: Workflow, stepsChanged: boolean): void {
   let ksamplerSteps: number | null = null
   for (const node of Object.values(clone)) {
     if (String(node.class_type) === 'KSampler' && typeof node.inputs.steps === 'number') {
@@ -492,8 +496,8 @@ function fixH3Params(clone: Workflow): void {
   }
   for (const node of Object.values(clone)) {
     const inputs = node.inputs
-    // SelfLift 分段步数对齐 KSampler steps
-    if (typeof inputs['分段步数'] === 'string' && ksamplerSteps !== null) {
+    // SelfLift 分段步数：仅当用户显式改了 steps 才按新 steps 重算，否则保留模板原值
+    if (stepsChanged && typeof inputs['分段步数'] === 'string' && ksamplerSteps !== null) {
       const total = ksamplerSteps
       const half = Math.floor(total / 2)
       inputs['分段步数'] = `${half},${total - half}`
@@ -577,7 +581,8 @@ export function buildWorkflow(template: Template, params: WorkflowParams): unkno
     // 生成模式可能只通过 h3.mode 传入（导演台），t2v 时必须清空参考图残留
     const effMode = (params.h3?.mode as string | undefined) ?? params.mode
     clearH3Refs(clone, effMode)
-    fixH3Params(clone)
+    // 只有用户显式改了步数才算"改了"，否则保留模板作者配的分段步数
+    fixH3Params(clone, params.steps !== undefined && !params.keepTemplateSampler)
     // H3 的种子在 KSampler 节点
     if (params.seed !== undefined) {
       for (const node of Object.values(clone)) {

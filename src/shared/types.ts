@@ -306,6 +306,11 @@ export interface JobParams {
    * H3 会把槽位 alias 与提示词里的称呼做匹配，写进 alias 后提示词写角色名即可绑定参考图。
    */
   refAliases?: string[]
+  /**
+   * 采样参数与模板完全一致时为 true。
+   * 此时不重算 SelfLift 分段步数，保留工作流作者的原配（如 4 步配 3,3）。
+   */
+  keepTemplateSampler?: boolean
   /** 需要挂载的 LoRA（如千问多角度四视图） */
   loras?: { file: string; strength: number }[]
   /** 参考视频（本段生成方式=视频参考时，传上一段成片） */

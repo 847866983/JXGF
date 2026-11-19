@@ -159,6 +159,7 @@ export class JobManager {
         cfg: params.cfg,
         samplerName: params.samplerName,
         scheduler: params.scheduler,
+        keepTemplateSampler: params.keepTemplateSampler,
         h3: params.h3,
         upscale: params.upscale,
         rife: params.rife,

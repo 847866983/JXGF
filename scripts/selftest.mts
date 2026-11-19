@@ -1326,5 +1326,87 @@ ok('H3参考图绑定：buildWorkflow 开启 alias 模式', () => {
   assert.equal(h3.alias, true, 'h3_data.alias 必须为 true，否则角色名不会展开成 @图片N')
 })
 
+// ---- 工作流作者参数保护：不擅自改写模板配置 ----
+ok('模板保护：未改采样参数时保留 SelfLift 分段步数原值', () => {
+  // 模板：KSampler steps=4，SelfLift 分段步数=3,3（作者刻意配的，合计≠steps）
+  const wf: Record<string, { class_type: string; inputs: Record<string, unknown> }> = {
+    '506': {
+      class_type: 'CSGlideCastCS',
+      inputs: {
+        h3_data: JSON.stringify({ mode: 'ref2va', prompt: '', slots: { images: [{}, {}], videos: [{}], audios: [{}] }, chain: { clip: 'clip_0001' } }),
+        prompt_text: ''
+      }
+    },
+    '277': { class_type: 'KSampler', inputs: { seed: 8, steps: 4, cfg: 1, sampler_name: 'euler', scheduler: 'beta', denoise: 1 } },
+    '431': { class_type: 'BanZhang_SelfLiftMultiStage', inputs: { 分段步数: '3,3', 级间倍率: 1.5 } }
+  }
+  const tpl = { id: 't', name: 't', kind: 'video', apiJson: wf, mapping: {} }
+  // 采样参数与模板一致 → keepTemplateSampler=true
+  const out = buildWorkflow(tpl as never, {
+    positive: 'p',
+    steps: 4,
+    cfg: 1,
+    samplerName: 'euler',
+    scheduler: 'beta',
+    keepTemplateSampler: true
+  }) as typeof wf
+  assert.equal(out['431'].inputs['分段步数'], '3,3', '未改参数时必须保留作者的 3,3')
+  assert.equal(out['277'].inputs.steps, 4)
+})
+
+ok('模板保护：用户改了步数时按新 steps 重算分段步数', () => {
+  const wf: Record<string, { class_type: string; inputs: Record<string, unknown> }> = {
+    '506': {
+      class_type: 'CSGlideCastCS',
+      inputs: {
+        h3_data: JSON.stringify({ mode: 'ref2va', prompt: '', slots: { images: [{}, {}], videos: [{}], audios: [{}] }, chain: { clip: 'clip_0001' } }),
+        prompt_text: ''
+      }
+    },
+    '277': { class_type: 'KSampler', inputs: { seed: 8, steps: 4, cfg: 1, sampler_name: 'euler', scheduler: 'beta', denoise: 1 } },
+    '431': { class_type: 'BanZhang_SelfLiftMultiStage', inputs: { 分段步数: '3,3', 级间倍率: 1.5 } }
+  }
+  const tpl = { id: 't', name: 't', kind: 'video', apiJson: wf, mapping: {} }
+  // 用户把 steps 改成 6 → 应重算成 3,3（6/2=3）
+  const out = buildWorkflow(tpl as never, {
+    positive: 'p',
+    steps: 6,
+    cfg: 1,
+    samplerName: 'euler',
+    scheduler: 'beta'
+  }) as typeof wf
+  assert.equal(out['277'].inputs.steps, 6)
+  assert.equal(out['431'].inputs['分段步数'], '3,3', '6 步应重算为 3,3')
+})
+
+ok('模板保护：一采采样参数原样保留(seed8/steps4/cfg1/euler/beta/denoise1)', () => {
+  const wf: Record<string, { class_type: string; inputs: Record<string, unknown> }> = {
+    '506': {
+      class_type: 'CSGlideCastCS',
+      inputs: {
+        h3_data: JSON.stringify({ mode: 'ref2va', prompt: '', slots: { images: [{}, {}], videos: [{}], audios: [{}] }, chain: { clip: 'clip_0001' } }),
+        prompt_text: ''
+      }
+    },
+    '277': { class_type: 'KSampler', inputs: { seed: 8, steps: 4, cfg: 1, sampler_name: 'euler', scheduler: 'beta', denoise: 1 } }
+  }
+  const tpl = { id: 't', name: 't', kind: 'video', apiJson: wf, mapping: {} }
+  const out = buildWorkflow(tpl as never, {
+    positive: 'p',
+    steps: 4,
+    cfg: 1,
+    samplerName: 'euler',
+    scheduler: 'beta',
+    keepTemplateSampler: true
+  }) as typeof wf
+  const ks = out['277'].inputs
+  assert.equal(ks.seed, 8)
+  assert.equal(ks.steps, 4)
+  assert.equal(ks.cfg, 1)
+  assert.equal(ks.sampler_name, 'euler')
+  assert.equal(ks.scheduler, 'beta')
+  assert.equal(ks.denoise, 1)
+})
+
 console.log(`\nselftest: ${pass} passed, ${fail} failed`)
 if (fail > 0) process.exit(1)

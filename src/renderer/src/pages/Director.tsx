@@ -79,6 +79,12 @@ export default function Director(): React.JSX.Element {
   const [promptDirty, setPromptDirty] = useState(false)
   /** 分镜剧本信息区是否展开 */
   const [metaOpen, setMetaOpen] = useState(false)
+  /**
+   * 模板自带的采样参数快照。
+   * 用来判断用户是否真的改过：没改就不传，让工作流模板保持作者原配
+   * （例如 4 步配 SelfLift 分段步数 3,3 是刻意配的，不该被代码按 steps/2 改写成 2,2）。
+   */
+  const [ksDefault, setKsDefault] = useState<{ steps: number; cfg: number; sampler: string; scheduler: string } | null>(null)
 
   // 全局采样参数（KSampler，应用于所有段）
   const [paramsOpen, setParamsOpen] = useState(false)
@@ -102,6 +108,13 @@ export default function Director(): React.JSX.Element {
     setGenSampler(ks.samplerName ?? 'euler')
     setGenScheduler(ks.scheduler ?? 'simple')
     setGenSeed('')
+    // 记录模板原值，提交时用于判断"用户是否改过"
+    setKsDefault({
+      steps: ks.steps ?? 4,
+      cfg: ks.cfg ?? 1,
+      sampler: ks.samplerName ?? 'euler',
+      scheduler: ks.scheduler ?? 'simple'
+    })
     void pv
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [templateId, hwKey])
@@ -262,6 +275,13 @@ export default function Director(): React.JSX.Element {
       samplerName: genSampler.trim() || undefined,
       scheduler: genScheduler.trim() || undefined,
       seed: genSeed.trim() ? Number(genSeed) || undefined : undefined,
+      // 采样参数与模板一致时标记为未改动，让工作流保留作者原配（含 SelfLift 分段步数）
+      keepTemplateSampler:
+        !!ksDefault &&
+        num(genSteps, 0) === ksDefault.steps &&
+        Number(genCfg) === ksDefault.cfg &&
+        genSampler.trim() === ksDefault.sampler &&
+        genScheduler.trim() === ksDefault.scheduler,
       h3: buildH3(shot, index),
       upscale: s.upscale,
       rife: s.rife,
