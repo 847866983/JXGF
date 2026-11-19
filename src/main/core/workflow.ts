@@ -502,10 +502,7 @@ function fixH3Params(clone: Workflow, stepsChanged: boolean): void {
       const half = Math.floor(total / 2)
       inputs['分段步数'] = `${half},${total - half}`
     }
-    // 无效调度器 -> simple
-    if (inputs['调度器'] === 'bong_tangent') {
-      inputs['调度器'] = 'simple'
-    }
+    // 无效调度器（第三方插件才有）已在 template-adapt 里兜底映射，这里不再重复改写
   }
 }
 

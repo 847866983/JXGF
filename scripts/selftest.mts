@@ -919,9 +919,9 @@ const tplApi = {
 }
 const adapted6 = adaptTemplateForGpu(JSON.parse(JSON.stringify(tplApi)), gpu6) as typeof tplApi
 ok('显存自适应：6GB 卡把放大模型换成免模型', () => assert.equal(adapted6.a.inputs['放大模型'], '⚡ 最近邻精确（免模型）'))
-ok('显存自适应：6GB 卡放大倍数降为1', () => assert.equal(adapted6.a.inputs['放大倍数'], 1))
+ok('显存自适应：6GB 卡保留作者放大倍数(不锁成1)', () => assert.equal(adapted6.a.inputs['放大倍数'], 1.5))
 ok('显存自适应：6GB 卡显存预设降为6GB', () => assert.equal(adapted6.a.inputs['显存预设'], '6 GB'))
-ok('显存自适应：非法调度器改 simple', () => assert.equal(adapted6.c.inputs['调度器'], 'simple'))
+ok('显存自适应：第三方调度器兜底为 beta', () => assert.equal(adapted6.c.inputs['调度器'], 'beta'))
 const adapted12 = adaptTemplateForGpu(JSON.parse(JSON.stringify(tplApi)), gpu12) as typeof tplApi
 ok('显存自适应：12GB 卡不降级模型', () => assert.equal(adapted12.a.inputs['放大模型'], 'minimax_h3_latent_upscaler_3d_bf16.safetensors'))
 
@@ -1406,6 +1406,45 @@ ok('模板保护：一采采样参数原样保留(seed8/steps4/cfg1/euler/beta/d
   assert.equal(ks.sampler_name, 'euler')
   assert.equal(ks.scheduler, 'beta')
   assert.equal(ks.denoise, 1)
+})
+
+// ---- 二采/三采：放大节点降级不丢作者配置 ----
+ok('模板保护：6GB降级保留作者的放大倍数(1.5不被锁成1)', () => {
+  const api = {
+    a: {
+      class_type: 'BanZhang_MMH3_UpscaleParams',
+      inputs: { 放大模型: 'minimax_h3_latent_upscaler_3d_bf16.safetensors', 放大倍数: 1.5, 显存预设: '12 GB' }
+    }
+  }
+  const out = adaptTemplateForGpu(api, { vendor: 'nvidia', name: 'RTX 2060', vramMB: 6144, vramKnown: true }) as typeof api
+  assert.equal(out.a.inputs['放大倍数'], 1.5, '放大倍数必须保留作者配的 1.5，不能被锁成 1（否则二采变无意义重采样）')
+  assert.equal(out.a.inputs['放大模型'], '⚡ 最近邻精确（免模型）', '大模型应换成免模型避免 OOM')
+  assert.equal(out.a.inputs['显存预设'], '6 GB')
+})
+
+ok('模板保护：第三方调度器 bong_tangent 兜底为 beta(不是 simple)', () => {
+  const api = { a: { class_type: 'BanZhang_MMH3_Upscale', inputs: { 调度器: 'bong_tangent', 步数: 2 } } }
+  const out = adaptTemplateForGpu(api, { vendor: 'nvidia', name: 'RTX 2060', vramMB: 6144, vramKnown: true }) as typeof api
+  assert.equal(out.a.inputs['调度器'], 'beta', 'bong_tangent 是 beta 类曲线，应映射到 beta 而非 simple')
+})
+
+ok('模板保护：标准调度器不被改写', () => {
+  const api = { a: { class_type: 'BanZhang_MMH3_Upscale', inputs: { 调度器: 'beta' } } }
+  const out = adaptTemplateForGpu(api, { vendor: 'nvidia', name: 'RTX 2060', vramMB: 6144, vramKnown: true }) as typeof api
+  assert.equal(out.a.inputs['调度器'], 'beta')
+})
+
+ok('模板保护：显存充足时不降级放大节点', () => {
+  const api = {
+    a: {
+      class_type: 'BanZhang_MMH3_UpscaleParams',
+      inputs: { 放大模型: 'minimax_h3_latent_upscaler_3d_bf16.safetensors', 放大倍数: 1.5, 显存预设: '12 GB' }
+    }
+  }
+  const out = adaptTemplateForGpu(api, { vendor: 'nvidia', name: 'RTX 4090', vramMB: 24576, vramKnown: true }) as typeof api
+  assert.equal(out.a.inputs['放大模型'], 'minimax_h3_latent_upscaler_3d_bf16.safetensors', '12GB+ 应保留真放大模型')
+  assert.equal(out.a.inputs['放大倍数'], 1.5)
+  assert.equal(out.a.inputs['显存预设'], '12 GB')
 })
 
 console.log(`\nselftest: ${pass} passed, ${fail} failed`)

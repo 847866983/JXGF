@@ -11,6 +11,24 @@ import type { GpuInfo } from '@shared/types'
  * 处理：显存 < 10GB 时，把放大节点改成「最近邻精确（免模型）」+ 倍数 1 + 显存预设 6GB，
  *   避免加载大模型，视频质量略降但能稳定出片。
  */
+/**
+ * 第三方插件调度器 → ComfyUI 标准调度器 的兜底映射。
+ *
+ * 模板作者常装 RES4LYF / ComfyUI-Impact 等插件，这些插件会往采样器下拉里加额外选项。
+ * 本机没装对应插件时，ComfyUI 的 calculate_sigmas 会因 KeyError 直接失败。
+ * 这里按曲线特性映射到最接近的标准调度器，尽量保留作者的意图：
+ *   bong_tangent 是 RES4LYF 的 tangent 类曲线，接近 beta 的钟形分布。
+ */
+const EXTERNAL_SCHEDULER_FALLBACK: Record<string, string> = {
+  bong_tangent: 'beta',
+  bong_tangent_v2: 'beta',
+  kl_optimal_v2: 'kl_optimal',
+  align_your_steps: 'simple',
+  align_your_steps_v2: 'simple',
+  gits: 'simple',
+  'beta57': 'beta'
+}
+
 export function adaptTemplateForGpu(apiJson: unknown, gpu: GpuInfo): unknown {
   if (!apiJson || typeof apiJson !== 'object' || Array.isArray(apiJson)) return apiJson
   const api = apiJson as Record<string, { class_type?: string; inputs?: Record<string, unknown> }>
@@ -21,12 +39,12 @@ export function adaptTemplateForGpu(apiJson: unknown, gpu: GpuInfo): unknown {
     const inputs = node.inputs
     if (!inputs) continue
     if (/BanZhang_MMH3_UpscaleParams/i.test(String(node.class_type))) {
+      // 只把「要加载大模型的放大」换成免模型的最近邻放大。
+      // 注意：**保留作者配的放大倍数**（截图里二采是 1.50）——
+      // 最近邻放大本身几乎不吃显存，把倍数锁成 1 会让二采/三采变成无意义重采样，
+      // 画质白白损失，也偏离作者原意。
       if (typeof inputs['放大模型'] === 'string' && inputs['放大模型'] !== '⚡ 最近邻精确（免模型）') {
         inputs['放大模型'] = '⚡ 最近邻精确（免模型）'
-        changed = true
-      }
-      if (inputs['放大倍数'] !== 1) {
-        inputs['放大倍数'] = 1
         changed = true
       }
       if (inputs['显存预设'] !== '6 GB') {
@@ -46,9 +64,17 @@ export function adaptTemplateForGpu(apiJson: unknown, gpu: GpuInfo): unknown {
         changed = true
       }
     }
-    if (inputs['调度器'] === 'bong_tangent') {
-      inputs['调度器'] = 'simple'
-      changed = true
+    // 调度器兜底：模板作者可能用了第三方插件提供的调度器（如 RES4LYF 的 bong_tangent），
+    // 本机没装那个插件时 ComfyUI 会直接抛 KeyError。这里映射到语义最接近的标准调度器，
+    // 不静默改成 simple（simple 与 bong_tangent 曲线差别较大）。
+    // 注：ComfyUI 标准调度器只有 simple/sgm_uniform/karras/exponential/ddim_uniform/beta/normal/linear_quadratic/kl_optimal。
+    if (typeof inputs['调度器'] === 'string') {
+      const sch = inputs['调度器']
+      const fallback = EXTERNAL_SCHEDULER_FALLBACK[sch]
+      if (fallback) {
+        inputs['调度器'] = fallback
+        changed = true
+      }
     }
   }
   return changed ? api : apiJson
