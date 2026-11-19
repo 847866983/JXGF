@@ -362,7 +362,7 @@
   "431": {
    "class_type": "BanZhang_SelfLiftMultiStage",
    "inputs": {
-    "分段步数": "3,3",
+    "分段步数": "2,2",
     "级间倍率": "1.5",
     "latent放大模型": "h3_upscaler_lms_v0.1.safetensors",
     "满分辨率分块": "关（整幅收尾）",

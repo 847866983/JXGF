@@ -480,13 +480,17 @@ function applyRifeParams(clone: Workflow, rife: RifeSettings): void {
 }
 
 /**
- * H3 参数一致性修正：
- * 1. SelfLift「分段步数」合计必须等于 KSampler 的 steps，否则 ValueError。
- *    —— 但模板作者填的值（如 4 步配 3,3）是刻意配的，合计不等于 steps 也能跑，
- *    所以只在**用户改了 steps** 导致明显错配时才按新 steps 重算，否则原样保留。
- * 2. 无效调度器名（如 bong_tangent）会导致 calculate_sigmas 报错，改成 simple。
+ * H3 参数一致性修正。
+ *
+ * SelfLift「分段步数」是硬约束：**各段合计不能超过 KSampler 的 steps**，
+ * 否则 Banzhang 节点直接抛「分段步数合计 X 步，超过本次调度的 Y 步」。
+ *
+ * 模板里作者填的 3,3（合计 6）只有在 steps≥6 时才成立；如果导演台把 steps 调成 4，
+ * 就必须重新分配成 2,2。所以这里不能"原样保留"，而要按当前 steps 校验并按需对齐：
+ *   - 合计 <= steps：保留作者原配（例如 steps=8 时 3,3 合法，不动）
+ *   - 合计 >  steps：按段数均分到 steps 以内（例如 steps=4 时 3,3 → 2,2）
  */
-function fixH3Params(clone: Workflow, stepsChanged: boolean): void {
+function fixH3Params(clone: Workflow): void {
   let ksamplerSteps: number | null = null
   for (const node of Object.values(clone)) {
     if (String(node.class_type) === 'KSampler' && typeof node.inputs.steps === 'number') {
@@ -496,11 +500,36 @@ function fixH3Params(clone: Workflow, stepsChanged: boolean): void {
   }
   for (const node of Object.values(clone)) {
     const inputs = node.inputs
-    // SelfLift 分段步数：仅当用户显式改了 steps 才按新 steps 重算，否则保留模板原值
-    if (stepsChanged && typeof inputs['分段步数'] === 'string' && ksamplerSteps !== null) {
-      const total = ksamplerSteps
-      const half = Math.floor(total / 2)
-      inputs['分段步数'] = `${half},${total - half}`
+    if (typeof inputs['分段步数'] === 'string' && ksamplerSteps !== null && ksamplerSteps > 0) {
+      const raw = inputs['分段步数']
+      const parts = raw
+        .split(/[,，]/)
+        .map((x) => Number(x.trim()))
+        .filter((x) => Number.isFinite(x) && x >= 0)
+      if (parts.length > 0) {
+        const sum = parts.reduce((a, b) => a + b, 0)
+        if (sum > ksamplerSteps) {
+          // 超过采样步数 → 重新分配到 steps 以内
+          const n = parts.length
+          let next: number[]
+          if (ksamplerSteps < n) {
+            // 极端情况：steps 比段数还少（如 steps=1、两段）→ 只给前几步各 1，其余 0
+            next = new Array(n).fill(0)
+            for (let i = 0; i < ksamplerSteps; i++) next[i] = 1
+          } else {
+            // 正常情况：按段数均分，余数从前往后加
+            const base = Math.floor(ksamplerSteps / n)
+            next = new Array(n).fill(base)
+            let rest = ksamplerSteps - base * n
+            for (let i = 0; i < n && rest > 0; i++) {
+              next[i] += 1
+              rest -= 1
+            }
+          }
+          inputs['分段步数'] = next.join(',')
+        }
+        // 合计 <= steps：保留作者原配（如 steps=8 时 3,3 合法）
+      }
     }
     // 无效调度器（第三方插件才有）已在 template-adapt 里兜底映射，这里不再重复改写
   }
@@ -578,8 +607,8 @@ export function buildWorkflow(template: Template, params: WorkflowParams): unkno
     // 生成模式可能只通过 h3.mode 传入（导演台），t2v 时必须清空参考图残留
     const effMode = (params.h3?.mode as string | undefined) ?? params.mode
     clearH3Refs(clone, effMode)
-    // 只有用户显式改了步数才算"改了"，否则保留模板作者配的分段步数
-    fixH3Params(clone, params.steps !== undefined && !params.keepTemplateSampler)
+    // SelfLift 分段步数合计不能超过采样步数，超了就按段数均分（硬约束，否则节点报错）
+    fixH3Params(clone)
     // H3 的种子在 KSampler 节点
     if (params.seed !== undefined) {
       for (const node of Object.values(clone)) {

@@ -1327,8 +1327,8 @@ ok('H3参考图绑定：buildWorkflow 开启 alias 模式', () => {
 })
 
 // ---- 工作流作者参数保护：不擅自改写模板配置 ----
-ok('模板保护：未改采样参数时保留 SelfLift 分段步数原值', () => {
-  // 模板：KSampler steps=4，SelfLift 分段步数=3,3（作者刻意配的，合计≠steps）
+ok('模板保护：分段步数超限时按 steps 对齐(3,3+steps4 → 2,2)', () => {
+  // 模板：KSampler steps=4，SelfLift 分段步数=3,3（合计 6 > 4，直接提交会报错）
   const wf: Record<string, { class_type: string; inputs: Record<string, unknown> }> = {
     '506': {
       class_type: 'CSGlideCastCS',
@@ -1341,7 +1341,6 @@ ok('模板保护：未改采样参数时保留 SelfLift 分段步数原值', () 
     '431': { class_type: 'BanZhang_SelfLiftMultiStage', inputs: { 分段步数: '3,3', 级间倍率: 1.5 } }
   }
   const tpl = { id: 't', name: 't', kind: 'video', apiJson: wf, mapping: {} }
-  // 采样参数与模板一致 → keepTemplateSampler=true
   const out = buildWorkflow(tpl as never, {
     positive: 'p',
     steps: 4,
@@ -1350,7 +1349,7 @@ ok('模板保护：未改采样参数时保留 SelfLift 分段步数原值', () 
     scheduler: 'beta',
     keepTemplateSampler: true
   }) as typeof wf
-  assert.equal(out['431'].inputs['分段步数'], '3,3', '未改参数时必须保留作者的 3,3')
+  assert.equal(out['431'].inputs['分段步数'], '2,2', '合计 6 超过 steps 4，必须对齐为 2,2')
   assert.equal(out['277'].inputs.steps, 4)
 })
 
@@ -1540,6 +1539,71 @@ ok('超分：buildWorkflow 后超分节点完整保留', () => {
   assert.equal(out['515'].inputs['处理档位'], '常规放大·极致')
   assert.equal(out['515'].inputs['放大倍数'], 2)
   assert.deepEqual(out['515'].inputs['视频'], ['307', 0])
+})
+
+// ---- SelfLift 分段步数硬约束（合计不能超过 KSampler steps）----
+function segSum(out: Record<string, { class_type: string; inputs: Record<string, unknown> }>): { steps: number; seg: string; sum: number } {
+  let steps = 0
+  for (const n of Object.values(out)) {
+    if (String(n.class_type) === 'KSampler' && typeof n.inputs.steps === 'number') {
+      steps = n.inputs.steps
+      break
+    }
+  }
+  const seg = String(out['431']?.inputs['分段步数'] ?? '')
+  const sum = seg
+    .split(/[,，]/)
+    .map((x) => Number(x.trim()))
+    .filter((x) => Number.isFinite(x))
+    .reduce((a, b) => a + b, 0)
+  return { steps, seg, sum }
+}
+
+function makeSegFixture(segValue: string, steps: number) {
+  return {
+    '506': {
+      class_type: 'CSGlideCastCS',
+      inputs: {
+        h3_data: JSON.stringify({ mode: 'ref2va', prompt: '', slots: { images: [{}, {}], videos: [{}], audios: [{}] }, chain: { clip: 'clip_0001' } }),
+        prompt_text: ''
+      }
+    },
+    '277': { class_type: 'KSampler', inputs: { seed: 8, steps, cfg: 1, sampler_name: 'euler', scheduler: 'beta', denoise: 1 } },
+    '431': { class_type: 'BanZhang_SelfLiftMultiStage', inputs: { 分段步数: segValue } }
+  }
+}
+
+ok('SelfLift：分段步数合计超过 steps 时自动均分(3,3 + steps4 → 2,2)', () => {
+  const tpl = { id: 't', name: 't', kind: 'video', apiJson: makeSegFixture('3,3', 4), mapping: {} }
+  const out = buildWorkflow(tpl as never, { positive: 'p', mode: 'ref2va', steps: 4 }) as Record<string, { class_type: string; inputs: Record<string, unknown> }>
+  const r = segSum(out)
+  assert.ok(r.sum <= r.steps, `分段步数合计 ${r.sum} 不能超过 steps ${r.steps}（实际 ${r.seg}）`)
+  assert.equal(r.seg, '2,2')
+})
+
+ok('SelfLift：分段步数合计未超限时保留作者原配(3,3 + steps8 保持)', () => {
+  const tpl = { id: 't', name: 't', kind: 'video', apiJson: makeSegFixture('3,3', 8), mapping: {} }
+  const out = buildWorkflow(tpl as never, { positive: 'p', mode: 'ref2va', steps: 8 }) as Record<string, { class_type: string; inputs: Record<string, unknown> }>
+  const r = segSum(out)
+  assert.equal(r.seg, '3,3', 'steps=8 时 3,3 合法，应保留')
+  assert.ok(r.sum <= r.steps)
+})
+
+ok('SelfLift：极端情况 steps 小于段数时不超限(3,3 + steps1 → 1,0)', () => {
+  const tpl = { id: 't', name: 't', kind: 'video', apiJson: makeSegFixture('3,3', 1), mapping: {} }
+  const out = buildWorkflow(tpl as never, { positive: 'p', mode: 'ref2va', steps: 1 }) as Record<string, { class_type: string; inputs: Record<string, unknown> }>
+  const r = segSum(out)
+  assert.ok(r.sum <= r.steps, `steps=1 时合计必须 <=1（实际 ${r.seg}）`)
+  assert.equal(r.seg, '1,0')
+})
+
+ok('SelfLift：各种步数下都不超限(2/4/6/8/10)', () => {
+  for (const steps of [2, 4, 6, 8, 10]) {
+    const tpl = { id: 't', name: 't', kind: 'video', apiJson: makeSegFixture('3,3', steps), mapping: {} }
+    const out = buildWorkflow(tpl as never, { positive: 'p', mode: 'ref2va', steps }) as Record<string, { class_type: string; inputs: Record<string, unknown> }>
+    const r = segSum(out)
+    assert.ok(r.sum <= r.steps, `steps=${steps} 时分段步数 ${r.seg} 合计 ${r.sum} 超限`)
+  }
 })
 
 console.log(`\nselftest: ${pass} passed, ${fail} failed`)
