@@ -301,6 +301,11 @@ export interface JobParams {
   /** 抽帧 / 插帧 */
   rife?: RifeSettings
   refImages?: string[]
+  /**
+   * 参考图对应的称呼（通常传资产名）。
+   * H3 会把槽位 alias 与提示词里的称呼做匹配，写进 alias 后提示词写角色名即可绑定参考图。
+   */
+  refAliases?: string[]
   /** 需要挂载的 LoRA（如千问多角度四视图） */
   loras?: { file: string; strength: number }[]
   /** 参考视频（本段生成方式=视频参考时，传上一段成片） */

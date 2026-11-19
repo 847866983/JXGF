@@ -197,16 +197,20 @@ export default function Director(): React.JSX.Element {
     const s = getSegment(shot, preset, index)
     // 参考图：仅「参考图」模式；参考视频：仅「视频参考」模式，取上一段成片
     // 封面缺失时回退用资产的第一张图，避免"有图但无封面"导致参考图为空
-    const refImages =
+    // refAliases：把资产名一并传给主进程，H3 靠它把提示词里的角色名绑定到参考图
+    const refPicks =
       s.genMode === 'ref2va'
         ? shot.assetIds
             .map((id) => {
               const a = liveProject.assets.find((x) => x.id === id)
               if (!a) return null
-              return a.coverFile ?? a.images?.[a.images.length - 1] ?? null
+              const file = a.coverFile ?? a.images?.[a.images.length - 1] ?? null
+              return file ? { file, name: a.name } : null
             })
-            .filter((f): f is string => Boolean(f))
+            .filter((x): x is { file: string; name: string } => Boolean(x))
         : []
+    const refImages = refPicks.map((x) => x.file)
+    const refAliases = refPicks.map((x) => x.name)
     // 参考图模式下没有任何可用参考图 → 明确报错，避免静默生成不带参考的视频
     if (s.genMode === 'ref2va' && refImages.length === 0 && shot.assetIds.length > 0) {
       const names = shot.assetIds
@@ -257,6 +261,7 @@ export default function Director(): React.JSX.Element {
       upscale: s.upscale,
       rife: s.rife,
       refImages: refImages.length > 0 ? refImages : undefined,
+      refAliases: refAliases.length > 0 ? refAliases : undefined,
       refVideos: refVideos.length > 0 ? refVideos : undefined
     })
   }

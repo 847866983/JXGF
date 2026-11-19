@@ -132,7 +132,8 @@ function deskDataField(node: WorkflowNode): string | null {
 /**
  * 把 MiniMax-H3 工作流的提示词写进 CSGlideDeskCS 的 desk_data.segs。
  */
-function injectH3Prompt(clone: Workflow, positive: string): boolean {
+export function injectH3Prompt(clone: unknown, positive: string): boolean {
+  if (!isWorkflowObject(clone)) return false
   // ① 关键：写进 CSGlideCastCS.h3_data.prompt —— 这是真正驱动画面的提示词字段。
   //    之前只写 desk_data.segs 导致 h3_data.prompt 一直为空，模型用了模板残留内容。
   let wroteCast = false
@@ -188,6 +189,8 @@ function injectH3Data(clone: Workflow, params: WorkflowParams): void {
     if (params.height) h3.height = params.height
     if (params.frames) h3.length = params.frames
     if (params.mode) h3.mode = params.mode
+    // 显式开启别名模式：H3 才会把提示词里的资产名/角色名展开成 @图片N → <Picture N>
+    h3.alias = true
     // 分段导演台覆盖字段（画布比例/保留头尾/参考/语义桥/续接/整片潜空间/链身份）
     if (params.h3) {
       for (const [k, v] of Object.entries(params.h3)) {
@@ -237,13 +240,20 @@ function clearH3Refs(clone: Workflow, mode?: string): void {
  *   顶层 slots（媒体架面板显示用）
  *   segs[cur].slots（当前段实际读取的槽位）
  * H3 运行时按 segs[cur] 取素材，只写顶层不生效，所以两处都要写。
+ *
+ * alias 是槽位称呼：H3 会把提示词里出现的 alias 自动展开成 @图片N，
+ * 所以把资产名写进 alias，提示词里写角色名即可绑定这张参考图。
  */
 function writeRackSlots(
   rack: Record<string, unknown>,
   kind: 'images' | 'videos' | 'audios',
-  files: string[]
+  files: string[],
+  aliases?: string[]
 ): void {
-  const entries = files.map((f) => ({ file: f, alias: [f] }))
+  const entries = files.map((f, i) => {
+    const a = aliases?.[i]?.trim()
+    return { file: f, alias: a ? [a] : [f] }
+  })
   // 顶层 slots
   const top = (rack.slots as Record<string, unknown> | undefined) ?? {}
   top[kind] = entries
@@ -268,7 +278,16 @@ function writeRackSlots(
  * h3_data.slots 结构：{ first:{}, last:{}, images:[{},{},...], videos:[...], audios:[...] }
  * 模板里 images/videos/audios 是预置的占位数组（长度固定），必须按索引填 file。
  */
-function writeCastSlots(h3: H3Data, kind: 'images' | 'videos' | 'audios', files: string[]): void {
+function writeCastSlots(
+  h3: H3Data,
+  kind: 'images' | 'videos' | 'audios',
+  files: string[],
+  aliases?: string[]
+): void {
+  const aliasOf = (f: string, i: number): string[] => {
+    const a = aliases?.[i]?.trim()
+    return a ? [a] : [f]
+  }
   const slots = (h3.slots as Record<string, unknown> | undefined) ?? {}
   const exist = slots[kind]
   if (Array.isArray(exist)) {
@@ -277,22 +296,50 @@ function writeCastSlots(h3: H3Data, kind: 'images' | 'videos' | 'audios', files:
       const f = files[i]
       if (!f) return {}
       const base = old && typeof old === 'object' ? { ...(old as Record<string, unknown>) } : {}
-      return { ...base, file: f, alias: [f] }
+      return { ...base, file: f, alias: aliasOf(f, i) }
     })
     // 超出占位长度的丢弃（H3 只读模板固定槽位数）
     slots[kind] = next
   } else {
-    slots[kind] = files.map((f) => ({ file: f, alias: [f] }))
+    slots[kind] = files.map((f, i) => ({ file: f, alias: aliasOf(f, i) }))
   }
   h3.slots = slots
 }
 
 /**
+ * 在提示词里补上参考素材的 @ 引用标签。
+ *
+ * H3 的绑定机制（见 Banzhang csglide_cast.py）：
+ *   提示词里写 @图片1 / @视频1 / @音频1，节点会转写成 <Picture 1> / <Video 1> / <Audio 1>，
+ *   并按实际填充的槽位重新编号。**提示词里没有 @ 引用，模型就完全不会用参考图。**
+ *
+ * 注意：槽位 alias 里存了资产名，H3 会把提示词中出现的资产名也展开成 @图片N。
+ * 所以这里只补 @图片N，**不附带资产名**——否则「@图片1（安洁拉）」会被展开成
+ * 「<Picture 1>（<Picture 1>）」，模型拿到的是自我指涉的编号，反而丢掉角色语义。
+ *
+ * 返回补好引用的提示词；已有 @图片N 时不重复插入。
+ */
+export function appendRefTags(prompt: string, refImages: string[]): string {
+  if (refImages.length === 0) return prompt
+  const text = prompt ?? ''
+  const tags: string[] = []
+  for (let i = 0; i < refImages.length; i++) {
+    const tag = `@图片${i + 1}`
+    // 提示词里已显式写过这个标签（或写过 <Picture N>）就不重复加
+    if (text.includes(tag) || new RegExp(`<\\s*Picture\\s*${i + 1}\\s*>`, 'i').test(text)) continue
+    tags.push(tag)
+  }
+  if (tags.length === 0) return text
+  // 追加到提示词末尾：只写 @图片N，不附资产名（否则会被 alias 二次展开成自我指涉）
+  return `${text}\n\n参考素材：${tags.join('、')}`
+}
+
+/**
  * 把参考图文件名注入 H3 媒体架（CSGlideH3MediaRackCS 的 rack_data）。
  * refImages 是已上传到 ComfyUI input 的文件名（如 cglide/xxx.png）。
- * 参考图会作为 ref2va 的素材，首张同时作为首帧。
+ * aliases 是对应的称呼（通常传资产名），写进槽位 alias 供提示词绑定。
  */
-export function injectH3RefImages(clone: unknown, refImages: string[]): void {
+export function injectH3RefImages(clone: unknown, refImages: string[], aliases?: string[]): void {
   if (refImages.length === 0) return
   if (!isWorkflowObject(clone)) return
   // Krea2 图生图：把参考图写进 LoadImage 节点（上传后的文件名）
@@ -313,7 +360,7 @@ export function injectH3RefImages(clone: unknown, refImages: string[]): void {
       if (typeof raw !== 'string') continue
       const rack = tryParse<Record<string, unknown>>(raw)
       if (!rack) continue
-      writeRackSlots(rack, 'images', refImages)
+      writeRackSlots(rack, 'images', refImages, aliases)
       node.inputs.rack_data = JSON.stringify(rack)
     }
     // ② CSGlideCastCS.h3_data.slots：真正喂给模型的槽位
@@ -322,7 +369,7 @@ export function injectH3RefImages(clone: unknown, refImages: string[]): void {
       if (!field) continue
       const h3 = tryParse<H3Data>(node.inputs[field])
       if (!h3) continue
-      writeCastSlots(h3, 'images', refImages)
+      writeCastSlots(h3, 'images', refImages, aliases)
       node.inputs[field] = JSON.stringify(h3)
     }
   }
@@ -331,7 +378,7 @@ export function injectH3RefImages(clone: unknown, refImages: string[]): void {
 /**
  * 视频参考：把上传后的参考视频写入 H3 媒体架（slots.videos）与 h3_data.slots。
  */
-export function injectH3RefVideos(clone: unknown, refVideos: string[]): void {
+export function injectH3RefVideos(clone: unknown, refVideos: string[], aliases?: string[]): void {
   if (refVideos.length === 0) return
   if (!isWorkflowObject(clone)) return
   for (const node of Object.values(clone)) {
@@ -341,7 +388,7 @@ export function injectH3RefVideos(clone: unknown, refVideos: string[]): void {
       if (typeof raw !== 'string') continue
       const rack = tryParse<Record<string, unknown>>(raw)
       if (!rack) continue
-      writeRackSlots(rack, 'videos', refVideos)
+      writeRackSlots(rack, 'videos', refVideos, aliases)
       node.inputs.rack_data = JSON.stringify(rack)
     }
     if (ct === 'CSGlideCastCS') {
@@ -349,7 +396,7 @@ export function injectH3RefVideos(clone: unknown, refVideos: string[]): void {
       if (!field) continue
       const h3 = tryParse<H3Data>(node.inputs[field])
       if (!h3) continue
-      writeCastSlots(h3, 'videos', refVideos)
+      writeCastSlots(h3, 'videos', refVideos, aliases)
       node.inputs[field] = JSON.stringify(h3)
     }
   }

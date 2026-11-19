@@ -13,7 +13,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import type { ComfySettings, JobInfo, JobParams, JobStatus, ShotOutput, Template } from '@shared/types'
 import { ComfyClient, makeClient } from './comfy'
-import { buildWorkflow, extractH3Chain, injectH3RefImages, injectH3RefVideos } from './workflow'
+import { appendRefTags, buildWorkflow, extractH3Chain, injectH3Prompt, injectH3RefImages, injectH3RefVideos } from './workflow'
 import { uid, now, ProjectStore } from './store'
 import { collectMediaFiles, collectHistoryFiles, pickFinalMedia, sanitizeOutputName, type MediaFile } from './output-files'
 import { buildBuiltinTemplates } from './builtin-workflows'
@@ -167,7 +167,11 @@ export class JobManager {
       })
 
       // 参考图：分镜引用的资产封面，上传到 ComfyUI 后注入 H3 媒体架（ref2va 素材）。
+      // H3 必须靠提示词里的 @图片N 才会真正使用参考图，所以这里同时：
+      //   ① 把资产名写进槽位 alias（提示词里写角色名也能自动绑定）
+      //   ② 在提示词末尾补 @图片N 引用
       const refImages = Array.isArray(params.refImages) ? params.refImages.filter(Boolean) : []
+      const refAliases = Array.isArray(params.refAliases) ? params.refAliases : []
       if (refImages.length > 0) {
         try {
           const uploaded: string[] = []
@@ -175,7 +179,12 @@ export class JobManager {
             const up = await this.client.uploadImage(localPath)
             uploaded.push(up.subfolder ? `${up.subfolder}/${up.name}` : up.name)
           }
-          injectH3RefImages(workflow, uploaded)
+          injectH3RefImages(workflow, uploaded, refAliases)
+          // 补 @图片N 引用：没有这一步模型会忽略参考图
+          const tagged = appendRefTags(params.positive ?? '', uploaded)
+          if (tagged !== (params.positive ?? '')) {
+            injectH3Prompt(workflow, tagged)
+          }
         } catch (err) {
           console.warn('[jobs] 上传参考图失败（不阻断生成）:', String((err as Error).message ?? err))
         }

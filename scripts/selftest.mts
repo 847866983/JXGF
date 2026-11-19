@@ -12,7 +12,7 @@ import crypto from 'node:crypto'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { PRESETS, presetFor } from '../src/main/core/presets.ts'
-import { buildWorkflow, extractH3Chain, injectH3RefImages, injectH3RefVideos } from '../src/main/core/workflow.ts'
+import { appendRefTags, buildWorkflow, extractH3Chain, injectH3Prompt, injectH3RefImages, injectH3RefVideos } from '../src/main/core/workflow.ts'
 import { ComfyClient } from '../src/main/core/comfy.ts'
 import { collectMediaFiles, collectHistoryFiles, pickFinalMedia, sanitizeOutputName } from '../src/main/core/output-files.ts'
 import {
@@ -1285,6 +1285,45 @@ ok('H3参考图：t2v 清空两层 slots', () => {
   const rack = JSON.parse(String(out['257'].inputs.rack_data))
   assert.equal(rack.slots.images.length, 0, 't2v 应清空顶层')
   assert.equal(rack.segs[rack.cur].slots.images.length, 0, 't2v 应清空当前段')
+})
+
+// ---- H3 参考图绑定：@图片N 引用（参考图不生效的真正原因） ----
+ok('H3参考图绑定：槽位 alias 写入资产名', () => {
+  const wf = makeH3Fixture()
+  injectH3RefImages(wf, ['cglide/a.png', 'cglide/b.png'], ['安洁拉', '开拓者'])
+  const h3 = JSON.parse(String(wf['506'].inputs.h3_data))
+  assert.deepEqual(h3.slots.images[0].alias, ['安洁拉'], 'h3_data 槽位 alias 应为资产名')
+  assert.deepEqual(h3.slots.images[1].alias, ['开拓者'])
+  const rack = JSON.parse(String(wf['257'].inputs.rack_data))
+  assert.deepEqual(rack.segs[rack.cur].slots.images[0].alias, ['安洁拉'], '媒体架当前段 alias 也要写')
+})
+
+ok('H3参考图绑定：提示词自动补 @图片N', () => {
+  const out = appendRefTags('安洁拉走进操纵室', ['cglide/a.png', 'cglide/b.png'])
+  assert.ok(out.includes('@图片1'), `应补 @图片1：${out}`)
+  assert.ok(out.includes('@图片2'), `应补 @图片2：${out}`)
+  assert.ok(out.startsWith('安洁拉走进操纵室'), '原文应保留')
+})
+
+ok('H3参考图绑定：补引用时不附资产名（避免自我指涉）', () => {
+  const out = appendRefTags('安洁拉走进操纵室', ['cglide/a.png'], ['安洁拉'])
+  assert.ok(!out.includes('（安洁拉）'), `不应附资产名，否则 alias 二次展开成 <Picture 1>（<Picture 1>）：${out}`)
+})
+
+ok('H3参考图绑定：已有 @图片N 时不重复插入', () => {
+  const once = appendRefTags('场景描述', ['cglide/a.png'])
+  const twice = appendRefTags(once, ['cglide/a.png'])
+  assert.equal(twice, once, '重复调用不应再追加')
+  const withPic = appendRefTags('从 <Picture 1> 开始', ['cglide/a.png'])
+  assert.ok(!withPic.includes('参考素材'), `已写 <Picture 1> 时不应再加：${withPic}`)
+})
+
+ok('H3参考图绑定：buildWorkflow 开启 alias 模式', () => {
+  const wf = makeH3Fixture()
+  const tpl = { id: 't', name: 't', kind: 'video', apiJson: wf, mapping: {} }
+  const out = buildWorkflow(tpl as never, { positive: 'p', mode: 'ref2va' }) as typeof wf
+  const h3 = JSON.parse(String(out['506'].inputs.h3_data))
+  assert.equal(h3.alias, true, 'h3_data.alias 必须为 true，否则角色名不会展开成 @图片N')
 })
 
 console.log(`\nselftest: ${pass} passed, ${fail} failed`)
