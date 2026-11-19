@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ChevronDown, ChevronRight, Film, Link2, Play, SlidersHorizontal, Wand2 } from 'lucide-react'
+import { ChevronDown, ChevronRight, Film, Link2, Play, Save, SlidersHorizontal, Wand2 } from 'lucide-react'
 import type { Shot, Template, SegmentSettings } from '@shared/types'
 import { useApp } from '../store/app'
 import { EmptyState, PageHeader } from '../components/ui'
@@ -74,6 +74,11 @@ export default function Director(): React.JSX.Element {
   const [submittingShotId, setSubmittingShotId] = useState<string | null>(null)
   /** 生成前校验错误（如参考图缺失），显示在页面顶部提示 */
   const [error, setError] = useState<string | null>(null)
+  /** 导演台内直接编辑本段提示词的草稿（按分镜 id 存），未保存时 dirty */
+  const [promptDraft, setPromptDraft] = useState<Record<string, string>>({})
+  const [promptDirty, setPromptDirty] = useState(false)
+  /** 分镜剧本信息区是否展开 */
+  const [metaOpen, setMetaOpen] = useState(false)
 
   // 全局采样参数（KSampler，应用于所有段）
   const [paramsOpen, setParamsOpen] = useState(false)
@@ -335,6 +340,34 @@ export default function Director(): React.JSX.Element {
     await saveSegment(shot.id, { ...segOf(shot), ...patch })
   }
 
+  /** 在导演台直接改本段视频提示词（不用再回剧本分镜页） */
+  const saveShotPrompt = async (shotId: string, prompt: string): Promise<void> => {
+    await persistProject((draft) => {
+      const sh = draft.shots.find((x) => x.id === shotId)
+      if (!sh) return
+      sh.prompt = prompt
+      sh.updatedAt = new Date().toISOString()
+    })
+    setPromptDirty(false)
+  }
+
+  /** 导演台内直接改分镜的剧本信息（标题/描述/台词/镜头/时长） */
+  const saveShotMeta = async (
+    shotId: string,
+    patch: { title?: string; description?: string; dialogue?: string; camera?: string; duration?: number }
+  ): Promise<void> => {
+    await persistProject((draft) => {
+      const sh = draft.shots.find((x) => x.id === shotId)
+      if (!sh) return
+      if (patch.title !== undefined) sh.title = patch.title
+      if (patch.description !== undefined) sh.description = patch.description
+      if (patch.dialogue !== undefined) sh.dialogue = patch.dialogue
+      if (patch.camera !== undefined) sh.camera = patch.camera
+      if (patch.duration !== undefined) sh.duration = patch.duration
+      sh.updatedAt = new Date().toISOString()
+    })
+  }
+
   /** 选定某个产物为保留版本（其余标记弃用） */
   const keepOutput = async (shotId: string, outputId: string): Promise<void> => {
     await persistProject((draft) => {
@@ -365,10 +398,25 @@ export default function Director(): React.JSX.Element {
     return undefined
   }
 
+  // 当前段（选中段或第 1 段）：左侧监视器 + 右侧参数面板都用它
+  const curShot = selectedShot ?? shots[0] ?? null
+  const curIndex = curShot ? shots.indexOf(curShot) : -1
+  const curSeg = curShot ? segOf(curShot) : null
+  /** 当前段提示词草稿（优先未保存的编辑内容） */
+  const curPrompt = curShot ? (promptDraft[curShot.id] ?? curShot.prompt ?? curShot.description ?? '') : ''
+  /** 当前段的成片（保留版本优先，否则取最后一个视频） */
+  const curOutput =
+    curShot && curShot.outputs.length > 0
+      ? (curShot.outputs.find((o) => o.kept !== false && o.kind === 'video') ??
+        curShot.outputs.filter((o) => o.kind === 'video').slice(-1)[0] ??
+        curShot.outputs.find((o) => o.kept !== false) ??
+        curShot.outputs[curShot.outputs.length - 1])
+      : null
+
   return (
     <div>
       {tabBar}
-      <PageHeader title="导演台" desc="分段编排 · 每段画布/参考/放大重绘 · 段间续接成长视频" crumbs={[project.name, '导演台']} />
+      <PageHeader title="导演台" desc="分段编排 · 直接改提示词 · 段间续接成长视频" crumbs={[project.name, '导演台']} />
 
       <div className="px-8 pb-8">
         {/* 生成前校验错误提示（如参考图缺失） */}
@@ -450,189 +498,399 @@ export default function Director(): React.JSX.Element {
           <EmptyState title="本集还没有分镜" desc="先去「剧本分镜」给本集添加场次与分镜" />
         ) : (
           <>
-            {/* 全片总览时间线 */}
-            <div className="panel mb-4 p-3">
-              <div className="mb-2 flex items-center gap-2 text-xs text-slate-400">
-                <Link2 size={14} className="text-accent-400" />
-                全片总览 · {shots.length} 段 · 段间自动续接（第 1 段起，后续段 latent 续接）
+            {/* ===== 上区：左成片监视器 + 右本段参数与提示词 ===== */}
+            <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)] gap-4">
+              {/* 左：成片监视器 */}
+              <section className="panel flex flex-col p-4">
+                <div className="mb-2 flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-sm font-medium text-white">
+                    <Film size={15} className="text-accent-400" />
+                    成片监视器
+                    <span className="text-[11px] font-normal text-slate-500">
+                      {selectedEpisode.title} · 第 {curIndex + 1} 段 / 共 {shots.length} 段
+                    </span>
+                  </div>
+                  <button className="text-[11px] text-slate-500 hover:text-slate-300" onClick={() => setParamsShotId(curShot?.id ?? null)}>
+                    规格·参考
+                  </button>
+                </div>
+                <div className="relative flex-1 overflow-hidden rounded-lg border border-white/5 bg-black">
+                  {curOutput ? (
+                    curOutput.kind === 'video' ? (
+                      <VideoThumb src={curOutput.file} className="h-full w-full object-contain" />
+                    ) : (
+                      <MediaImage src={curOutput.file} alt="" className="h-full w-full object-contain" fallback={<div className="h-full w-full" />} />
+                    )
+                  ) : (
+                    <div className="flex h-full min-h-[260px] w-full items-center justify-center">
+                      <div className="rounded-lg bg-white/[0.06] px-4 py-2 text-xs text-slate-300">
+                        段落都接好了 —— 点「生成本段」或「连续生成」出画面
+                      </div>
+                    </div>
+                  )}
+                </div>
+                <div className="mt-2 flex items-center justify-between text-[11px] text-slate-500">
+                  <span>
+                    {curOutput
+                      ? `已生成 · ${curOutput.file.split(/[\\/]/).pop()}`
+                      : `第 ${curIndex + 1} 段还没有成片 —— 生成一次就有了`}
+                  </span>
+                  {curShot && curShot.outputs.length > 1 && (
+                    <span>共 {curShot.outputs.length} 个版本</span>
+                  )}
+                </div>
+
+                {/* 多版本管理：选保留版本（将作为下一段视频参考）/ 删除多余 */}
+                {curShot && curShot.outputs.length > 0 && (
+                  <div className="mt-2 flex gap-2 overflow-x-auto border-t border-white/5 pt-2">
+                    {curShot.outputs.map((o) => {
+                      const keptCount = curShot.outputs.filter((x) => x.kept !== false).length
+                      const kept = o.kept !== false && keptCount === 1
+                      const isVideo = o.kind === 'video'
+                      return (
+                        <div
+                          key={o.id}
+                          className={`shrink-0 rounded border p-1 ${kept ? 'border-accent-500 bg-accent-600/10' : 'border-white/10 bg-white/[0.02]'}`}
+                        >
+                          <div className="h-12 w-20 overflow-hidden rounded bg-black">
+                            {isVideo ? (
+                              <VideoThumb src={o.file} className="h-full w-full object-cover" />
+                            ) : (
+                              <MediaImage src={o.file} alt="" className="h-full w-full object-cover" fallback={<div className="h-full w-full" />} />
+                            )}
+                          </div>
+                          <div className="mt-1 flex gap-1">
+                            <button
+                              className={`rounded px-1 py-0.5 text-[9px] ${kept ? 'bg-emerald-500/20 text-emerald-300' : 'bg-white/5 text-slate-400 hover:bg-white/10'}`}
+                              onClick={() => void keepOutput(curShot.id, o.id)}
+                            >
+                              {kept ? '✓' : '保留'}
+                            </button>
+                            <button
+                              className="rounded bg-rose-500/10 px-1 py-0.5 text-[9px] text-rose-300 hover:bg-rose-500/20"
+                              onClick={() => void removeOutput(curShot.id, o.id)}
+                            >
+                              删
+                            </button>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </section>
+
+              {/* 右：本段参数 + 视频提示词 */}
+              <section className="panel p-4">
+                <div className="mb-3 flex items-center justify-between">
+                  <div className="text-sm font-medium text-white">第 {curIndex + 1} 段</div>
+                  <div className="flex items-center gap-2">
+                    <ShotStatusBadge status={curShot?.status ?? 'pending'} />
+                    <button className="btn-ghost" onClick={() => setParamsShotId(curShot?.id ?? null)}>
+                      <SlidersHorizontal size={13} />
+                      段参数
+                    </button>
+                  </div>
+                </div>
+
+                {/* 画布 / 时长 / 参考 / 放大 / 抽帧 / 语义桥：只读摘要，改到段参数 */}
+                {curSeg && (
+                  <div className="space-y-1.5 rounded-lg border border-white/5 bg-ink-950/40 p-3 text-[11px]">
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">画布</span>
+                      <span className="text-slate-300">
+                        {curSeg.ratio} · {curSeg.width} × {curSeg.height}
+                        <span className="ml-2 text-slate-500">{((curSeg.width * curSeg.height) / 1e6).toFixed(2)} MP</span>
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">时长</span>
+                      <span className="text-slate-300">
+                        {curSeg.durationSec} 秒 · {curSeg.frames} 帧 · {curSeg.fps}fps
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">生成方式</span>
+                      <span className="text-slate-300">
+                        {curSeg.genMode === 'ref2va' ? '参考图' : curSeg.genMode === 'video' ? '视频参考' : '纯文生'}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">续接</span>
+                      <span className="text-slate-300">{curSeg.contMode === 'none' ? '不续接' : `${curSeg.contMode} 续接`}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">参考图 / 视频</span>
+                      <span className="text-slate-300">
+                        {curSeg.refImageSize} / {curSeg.refVideoSize}px
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">放大重绘</span>
+                      <span className="text-slate-300">
+                        {curSeg.upscale.enabled
+                          ? curSeg.upscale.mode === '倍数'
+                            ? `${curSeg.upscale.scale}×`
+                            : `${curSeg.upscale.targetWidth}×${curSeg.upscale.targetHeight}`
+                          : '关'}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">抽帧</span>
+                      <span className="text-slate-300">
+                        {curSeg.rife.fps}fps{curSeg.rife.enabled ? ` · 插帧 ${curSeg.rife.multiplier}×` : ' · 不抽帧'}
+                      </span>
+                    </div>
+                  </div>
+                )}
+
+                {/* 分镜剧本信息：直接在导演台改，不用回剧本分镜页 */}
+                {curShot && (
+                  <div className="mt-3">
+                    <button
+                      className="mb-1.5 flex w-full items-center gap-1.5 text-[11px] text-slate-400 hover:text-slate-300"
+                      onClick={() => setMetaOpen((v) => !v)}
+                    >
+                      {metaOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                      分镜剧本信息
+                      <span className="text-slate-600">（标题 / 描述 / 台词 / 镜头 / 时长）</span>
+                    </button>
+                    {metaOpen && (
+                      <div className="space-y-2 rounded-lg border border-white/5 bg-ink-950/40 p-3">
+                        <div>
+                          <label className="label text-[10px]">标题</label>
+                          <input
+                            className="field text-xs"
+                            defaultValue={curShot.title}
+                            onBlur={(e) => {
+                              if (e.target.value !== curShot.title) void saveShotMeta(curShot.id, { title: e.target.value })
+                            }}
+                          />
+                        </div>
+                        <div>
+                          <label className="label text-[10px]">画面描述（剧本原文）</label>
+                          <textarea
+                            className="field h-16 resize-y text-xs"
+                            defaultValue={curShot.description ?? ''}
+                            onBlur={(e) => {
+                              if (e.target.value !== (curShot.description ?? '')) {
+                                void saveShotMeta(curShot.id, { description: e.target.value })
+                              }
+                            }}
+                          />
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <label className="label text-[10px]">台词</label>
+                            <textarea
+                              className="field h-14 resize-y text-xs"
+                              defaultValue={curShot.dialogue ?? ''}
+                              onBlur={(e) => {
+                                if (e.target.value !== (curShot.dialogue ?? '')) {
+                                  void saveShotMeta(curShot.id, { dialogue: e.target.value })
+                                }
+                              }}
+                            />
+                          </div>
+                          <div>
+                            <label className="label text-[10px]">镜头</label>
+                            <textarea
+                              className="field h-14 resize-y text-xs"
+                              defaultValue={curShot.camera ?? ''}
+                              onBlur={(e) => {
+                                if (e.target.value !== (curShot.camera ?? '')) {
+                                  void saveShotMeta(curShot.id, { camera: e.target.value })
+                                }
+                              }}
+                            />
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <label className="label mb-0 text-[10px]">时长（秒）</label>
+                          <input
+                            className="field w-24 text-xs"
+                            type="number"
+                            min={1}
+                            max={15}
+                            defaultValue={curShot.duration ?? 5}
+                            onBlur={(e) => {
+                              const v = Number(e.target.value)
+                              if (v > 0 && v !== curShot.duration) void saveShotMeta(curShot.id, { duration: v })
+                            }}
+                          />
+                          <span className="text-[10px] text-slate-600">改完点空白处自动保存</span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* 视频提示词：导演台内直接编辑 */}
+                <div className="mt-3">
+                  <div className="mb-1.5 flex items-center justify-between">
+                    <label className="text-[11px] text-slate-400">
+                      视频提示词
+                      <span className="ml-1 text-slate-600">（写角色名会自动绑定参考图）</span>
+                    </label>
+                    {promptDirty && <span className="text-[10px] text-amber-400">未保存</span>}
+                  </div>
+                  <textarea
+                    className="field h-40 w-full resize-y font-mono text-xs leading-relaxed"
+                    value={curPrompt}
+                    placeholder="描述这一段的画面、人物动作、镜头运动与声音。&#10;例：安洁拉走进操纵室，转身看向主屏幕，镜头缓慢推进。"
+                    onChange={(e) => {
+                      if (!curShot) return
+                      setPromptDraft((d) => ({ ...d, [curShot.id]: e.target.value }))
+                      setPromptDirty(true)
+                    }}
+                  />
+                  <div className="mt-2 flex items-center gap-2">
+                    <button
+                      className="btn-primary"
+                      disabled={!promptDirty || !curShot}
+                      onClick={() => curShot && void saveShotPrompt(curShot.id, curPrompt)}
+                    >
+                      <Save size={13} />
+                      保存提示词
+                    </button>
+                    <button
+                      className="btn-ghost"
+                      disabled={!curShot}
+                      onClick={() => {
+                        if (!curShot) return
+                        setPromptDraft((d) => ({ ...d, [curShot.id]: curShot.description ?? '' }))
+                        setPromptDirty(true)
+                      }}
+                    >
+                      用分镜描述
+                    </button>
+                    <button
+                      className="btn-primary ml-auto"
+                      disabled={!canGenerate || !curShot || submittingShotId === curShot?.id}
+                      onClick={() => curShot && void generateOne(curShot)}
+                    >
+                      <Wand2 size={14} />
+                      {submittingShotId === curShot?.id ? '提交中…' : '生成本段'}
+                    </button>
+                  </div>
+                </div>
+
+                {/* 参考图绑定情况 */}
+                {curShot && curShot.assetIds.length > 0 && (
+                  <div className="mt-3 flex flex-wrap items-center gap-1.5 border-t border-white/5 pt-2.5">
+                    <span className="text-[11px] text-slate-600">引用资产：</span>
+                    {curShot.assetIds.map((id) => {
+                      const a = project.assets.find((x) => x.id === id)
+                      if (!a) return null
+                      const hasImg = Boolean(a.coverFile ?? a.images?.[a.images.length - 1])
+                      return (
+                        <span
+                          key={id}
+                          className={`rounded px-1.5 py-0.5 text-[10px] ${hasImg ? 'bg-accent-600/20 text-accent-300' : 'bg-amber-500/15 text-amber-300'}`}
+                          title={hasImg ? '已绑定参考图' : '该资产还没有图片，参考图不会生效'}
+                        >
+                          {a.name}
+                          {!hasImg && ' ⚠'}
+                        </span>
+                      )
+                    })}
+                  </div>
+                )}
+              </section>
+            </div>
+
+            {/* ===== 下区：全片总览时间轴 ===== */}
+            <section className="panel mt-4 p-3">
+              <div className="mb-2 flex flex-wrap items-center gap-2">
+                <div className="flex items-center gap-2 text-xs text-slate-400">
+                  <Link2 size={14} className="text-accent-400" />
+                  全片总览 · {shots.length} 段 · {totalSec.toFixed(1)}s
+                </div>
+                <div className="ml-auto flex flex-wrap gap-1.5">
+                  <button className="btn-ghost" onClick={() => void generateAll()} disabled={!canGenerate || batchRunning || pendingCount === 0}>
+                    <Play size={13} />
+                    {batchRunning ? '生成中…' : `连续生成（${pendingCount}）`}
+                  </button>
+                  <button className="btn-ghost" onClick={() => setParamsOpen((v) => !v)}>
+                    <SlidersHorizontal size={13} />
+                    采样参数
+                  </button>
+                </div>
               </div>
+
+              {paramsOpen && (
+                <div className="mb-3 grid grid-cols-5 gap-3 rounded-lg border border-white/5 bg-white/[0.02] p-3">
+                  <div>
+                    <label className="label">步数</label>
+                    <input className="field" value={genSteps} onChange={(e) => setGenSteps(e.target.value.replace(/[^0-9]/g, ''))} />
+                  </div>
+                  <div>
+                    <label className="label">CFG</label>
+                    <input className="field" value={genCfg} onChange={(e) => setGenCfg(e.target.value.replace(/[^0-9.]/g, ''))} />
+                  </div>
+                  <div>
+                    <label className="label">采样器</label>
+                    <input className="field" value={genSampler} onChange={(e) => setGenSampler(e.target.value)} />
+                  </div>
+                  <div>
+                    <label className="label">调度器</label>
+                    <input className="field" value={genScheduler} onChange={(e) => setGenScheduler(e.target.value)} />
+                  </div>
+                  <div>
+                    <label className="label">种子（空=随机）</label>
+                    <input className="field" value={genSeed} onChange={(e) => setGenSeed(e.target.value.replace(/[^0-9]/g, ''))} placeholder="随机" />
+                  </div>
+                </div>
+              )}
+
+              {/* 时间轴：每段一个可点选块 */}
               <div className="flex gap-2 overflow-x-auto pb-1">
                 {shots.map((shot, i) => {
                   const s = segOf(shot)
-                  const active = selectedShot?.id === shot.id
+                  const active = curShot?.id === shot.id
+                  const out = shot.outputs.find((o) => o.kept !== false) ?? shot.outputs[shot.outputs.length - 1]
                   return (
                     <button
                       key={shot.id}
-                      onClick={() => setSelectedShotId(shot.id)}
-                      className={`min-w-[150px] shrink-0 rounded-lg border px-3 py-2 text-left transition-colors ${
+                      onClick={() => { setSelectedShotId(shot.id); setPromptDirty(false) }}
+                      className={`group min-w-[168px] shrink-0 rounded-lg border text-left transition-colors ${
                         active ? 'border-accent-500 bg-accent-600/10' : 'border-white/10 bg-white/[0.02] hover:border-white/20'
                       }`}
                     >
-                      <div className="flex items-center justify-between text-xs">
+                      <div className="flex items-center justify-between px-2.5 pt-2 text-[11px]">
                         <span className={active ? 'text-accent-300' : 'text-slate-400'}>第 {i + 1} 段</span>
                         <ShotStatusBadge status={shot.status} />
                       </div>
-                      <div className="mt-1 text-[11px] text-slate-500">
-                        {s.durationSec}s · {s.width}×{s.height}
+                      <div className="mx-2.5 mt-1.5 h-12 overflow-hidden rounded bg-black">
+                        {out ? (
+                          out.kind === 'video' ? (
+                            <VideoThumb src={out.file} className="h-full w-full object-cover" />
+                          ) : (
+                            <MediaImage src={out.file} alt="" className="h-full w-full object-cover" fallback={<div className="h-full w-full" />} />
+                          )
+                        ) : (
+                          <div className="flex h-full w-full items-center justify-center text-[10px] text-slate-600">待生成</div>
+                        )}
                       </div>
-                      <div className="text-[11px] text-slate-600">
-                        {s.frames} 帧{s.contMode !== 'none' ? ' · 续接' : ' · 不续接'}
+                      <div className="px-2.5 pb-2 pt-1 text-[10px] text-slate-500">
+                        {s.durationSec}s · {s.frames}帧 · {s.contMode === 'none' ? '不续接' : `${s.contMode}续接`}
                       </div>
                     </button>
                   )
                 })}
               </div>
-            </div>
 
-            {/* 段列表 */}
-            <div className="space-y-3">
-              {shots.map((shot, i) => {
-                const s = segOf(shot)
-                const cover = shot.assetIds.map((id) => project.assets.find((a) => a.id === id)?.coverFile).find(Boolean) ?? null
-                return (
-                  <div
-                    key={shot.id}
-                    className={`panel p-4 ${selectedShot?.id === shot.id ? 'border-accent/40' : ''}`}
-                    onClick={() => setSelectedShotId(shot.id)}
-                  >
-                    <div className="flex gap-4">
-                      <div className="h-20 w-32 shrink-0 overflow-hidden rounded-lg border border-white/5 bg-ink-800">
-                        <MediaImage
-                          src={cover}
-                          alt={shot.title}
-                          className="h-full w-full object-cover"
-                          fallback={
-                            <div className="flex h-full w-full items-center justify-center text-slate-600">
-                              <Film size={22} />
-                            </div>
-                          }
-                        />
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm font-semibold text-white">第 {i + 1} 段</span>
-                          <span className="truncate text-sm text-slate-300">{shot.title}</span>
-                          <ShotStatusBadge status={shot.status} />
-                        </div>
-                        <div className="mt-1 line-clamp-2 text-xs text-slate-500">{shot.description || shot.prompt}</div>
-                        <div className="mt-2 flex flex-wrap items-center gap-3 text-[11px] text-slate-500">
-                          <span>
-                            画布 {s.width}×{s.height}（{s.ratio}）
-                          </span>
-                          <span>
-                            时长 {s.durationSec}s · {s.fps}fps · {s.frames} 帧
-                          </span>
-                          <span>保留头 {s.pinHead} / 尾 {s.pinTail}</span>
-                          <span>参考图 {s.refImageSize} · 视频 {s.refVideoSize}px</span>
-                          <span>放大重绘 {s.upscale.enabled ? `${s.upscale.mode} ${s.upscale.mode === '倍数' ? s.upscale.scale + '×' : s.upscale.targetWidth + '×' + s.upscale.targetHeight}` : '关'}</span>
-                          <span>抽帧 {s.rife.fps}fps{s.rife.enabled ? ` · 插帧 ${s.rife.multiplier}×` : ''}</span>
-                          <span>语义桥 {s.bridgeMode} · {s.bridgeAlpha}</span>
-                        </div>
-                        <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                          <span className="text-[11px] text-slate-600">续接：</span>
-                          {([
-                            ['none', '不续接'],
-                            ['latent', 'latent 续接'],
-                            ['video', 'video 续接']
-                          ] as const).map(([m, label]) => (
-                            <button
-                              key={m}
-                              className={`rounded px-2 py-0.5 text-[11px] ${s.contMode === m ? 'bg-accent-600/30 text-accent-200' : 'bg-white/5 text-slate-400 hover:bg-white/10'}`}
-                              onClick={(e) => { e.stopPropagation(); void patchSegment(shot, { contMode: m }) }}
-                            >
-                              {label}
-                            </button>
-                          ))}
-                          <span className="ml-3 text-[11px] text-slate-600">生成方式：</span>
-                          {([
-                            ['ref2va', '参考图'],
-                            ['video', '视频参考'],
-                            ['t2v', '文生']
-                          ] as const).map(([m, label]) => (
-                            <button
-                              key={m}
-                              className={`rounded px-2 py-0.5 text-[11px] ${s.genMode === m ? 'bg-accent-600/30 text-accent-200' : 'bg-white/5 text-slate-400 hover:bg-white/10'}`}
-                              onClick={(e) => { e.stopPropagation(); void patchSegment(shot, { genMode: m }) }}
-                            >
-                              {label}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                      <div className="flex shrink-0 flex-col gap-2">
-                        <button className="btn-ghost" onClick={(e) => { e.stopPropagation(); setParamsShotId(shot.id) }}>
-                          <SlidersHorizontal size={14} />
-                          段参数
-                        </button>
-                        <button
-                          className="btn-primary"
-                          disabled={!canGenerate || submittingShotId === shot.id}
-                          onClick={(e) => { e.stopPropagation(); void generateOne(shot) }}
-                        >
-                          <Wand2 size={14} />
-                          {submittingShotId === shot.id ? '提交中…' : '生成本段'}
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* 本段生成结果：多版本视频/图片预览，可选保留哪一个、删多余的 */}
-                    {shot.outputs.length > 0 && (
-                      <div className="mt-3 border-t border-white/5 pt-3">
-                        <div className="mb-2 flex items-center gap-2 text-xs text-slate-400">
-                          本段成片（{shot.outputs.length} 个版本，点「保留」选定，其余可删）
-                          {shot.outputs.some((o) => o.kept) && (
-                            <span className="rounded bg-emerald-500/10 px-1.5 py-0.5 text-[10px] text-emerald-400">
-                              已选版本将作为下一段视频参考
-                            </span>
-                          )}
-                        </div>
-                        <div className="flex gap-3 overflow-x-auto pb-1">
-                          {shot.outputs.map((o) => {
-                            const keptCount = shot.outputs.filter((x) => x.kept !== false).length
-                            const kept = o.kept !== false && keptCount === 1
-                            const isVideo = o.kind === 'video'
-                            return (
-                              <div
-                                key={o.id}
-                                className={`shrink-0 rounded-lg border p-2 ${kept ? 'border-accent-500 bg-accent-600/10' : 'border-white/10 bg-white/[0.02]'}`}
-                              >
-                                <div className="h-28 w-48 overflow-hidden rounded bg-black">
-                                  {isVideo ? (
-                                    <VideoThumb src={o.file} className="h-full w-full object-contain" />
-                                  ) : (
-                                    <MediaImage src={o.file} alt="" className="h-full w-full object-cover" fallback={<div className="h-full w-full bg-ink-800" />} />
-                                  )}
-                                </div>
-                                <div className="mt-1.5 truncate text-[11px] text-slate-400" title={o.file}>
-                                  {o.file.split(/[\\/]/).pop()}
-                                </div>
-                                <div className="mt-1.5 flex gap-1.5">
-                                  <button
-                                    className={`rounded px-2 py-0.5 text-[11px] ${kept ? 'bg-emerald-500/20 text-emerald-300' : 'bg-white/5 text-slate-400 hover:bg-white/10'}`}
-                                    onClick={(e) => { e.stopPropagation(); void keepOutput(shot.id, o.id) }}
-                                  >
-                                    {kept ? '✓ 保留中' : '设为保留'}
-                                  </button>
-                                  <button
-                                    className="rounded bg-rose-500/10 px-2 py-0.5 text-[11px] text-rose-300 hover:bg-rose-500/20"
-                                    onClick={(e) => { e.stopPropagation(); void removeOutput(shot.id, o.id) }}
-                                  >
-                                    删除
-                                  </button>
-                                </div>
-                              </div>
-                            )
-                          })}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )
-              })}
-            </div>
+              <div className="mt-2 flex items-center justify-between text-[11px] text-slate-500">
+                <span>
+                  第 {curIndex + 1} / {shots.length} 段 · 待生成 {pendingCount} 段
+                </span>
+                <span>{curSeg ? `${curSeg.frames} 帧` : ''}</span>
+              </div>
+            </section>
           </>
         )}
       </div>
+
 
       {paramsShotId && (() => {
         const shot = project.shots.find((s) => s.id === paramsShotId)
