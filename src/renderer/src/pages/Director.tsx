@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ChevronDown, ChevronRight, Film, Link2, Play, Save, SlidersHorizontal, Wand2 } from 'lucide-react'
+import { ChevronDown, ChevronRight, Film, ImageIcon, Link2, PenLine, Play, Save, SlidersHorizontal, Sparkles, Wand2 } from 'lucide-react'
 import type { Shot, Template, SegmentSettings } from '@shared/types'
 import { useApp } from '../store/app'
 import { EmptyState, PageHeader } from '../components/ui'
@@ -10,6 +10,7 @@ import { MediaImage } from '../components/MediaImage'
 import { VideoThumb } from '../components/VideoThumb'
 import { Modal } from '../components/Modal'
 import { persistProject } from '../components/mutate'
+import FilmMonitor from '../components/FilmMonitor'
 import { defaultSegment, framesFor, getSegment, ratioOf } from '../lib/segment'
 import Storyboard from './Storyboard'
 
@@ -77,6 +78,15 @@ export default function Director(): React.JSX.Element {
   /** 导演台内直接编辑本段提示词的草稿（按分镜 id 存），未保存时 dirty */
   const [promptDraft, setPromptDraft] = useState<Record<string, string>>({})
   const [promptDirty, setPromptDirty] = useState(false)
+  /** 文案台「片子级提示词」草稿：null = 跟随当前剧集（未编辑过） */
+  const [globalPromptDraft, setGlobalPromptDraft] = useState<string | null>(null)
+  const [globalDirty, setGlobalDirty] = useState(false)
+  /** 片子级提示词区是否展开 */
+  const [globalOpen, setGlobalOpen] = useState(true)
+  /** 成片时间轴刷新计数（生成完成后 +1） */
+  const [filmRefresh, setFilmRefresh] = useState(0)
+  /** 文案台「AI 改写」进行中 */
+  const [rewriting, setRewriting] = useState(false)
   /** 分镜剧本信息区是否展开 */
   const [metaOpen, setMetaOpen] = useState(false)
   /**
@@ -167,6 +177,9 @@ export default function Director(): React.JSX.Element {
 
   const shots = computeShots(project, selectedEpisode.id)
 
+  /** 片子级提示词：编辑过就用草稿，否则跟随剧集里存的那份 */
+  const globalPrompt = globalPromptDraft ?? selectedEpisode.globalPrompt ?? ''
+
   const template = pickDirectorTemplate(project.templates, templateId)
   const preset = hardware?.preset.video ?? null
   const canGenerate = Boolean(template && preset)
@@ -201,9 +214,12 @@ export default function Director(): React.JSX.Element {
       bridge_mode: s.bridgeMode,
       pace: s.pace,
       push_whole: s.pushWhole,
+      // 别名模式：开启后提示词里的资产名/角色名会被 H3 展开成 @图片N
+      alias: s.aliasMode !== false,
       chain: { name: chainName, clip, shot: shot.id }
     }
-    if (s.contMode !== 'none') h3.cont = { mode: s.contMode }
+    // 只有潜空间续接才真正写 cont；历史遗留的 'video' 档不写（避免误导）
+    if (s.contMode === 'latent') h3.cont = { mode: 'latent' }
     return h3
   }
 
@@ -262,11 +278,47 @@ export default function Director(): React.JSX.Element {
     const basePrompt = shot.prompt || shot.description || shot.title
     const positive = charDesc ? `${basePrompt}\n角色位置与动作：${charDesc}` : basePrompt
 
+    // 潜空间续写：向 H3 档案查**上一段当前版本**的续拍存档路径，写进本段 cont。
+    // 这是导演台「全部渲染」逐段衔接的同一套机制（没有存档就当第一段处理）。
+    const chainName = `${project.name}·${selectedEpisode.title}`
+    const h3Param = buildH3(shot, index)
+    if (s.contMode === 'latent' && index > 0) {
+      const prev = liveShots[index - 1]
+      if (prev) {
+        try {
+          const r = (await window.api.h3ChainCont(chainName, prev.id)) as {
+            cont_path?: string
+            error?: string
+          }
+          if (r?.cont_path) {
+            h3Param.cont = {
+              mode: 'latent',
+              latent_file: r.cont_path,
+              // 承接帧数 = 上一段尾部取几帧钉在本段开头（不是上一段整段长度！）
+              frames: s.contFrames ?? 22,
+              audio: true
+            }
+          } else {
+            // 上一段还没跑过 → 本段按第一段处理（与导演台同口径），并在界面上提示
+            setError(
+              `第 ${index + 1} 段设置为 latent 续接，但上一段还没有续拍存档` +
+                `（${r?.error ?? '未找到'}）。本次会按第一段生成；` +
+                `先把上一段跑完，再生成这一段才能接上。`
+            )
+          }
+        } catch (err) {
+          setError(`查询上一段续拍存档失败：${String((err as Error).message ?? err)}`)
+        }
+      }
+    }
+
     await window.api.jobGenerate({
       projectId: project.id,
       shotId: shot.id,
       templateId: template.id,
       positive,
+      // 文案台「片子级」提示词：主进程按 片子级 + 本段 拼接后写进 h3_data.prompt
+      globalPrompt,
       width: s.width,
       height: s.height,
       frames: s.frames,
@@ -282,7 +334,7 @@ export default function Director(): React.JSX.Element {
         Number(genCfg) === ksDefault.cfg &&
         genSampler.trim() === ksDefault.sampler &&
         genScheduler.trim() === ksDefault.scheduler,
-      h3: buildH3(shot, index),
+      h3: h3Param,
       upscale: s.upscale,
       rife: s.rife,
       refImages: refImages.length > 0 ? refImages : undefined,
@@ -334,6 +386,7 @@ export default function Director(): React.JSX.Element {
         if (s.outputs.length > 0) continue
         await submitJob(s, i)
         const result = await waitJobDone(s.id)
+        if (result === 'done') setFilmRefresh((v) => v + 1)
         if (result === 'failed') {
           // 失败后停止连续生成，让用户去队列看原因，避免后续段空跑
           break
@@ -353,6 +406,65 @@ export default function Director(): React.JSX.Element {
         sh.updatedAt = new Date().toISOString()
       }
     })
+  }
+
+  /**
+   * 文案台「立即改写」：把本段提示词喂给已配置的 AI，按 H3 官方六段规范重写。
+   * 照搬节点包的 REWRITE_SYSTEM_OFFICIAL（精简版）：六段固定顺序、@标签逐字保留。
+   * 改写只改**文字**，不动任何画布/采样参数。
+   */
+  const rewritePrompt = async (shot: Shot): Promise<void> => {
+    const cur = (promptDraft[shot.id] ?? shot.prompt ?? '').trim()
+    if (!cur) {
+      setError('本段还没有提示词，先写几句再改写')
+      return
+    }
+    setRewriting(true)
+    setError(null)
+    try {
+      const names = shot.assetIds
+        .map((id) => project.assets.find((a) => a.id === id)?.name ?? '')
+        .filter(Boolean)
+      const refList = names.length
+        ? names.map((n, i) => `@图片${i + 1} = ${n}`).join('\n')
+        : '（本段没有参考素材）'
+      const guide = [
+        '你是 MiniMax H3 视频提示词改写器。只输出改写后的提示词正文，不要解释、不要代码块。',
+        '【输出语言】简体中文；对白、歌词、画面可见文字保留原语言。',
+        '【必须只输出这六段，按序，段名照抄】',
+        'subject_definitions：每个被引用内容一项一行——标签、是什么、要保留的特征',
+        'summary：一句话概括目标视频与引用关系，以 [任务类型] 开头（reference generation / keyframe completion / video continuation / video editing / audio reuse / audio reference，可组合用 +）',
+        'retention_analysis：每个标签一行，说明保留/转移/复用方式',
+        'detailed_description：逐镜描述画面、动作、光影、运镜、声音、对白',
+        'overall_soundscape：全片环境底噪与物件实声',
+        'non_diegetic_music：只有观众听得见的配乐（无则写「无」）',
+        '【引用标签】@图片N / @视频N / @音频N / @视频音频N 必须逐字保留，不得增删、不得改编号；编号含义六段一致。',
+        '【可用引用】',
+        refList
+      ].join('\n')
+      const res = (await window.api.aiChat({
+        messages: [{ role: 'user', content: `${guide}\n\n【待改写提示词】\n${cur}` }]
+      })) as { content?: string }
+      const next = (res?.content ?? '').trim()
+      if (!next) throw new Error('AI 没有返回内容')
+      setPromptDraft((d) => ({ ...d, [shot.id]: next }))
+      setPromptDirty(true)
+    } catch (err) {
+      setError(`AI 改写失败：${String((err as Error).message ?? err)}`)
+    } finally {
+      setRewriting(false)
+    }
+  }
+
+  /** 保存文案台的「片子级提示词」到当前剧集（全片共用一份） */
+  const saveGlobalPrompt = async (): Promise<void> => {
+    const text = globalPrompt
+    await persistProject((draft) => {
+      const ep = draft.episodes.find((x) => x.id === selectedEpisode.id)
+      if (ep) ep.globalPrompt = text
+    })
+    setGlobalPromptDraft(text)
+    setGlobalDirty(false)
   }
 
   /** 快捷改单段参数（续接方式 / 生成方式按钮用），立即保存 */
@@ -481,10 +593,68 @@ export default function Director(): React.JSX.Element {
             </button>
             <button className="btn-primary" disabled={!canGenerate || batchRunning || pendingCount === 0} onClick={() => void generateAll()}>
               <Play size={15} />
-              {batchRunning ? '提交中…' : `连续生成（${pendingCount}）`}
+              {batchRunning ? '全部渲染中…' : `全部渲染（${pendingCount}）`}
             </button>
           </div>
         </div>
+
+        {/* 工程状态条：对齐 H3 Studio 顶栏（工程名 · 段进度 · 时长 · 帧数 · 生成方式） */}
+        {curShot && curSeg && (
+          <div className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-white/5 bg-ink-950/40 px-3 py-2 text-[11px]">
+            <span className="flex items-center gap-1.5 font-medium text-slate-200">
+              <span className="h-1.5 w-1.5 rounded-full bg-accent-400" />
+              {project.name}
+            </span>
+            <span className="text-slate-600">|</span>
+            <span className="text-slate-400">
+              段 <b className="text-slate-200">{curIndex + 1}</b> / {shots.length}
+            </span>
+            <span className="text-slate-600">|</span>
+            <span className="text-slate-400">
+              <b className="text-slate-200">{curSeg.durationSec.toFixed(2)}</b> s
+            </span>
+            <span className="text-slate-600">|</span>
+            <span className="text-slate-400">
+              <b className="text-slate-200">{curSeg.frames}</b> 帧
+            </span>
+            <span className="text-slate-600">|</span>
+            <span className="text-slate-400">
+              权重 <b className="text-accent-300">{curSeg.genMode}</b>
+            </span>
+            <span className="text-slate-600">|</span>
+            <span className="text-slate-400">
+              {curSeg.contMode === 'none' ? '不续接' : `${curSeg.contMode} 续接`}
+            </span>
+            <div className="ml-auto flex items-center gap-1.5">
+              {curShot.outputs.length > 0 && (
+                <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] text-emerald-300">
+                  {curShot.outputs.filter((o) => o.kept !== false).length} 个成片
+                </span>
+              )}
+              <button
+                className="rounded bg-white/5 px-2 py-0.5 text-[10px] text-slate-400 hover:bg-white/10"
+                onClick={() => {
+                  if (!curShot) return
+                  void persistProject((draft) => {
+                    draft.shots.push({
+                      ...structuredClone(curShot),
+                      id: `sh_${Math.random().toString(36).slice(2, 12)}`,
+                      index: draft.shots.length,
+                      title: `${curShot.title} · 接段`,
+                      outputs: [],
+                      status: 'draft',
+                      prompt: '',
+                      createdAt: new Date().toISOString(),
+                      updatedAt: new Date().toISOString()
+                    })
+                  })
+                }}
+              >
+                + 新建工程
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* 全局采样参数 */}
         {paramsOpen && (
@@ -534,30 +704,29 @@ export default function Director(): React.JSX.Element {
                     规格·参考
                   </button>
                 </div>
-                <div className="relative flex-1 overflow-hidden rounded-lg border border-white/5 bg-black">
-                  {curOutput ? (
-                    curOutput.kind === 'video' ? (
-                      <VideoThumb src={curOutput.file} className="h-full w-full object-contain" />
-                    ) : (
-                      <MediaImage src={curOutput.file} alt="" className="h-full w-full object-contain" fallback={<div className="h-full w-full" />} />
-                    )
-                  ) : (
-                    <div className="flex h-full min-h-[260px] w-full items-center justify-center">
-                      <div className="rounded-lg bg-white/[0.06] px-4 py-2 text-xs text-slate-300">
-                        段落都接好了 —— 点「生成本段」或「连续生成」出画面
-                      </div>
-                    </div>
-                  )}
+                <div>
+                  <FilmMonitor
+                    chainName={`${project.name}·${selectedEpisode.title}`}
+                    selectedShotId={curShot?.id}
+                    onSelectShot={(shotId) => {
+                      setSelectedShotId(shotId)
+                      setPromptDirty(false)
+                    }}
+                    refreshKey={filmRefresh}
+                  />
                 </div>
                 <div className="mt-2 flex items-center justify-between text-[11px] text-slate-500">
                   <span>
                     {curOutput
-                      ? `已生成 · ${curOutput.file.split(/[\\/]/).pop()}`
+                      ? `本段成片 · ${curOutput.file.split(/[\\/]/).pop()}`
                       : `第 ${curIndex + 1} 段还没有成片 —— 生成一次就有了`}
                   </span>
-                  {curShot && curShot.outputs.length > 1 && (
-                    <span>共 {curShot.outputs.length} 个版本</span>
-                  )}
+                  <span className="flex items-center gap-2">
+                    {curShot && curShot.outputs.length > 1 && <span>共 {curShot.outputs.length} 个版本</span>}
+                    <button className="text-slate-500 hover:text-slate-300" onClick={() => setFilmRefresh((v) => v + 1)}>
+                      刷新时间轴
+                    </button>
+                  </span>
                 </div>
 
                 {/* 多版本管理：选保留版本（将作为下一段视频参考）/ 删除多余 */}
@@ -745,25 +914,197 @@ export default function Director(): React.JSX.Element {
                   </div>
                 )}
 
-                {/* 视频提示词：导演台内直接编辑 */}
-                <div className="mt-3">
+                {/* ===== 文案台：参考素材 + 预设标签 + 本段提示词 ===== */}
+                <div className="mt-3 rounded-lg border border-white/5 bg-ink-950/30 p-3">
+                  <div className="mb-2 flex items-center justify-between">
+                    <div className="flex items-center gap-2 text-xs font-medium text-white">
+                      <PenLine size={13} className="text-accent-400" />
+                      文案台
+                      <span className="rounded bg-white/[0.06] px-1.5 py-0.5 text-[10px] font-normal text-slate-400">
+                        第 {curIndex + 1} 段
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {/* 别名模式：开启后提示词写角色名自动绑定参考图 */}
+                      <label className="flex cursor-pointer items-center gap-1 text-[10px] text-slate-400">
+                        <span>别名</span>
+                        <button
+                          type="button"
+                          role="switch"
+                          aria-checked={curSeg?.aliasMode !== false}
+                          onClick={() => curShot && void patchSegment(curShot, { aliasMode: curSeg?.aliasMode === false })}
+                          className={`relative h-3.5 w-7 shrink-0 rounded-full transition-colors ${
+                            curSeg?.aliasMode !== false ? 'bg-accent-600' : 'bg-white/15'
+                          }`}
+                        >
+                          <span
+                            className={`absolute top-0.5 h-2.5 w-2.5 rounded-full bg-white transition-transform ${
+                              curSeg?.aliasMode !== false ? 'translate-x-3.5' : 'translate-x-0.5'
+                            }`}
+                          />
+                        </button>
+                      </label>
+                      <button
+                        className="rounded bg-white/5 px-2 py-0.5 text-[10px] text-slate-400 hover:bg-white/10"
+                        onClick={() => {
+                          if (!curShot) return
+                          void patchSegment(curShot, { presets: [...(curSeg?.presets ?? [])] })
+                        }}
+                      >
+                        存预设
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* 片子级提示词：全片统一风格，生成每段时拼在本段词前面（照搬 H3 文案台的 global） */}
+                  <div className="mb-2 rounded border border-white/5 bg-white/[0.02] p-2">
+                    <div className="flex items-center justify-between">
+                      <button
+                        type="button"
+                        className="flex items-center gap-1 text-[10px] text-slate-400 hover:text-slate-200"
+                        onClick={() => setGlobalOpen((v) => !v)}
+                      >
+                        {globalOpen ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+                        片子级提示词
+                        <span className="text-slate-600">（全片统一风格）</span>
+                        {globalPrompt.trim().length > 0 && (
+                          <span className="ml-1 rounded bg-accent-600/20 px-1 text-[9px] text-accent-300">
+                            {globalPrompt.trim().length} 字
+                          </span>
+                        )}
+                      </button>
+                      {globalDirty && (
+                        <button
+                          type="button"
+                          className="text-[10px] text-accent-400 hover:text-accent-300"
+                          onClick={() => void saveGlobalPrompt()}
+                        >
+                          保存
+                        </button>
+                      )}
+                    </div>
+                    {globalOpen && (
+                      <>
+                        <textarea
+                          className="field mt-1.5 h-20 w-full resize-y font-mono text-[11px] leading-relaxed"
+                          value={globalPrompt}
+                          placeholder="全片统一的风格 / 影调 / 世界观。例：冷调赛博都市，青蓝霓虹，湿润街道反光，电影感颗粒…"
+                          onChange={(e) => {
+                            setGlobalPromptDraft(e.target.value)
+                            setGlobalDirty(true)
+                          }}
+                        />
+                        <div className="mt-1 text-[9px] text-slate-600">
+                          每一段生成时都会带上这段文字（拼在本段提示词「前面」）
+                        </div>
+                      </>
+                    )}
+                  </div>
+
+                  {/* 参考素材：本段引用的资产图（就是 H3 媒体架的图片槽位） */}
+                  {curShot && curShot.assetIds.length > 0 && (
+                    <div className="mb-2 flex flex-wrap gap-1.5">
+                      {curShot.assetIds.map((id, i) => {
+                        const a = project.assets.find((x) => x.id === id)
+                        if (!a) return null
+                        const img = a.coverFile ?? a.images?.[a.images.length - 1] ?? null
+                        return (
+                          <div
+                            key={id}
+                            className="flex items-center gap-1.5 rounded border border-white/10 bg-white/[0.03] px-1.5 py-1"
+                            title={img ? `参考图：${a.name}（@图片${i + 1}）` : '该资产还没有图片'}
+                          >
+                            <div className="h-7 w-7 overflow-hidden rounded bg-black">
+                              {img ? (
+                                <MediaImage src={img} alt={a.name} className="h-full w-full object-cover" fallback={<div className="h-full w-full" />} />
+                              ) : (
+                                <div className="flex h-full w-full items-center justify-center text-[9px] text-amber-500">⚠</div>
+                              )}
+                            </div>
+                            <div className="min-w-0">
+                              <div className="max-w-[90px] truncate text-[10px] text-slate-300">{a.name}</div>
+                              <div className="text-[9px] text-accent-400">@图片{i + 1}</div>
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
+
+                  {/* 预设标签：点一下追加到本段提示词末尾 */}
+                  <div className="mb-2 flex flex-wrap gap-1">
+                    {(curSeg?.presets && curSeg.presets.length > 0
+                      ? curSeg.presets
+                      : ['镜头缓慢推进，主体保持在画面中央', '手持感轻微晃动，环境光偏冷', '固定机位，人物从画面左侧入画']
+                    ).map((p) => (
+                      <button
+                        key={p}
+                        className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-0.5 text-[10px] text-slate-400 hover:border-accent-500/40 hover:text-accent-300"
+                        onClick={() => {
+                          if (!curShot) return
+                          const cur = promptDraft[curShot.id] ?? curShot.prompt ?? ''
+                          const next = cur ? `${cur}，${p}` : p
+                          setPromptDraft((d) => ({ ...d, [curShot.id]: next }))
+                          setPromptDirty(true)
+                        }}
+                      >
+                        {p}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* 本段提示词 */}
                   <div className="mb-1.5 flex items-center justify-between">
-                    <label className="text-[11px] text-slate-400">
-                      视频提示词
-                      <span className="ml-1 text-slate-600">（写角色名会自动绑定参考图）</span>
+                    <label className="text-[10px] text-slate-500">
+                      本段提示词
+                      <span className="ml-1 text-slate-600">（回车换行；写角色名会自动绑定参考图）</span>
                     </label>
                     {promptDirty && <span className="text-[10px] text-amber-400">未保存</span>}
                   </div>
                   <textarea
                     className="field h-40 w-full resize-y font-mono text-xs leading-relaxed"
                     value={curPrompt}
-                    placeholder="描述这一段的画面、人物动作、镜头运动与声音。&#10;例：安洁拉走进操纵室，转身看向主屏幕，镜头缓慢推进。"
+                    placeholder="描述这一段的画面、人物动作、镜头运动与声音。&#10;例：单人全身舞蹈动作延续，保持同一人物 @图片1 体型与动作节奏，5 秒连贯动态画面…"
                     onChange={(e) => {
                       if (!curShot) return
                       setPromptDraft((d) => ({ ...d, [curShot.id]: e.target.value }))
                       setPromptDirty(true)
                     }}
                   />
+                  {/* 本段提示词实时校验：提示词里是否有 @图片N 引用，或写了资产名（别名） */}
+                  {(() => {
+                    const n = curShot?.assetIds.length ?? 0
+                    if (n === 0) return null
+                    const hasRef = /@图片\d+|<Picture\s*\d+>/i.test(curPrompt)
+                    const aliasOn = curSeg?.aliasMode !== false
+                    // 别名模式：提示词里出现的资产名会被 H3 展开成 @图片N
+                    const hitNames = aliasOn
+                      ? curShot!.assetIds
+                          .map((id) => project.assets.find((x) => x.id === id)?.name ?? '')
+                          .filter((name) => name && curPrompt.includes(name))
+                      : []
+                    const usesRefs = hasRef || hitNames.length > 0
+                    return (
+                      <div className="mt-1.5 flex items-center gap-1.5 text-[10px]">
+                        {usesRefs ? (
+                          <span className="text-emerald-400">
+                            ✓ 已引用参考图
+                            {hitNames.length > 0 && `（按名字：${hitNames.join('、')}）`}
+                            ，模型会按参考图生成
+                          </span>
+                        ) : aliasOn ? (
+                          <span className="text-slate-500">
+                            提示词里没提到任何参考素材 —— 按导演台规则**一张都不会送**。
+                            写角色名或 @图片1 即可引用。
+                          </span>
+                        ) : (
+                          <span className="text-amber-400">
+                            ⚠ 别名模式已关，且提示词里没有 @图片N —— 参考图不会被发送
+                          </span>
+                        )}
+                      </div>
+                    )
+                  })()}
                   <div className="mt-2 flex items-center gap-2">
                     <button
                       className="btn-primary"
@@ -772,6 +1113,15 @@ export default function Director(): React.JSX.Element {
                     >
                       <Save size={13} />
                       保存提示词
+                    </button>
+                    <button
+                      className="btn-ghost"
+                      disabled={!curShot || rewriting}
+                      title="按 H3 官方六段规范重写本段提示词（只改文字，不动画布/采样参数）"
+                      onClick={() => curShot && void rewritePrompt(curShot)}
+                    >
+                      <Sparkles size={13} />
+                      {rewriting ? '改写中…' : 'AI 改写'}
                     </button>
                     <button
                       className="btn-ghost"
@@ -795,7 +1145,49 @@ export default function Director(): React.JSX.Element {
                   </div>
                 </div>
 
-                {/* 参考图绑定情况 */}
+                {/* 首尾关键帧：ref2va 多参考模式下不参与（对齐 H3 Studio） */}
+                {curShot && curSeg && (
+                  <div className="mt-3 rounded-lg border border-white/5 bg-ink-950/30 p-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2 text-[11px] text-slate-300">
+                        <ImageIcon size={12} className="text-accent-400" />
+                        首尾关键帧
+                      </div>
+                      <span className="text-[10px] text-slate-600">
+                        {curSeg.genMode === 'ref2va' ? '多参考模式下不参与' : '用首帧/末帧锚定画面'}
+                      </span>
+                    </div>
+                    <div className="mt-2 grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="label text-[10px]">保留头帧</label>
+                        <input
+                          className="field text-xs"
+                          type="number"
+                          min={0}
+                          max={curSeg.frames}
+                          value={curSeg.pinHead}
+                          onChange={(e) => curShot && void patchSegment(curShot, { pinHead: Math.max(0, Number(e.target.value) || 0) })}
+                        />
+                      </div>
+                      <div>
+                        <label className="label text-[10px]">保留尾帧</label>
+                        <input
+                          className="field text-xs"
+                          type="number"
+                          min={0}
+                          max={curSeg.frames}
+                          value={curSeg.pinTail}
+                          onChange={(e) => curShot && void patchSegment(curShot, { pinTail: Math.max(0, Number(e.target.value) || 0) })}
+                        />
+                      </div>
+                    </div>
+                    <div className="mt-1.5 text-[10px] text-slate-600">
+                      保留头尾帧用于段间衔接，数值为帧数（0 = 不保留）
+                    </div>
+                  </div>
+                )}
+
+                {/* 引用资产 */}
                 {curShot && curShot.assetIds.length > 0 && (
                   <div className="mt-3 flex flex-wrap items-center gap-1.5 border-t border-white/5 pt-2.5">
                     <span className="text-[11px] text-slate-600">引用资产：</span>
@@ -819,17 +1211,17 @@ export default function Director(): React.JSX.Element {
               </section>
             </div>
 
-            {/* ===== 下区：全片总览时间轴 ===== */}
+            {/* ===== 下区：分段总览（时间轴在上方成片监视器里） ===== */}
             <section className="panel mt-4 p-3">
               <div className="mb-2 flex flex-wrap items-center gap-2">
                 <div className="flex items-center gap-2 text-xs text-slate-400">
                   <Link2 size={14} className="text-accent-400" />
-                  全片总览 · {shots.length} 段 · {totalSec.toFixed(1)}s
+                  分段总览 · {shots.length} 段 · {totalSec.toFixed(1)}s
                 </div>
                 <div className="ml-auto flex flex-wrap gap-1.5">
                   <button className="btn-ghost" onClick={() => void generateAll()} disabled={!canGenerate || batchRunning || pendingCount === 0}>
                     <Play size={13} />
-                    {batchRunning ? '生成中…' : `连续生成（${pendingCount}）`}
+                    {batchRunning ? '全部渲染中…' : `全部渲染（${pendingCount}）`}
                   </button>
                   <button className="btn-ghost" onClick={() => setParamsOpen((v) => !v)}>
                     <SlidersHorizontal size={13} />
@@ -1157,9 +1549,8 @@ function SegmentParamsModal({
             <div>
               <label className="label">续接模式</label>
               <select className="field" value={s.contMode} onChange={(e) => set('contMode', e.target.value as SegmentSettings['contMode'])}>
-                <option value="none">不续接</option>
-                <option value="latent">latent 续接（推荐）</option>
-                <option value="video">video 续接</option>
+                <option value="none">不续接（独立成段）</option>
+                <option value="latent">潜空间续接（上一段尾帧 → 本段开头）</option>
               </select>
             </div>
             <div className="flex items-end">
@@ -1172,6 +1563,43 @@ function SegmentParamsModal({
               第 1 段建议不续接；后续段 latent 续接上一段，形成连续长视频。
             </div>
           </div>
+
+          {/* 承接帧数：从上一段尾部取几帧钉在本段开头（H3 导演台的「承接帧数」） */}
+          {s.contMode === 'latent' && (
+            <div className="mt-2.5 rounded border border-white/5 bg-white/[0.02] p-2">
+              <div className="flex items-center gap-2">
+                <label className="label mb-0 whitespace-nowrap">承接帧数</label>
+                <input
+                  className="field w-20 text-xs"
+                  type="number"
+                  min={0}
+                  step={17}
+                  value={s.contFrames ?? 22}
+                  onChange={(e) => set('contFrames', Math.max(0, Number(e.target.value) || 0))}
+                />
+                <div className="flex flex-wrap gap-1">
+                  {[5, 22, 39, 56, 73, 90].map((n) => (
+                    <button
+                      key={n}
+                      type="button"
+                      className={`rounded border px-1.5 py-0.5 text-[10px] ${
+                        (s.contFrames ?? 22) === n
+                          ? 'border-accent-500/50 bg-accent-600/20 text-accent-300'
+                          : 'border-white/10 bg-white/[0.03] text-slate-400 hover:text-slate-200'
+                      }`}
+                      onClick={() => set('contFrames', n)}
+                    >
+                      {n}帧
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="mt-1 text-[10px] text-slate-600">
+                从「上一段尾部」取几帧钉在本段开头（只接受 17k+5：5/22/39/56/73…）。
+                成片里这几帧会被剪掉，不会重复。0 = 独立成段。
+              </div>
+            </div>
+          )}
         </section>
       </div>
     </Modal>

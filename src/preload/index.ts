@@ -1,18 +1,14 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { CH, type PushEvent } from '../shared/ipc'
 import type {
-  CatalogItem,
   ComfyRuntimeConfig,
   ComfyRuntimeState,
-  DownloadRequest,
   DownloadTask,
-  EnvironmentReport,
   HardwareReport,
   JobParams,
   Project,
   ComfySettings,
   UpdateInfo,
-  NetworkSettings
 } from '../shared/types'
 
 const api = {
@@ -36,35 +32,22 @@ const api = {
 
   comfyStatus: (settings?: ComfySettings) => ipcRenderer.invoke(CH.comfyStatus, settings),
   comfyTest: (settings?: ComfySettings) => ipcRenderer.invoke(CH.comfyTest, settings),
-  envScan: (): Promise<EnvironmentReport> => ipcRenderer.invoke(CH.envScan),
-  envCatalog: (): Promise<CatalogItem[]> => ipcRenderer.invoke(CH.envCatalog),
-  envExtract: (payload: { archive: string; dest: string }): Promise<{ dest: string }> =>
-    ipcRenderer.invoke(CH.envExtract, payload),
-  networkGet: (): Promise<NetworkSettings> => ipcRenderer.invoke(CH.networkGet),
-  networkSave: (patch: Partial<NetworkSettings>): Promise<NetworkSettings> =>
-    ipcRenderer.invoke(CH.networkSave, patch),
 
   comfyRuntimeStatus: (): Promise<ComfyRuntimeState> => ipcRenderer.invoke(CH.comfyRuntimeStatus),
   comfyRuntimeStart: (): Promise<ComfyRuntimeState> => ipcRenderer.invoke(CH.comfyRuntimeStart),
   comfyRuntimeStop: (): Promise<ComfyRuntimeState> => ipcRenderer.invoke(CH.comfyRuntimeStop),
   comfyRuntimeSetConfig: (cfg: ComfyRuntimeConfig): Promise<ComfyRuntimeConfig> =>
     ipcRenderer.invoke(CH.comfyRuntimeSetConfig, cfg),
-  comfyInstallStart: (): Promise<ComfyRuntimeState | import('../shared/types').ComfyInstallState> =>
-    ipcRenderer.invoke(CH.comfyInstallStart),
-  modelPackList: (): Promise<unknown> => ipcRenderer.invoke(CH.modelPackList),
-  modelPackExport: (paths: { absPath: string; relativePath: string }[]): Promise<unknown> =>
-    ipcRenderer.invoke(CH.modelPackExport, paths),
-  modelPackImport: (): Promise<unknown> => ipcRenderer.invoke(CH.modelPackImport),
-  modelPackPickSave: (): Promise<string | null> => ipcRenderer.invoke(CH.modelPackPickSave),
-  modelPackPickOpen: (): Promise<string | null> => ipcRenderer.invoke(CH.modelPackPickOpen),
-  nodePackStatus: (comfyRoot: string): Promise<unknown> => ipcRenderer.invoke(CH.nodePackStatus, comfyRoot),
-  nodePackInstall: (comfyRoot: string): Promise<unknown> => ipcRenderer.invoke(CH.nodePackInstall, comfyRoot),
 
   projectList: () => ipcRenderer.invoke(CH.projectList),
   projectOpen: (id: string): Promise<Project> => ipcRenderer.invoke(CH.projectOpen, id),
   projectCreate: (name: string): Promise<Project> => ipcRenderer.invoke(CH.projectCreate, name),
   projectSave: (project: Project): Promise<Project> => ipcRenderer.invoke(CH.projectSave, project),
   projectGetCurrent: (): Promise<Project | null> => ipcRenderer.invoke(CH.projectGetCurrent),
+  projectExport: (id: string): Promise<{ cancelled?: boolean; ok?: boolean; outPath?: string; mediaCount?: number; totalBytes?: number }> =>
+    ipcRenderer.invoke(CH.projectExport, { id }),
+  projectImport: (): Promise<{ cancelled?: boolean; ok?: boolean; project?: unknown; mediaCount?: number }> =>
+    ipcRenderer.invoke(CH.projectImport),
   projectImportTemplate: (payload: { name: string; kind?: 'image' | 'video'; apiJson: unknown }) =>
     ipcRenderer.invoke(CH.projectImportTemplate, payload),
 
@@ -98,9 +81,19 @@ const api = {
   updateDownload: (): Promise<UpdateInfo> => ipcRenderer.invoke(CH.updateDownload),
   updateInstall: () => ipcRenderer.invoke(CH.updateInstall),
 
-  downloadStart: (req: DownloadRequest): Promise<DownloadTask> => ipcRenderer.invoke(CH.downloadStart, req),
+  cglideBase: (): Promise<string> => ipcRenderer.invoke(CH.cglideBase),
+  cglideFilmSummary: (name: string): Promise<Record<string, unknown>> =>
+    ipcRenderer.invoke(CH.cglideFilmSummary, { name }),
+  cglideJoinWaveform: (video: string, bins?: number): Promise<{ bins?: number[]; duration?: number; error?: string }> =>
+    ipcRenderer.invoke(CH.cglideJoinWaveform, { video, bins }),
+  h3ChainCont: (name: string, shot: string): Promise<{ cont_path?: string; cid?: string; take?: number; error?: string }> =>
+    ipcRenderer.invoke(CH.h3ChainCont, { name, shot }),
+  workflowSyncList: (): Promise<{ comfyRoot: string; items: unknown[] }> =>
+    ipcRenderer.invoke(CH.workflowSyncList),
+  workflowSyncApply: (files: string[]): Promise<{ replaced: number; added: number; failed: unknown[] }> =>
+    ipcRenderer.invoke(CH.workflowSyncApply, { files }),
+
   downloadList: (): Promise<DownloadTask[]> => ipcRenderer.invoke(CH.downloadList),
-  downloadCancel: (id: string) => ipcRenderer.invoke(CH.downloadCancel, id),
 
   openPath: (p: string) => ipcRenderer.invoke(CH.shellOpenPath, p),
 

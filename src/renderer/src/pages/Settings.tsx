@@ -1,10 +1,9 @@
 import { useEffect, useRef, useState, type ChangeEvent } from 'react'
-import { Copy, Download, FileUp, Globe, Plug, RefreshCw, RotateCw, Save, ShieldCheck, Sparkles, Workflow } from 'lucide-react'
-import type { ComfySettings, NetworkSettings } from '@shared/types'
+import { Copy, Download, FileUp, Plug, RefreshCw, RotateCw, Save, ShieldCheck, Sparkles, Workflow } from 'lucide-react'
+import type { ComfySettings } from '@shared/types'
 import { useApp } from '../store/app'
 import { PageHeader } from '../components/ui'
 import { AiSettings } from '../components/AiSettings'
-import Environment from './Environment'
 
 const DEFAULT_COMFY: ComfySettings = { host: '127.0.0.1', port: 8188, protocol: 'http' }
 
@@ -27,6 +26,9 @@ export default function Settings(): React.JSX.Element {
   const [checking, setChecking] = useState(false)
   const [downloading, setDownloading] = useState(false)
   const [importError, setImportError] = useState<string | null>(null)
+  /** 从 ComfyUI 同步：进行中 / 结果提示 */
+  const [syncing, setSyncing] = useState(false)
+  const [syncResult, setSyncResult] = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const [mcp, setMcp] = useState<{
     command: string
@@ -37,7 +39,6 @@ export default function Settings(): React.JSX.Element {
     note: string
   } | null>(null)
   const [copied, setCopied] = useState(false)
-  const [tab, setTab] = useState<'general' | 'env' | 'network'>('general')
 
   useEffect(() => {
     void window.api.appInfo().then((info) => setMcp(info.mcp))
@@ -92,6 +93,48 @@ export default function Settings(): React.JSX.Element {
     })
   }
 
+  /**
+   * 从 ComfyUI 网页端同步工作流。
+   * 按工作流名字匹配项目里已有的模板，整份替换成网页端的最新版本
+   * （你在网页端关掉的 LoRA、改过的采样器参数都会同步过来）。
+   */
+  const onSyncFromComfy = async (): Promise<void> => {
+    if (!project) return
+    setSyncing(true)
+    setSyncResult(null)
+    setImportError(null)
+    try {
+      const { items } = (await window.api.workflowSyncList()) as {
+        comfyRoot: string
+        items: { file: string; name: string; inProject: boolean; mtime: string }[]
+      }
+      if (items.length === 0) {
+        setImportError('ComfyUI 的 workflows 目录里没有找到工作流文件')
+        return
+      }
+      // 同步全部（已存在的整份替换，缺的新增）
+      const res = (await window.api.workflowSyncApply(items.map((i) => i.file))) as {
+        replaced: number
+        added: number
+        failed: { file: string; error: string }[]
+      }
+      const parts: string[] = []
+      if (res.replaced > 0) parts.push(`替换 ${res.replaced} 个`)
+      if (res.added > 0) parts.push(`新增 ${res.added} 个`)
+      if (res.failed.length > 0) parts.push(`失败 ${res.failed.length} 个`)
+      setSyncResult(parts.length > 0 ? `同步完成：${parts.join('，')}` : '没有需要同步的工作流')
+      if (res.failed.length > 0) {
+        setImportError(res.failed.map((f) => `${f.file}: ${f.error}`).join('\n'))
+      }
+      // 重新拉项目，让界面上的模板列表刷新
+      await useApp.getState().openProject(project.id)
+    } catch (err) {
+      setImportError(`同步失败：${String((err as Error).message ?? err)}`)
+    } finally {
+      setSyncing(false)
+    }
+  }
+
   const onFile = async (e: ChangeEvent<HTMLInputElement>): Promise<void> => {
     const file = e.target.files?.[0]
     e.target.value = ''
@@ -115,28 +158,6 @@ export default function Settings(): React.JSX.Element {
   const templates = project?.templates ?? []
 
   /** 设置内容分类 */
-  const TABS = [
-    { id: 'general' as const, label: '常规设置' },
-    { id: 'env' as const, label: '环境检测' },
-    { id: 'network' as const, label: '下载源' }
-  ]
-
-  const tabsBar = (
-    <div className="mx-8 mb-4 flex w-fit items-center gap-1 rounded-lg border border-white/5 bg-ink-900 p-1">
-      {TABS.map((t) => (
-        <button
-          key={t.id}
-          onClick={() => setTab(t.id)}
-          className={`rounded-md px-4 py-1.5 text-sm transition-colors ${
-            tab === t.id ? 'bg-accent-600/20 text-accent-400' : 'text-slate-400 hover:text-slate-200'
-          }`}
-        >
-          {t.label}
-        </button>
-      ))}
-    </div>
-  )
-
   const ComfyConn = (
     <div className="panel p-5">
       <div className="mb-3 flex items-center gap-2 text-sm font-medium text-white">
@@ -210,21 +231,40 @@ export default function Settings(): React.JSX.Element {
           <Workflow size={15} className="text-accent-400" />
           工作流模板
         </div>
-        <button
-          className="btn-primary"
-          disabled={!project}
-          onClick={() => fileRef.current?.click()}
-          title={project ? undefined : '请先打开项目'}
-        >
-          <FileUp size={15} />
-          导入工作流
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            className="btn-ghost"
+            disabled={!project || syncing}
+            onClick={() => void onSyncFromComfy()}
+            title="从 ComfyUI 网页端重新拉取工作流配置（你在网页端改的 LoRA/参数会同步过来）"
+          >
+            <RefreshCw size={15} className={syncing ? 'animate-spin' : ''} />
+            {syncing ? '同步中…' : '从 ComfyUI 同步'}
+          </button>
+          <button
+            className="btn-primary"
+            disabled={!project}
+            onClick={() => fileRef.current?.click()}
+            title={project ? undefined : '请先打开项目'}
+          >
+            <FileUp size={15} />
+            导入工作流
+          </button>
+        </div>
         <input ref={fileRef} type="file" accept=".json" className="hidden" onChange={(e) => void onFile(e)} />
       </div>
 
       <div className="mb-2 text-xs text-slate-500">
         支持 ComfyUI 界面格式（含 nodes/links）与「导出（API）」格式；界面格式会自动转换为 API 格式。需 ComfyUI 在线。
+        <br />
+        <span className="text-slate-600">
+          在 ComfyUI 网页端改过工作流（关 LoRA、调参数…）后，点「从 ComfyUI 同步」按名字整份替换，软件才会用新配置。
+        </span>
       </div>
+
+      {syncResult && (
+        <div className="mb-3 rounded-lg bg-emerald-500/10 px-3 py-2 text-sm text-emerald-300">{syncResult}</div>
+      )}
 
       {importError && (
         <div className="mb-3 rounded-lg bg-rose-500/10 px-3 py-2 text-sm text-rose-300">{importError}</div>
@@ -345,124 +385,6 @@ export default function Settings(): React.JSX.Element {
   )
 
   // 网络与下载源设置（对齐绘世启动器的网络设置面板）
-  const [net, setNet] = useState<NetworkSettings | null>(null)
-  const [netProxy, setNetProxy] = useState('')
-  const [netSaved, setNetSaved] = useState(false)
-
-  useEffect(() => {
-    void window.api.networkGet().then((s) => {
-      setNet(s)
-      setNetProxy(s.proxyAddress)
-    })
-  }, [])
-
-  const NetworkPanel = (
-    <div className="panel p-5">
-      <div className="mb-3 flex items-center gap-2 text-sm font-medium text-white">
-        <Globe size={15} className="text-accent-400" />
-        网络与下载源
-      </div>
-      <div className="text-[11px] leading-relaxed text-slate-500">
-        下载失败或极慢时，在这里调整下载源与代理。设置保存后立即生效，下载会按新的镜像规则重新选源。
-      </div>
-
-      {/* 代理设置 */}
-      <div className="mt-4 rounded-lg border border-white/5 bg-ink-950/40 p-3">
-        <div className="mb-2 flex items-center gap-2 text-xs font-medium text-slate-300">
-          <ShieldCheck size={13} className="text-accent-400" />
-          代理设置
-        </div>
-        <div className="flex items-center gap-2">
-          <input
-            className="field"
-            value={netProxy}
-            onChange={(e) => setNetProxy(e.target.value)}
-            placeholder="http://127.0.0.1:7890（留空则直连）"
-          />
-          <button
-            className="btn-primary shrink-0"
-            disabled={!net}
-            onClick={async () => {
-              const s = await window.api.networkSave({ proxyAddress: netProxy })
-              setNet(s)
-              setNetSaved(true)
-              setTimeout(() => setNetSaved(false), 2000)
-            }}
-          >
-            <Save size={13} />
-            保存
-          </button>
-        </div>
-        <div className="mt-1 text-[11px] text-slate-500">
-          填入本地代理（如 Clash 的 7890 端口）后，所有下载请求会走该代理。留空则直连。
-        </div>
-      </div>
-
-      {/* 镜像开关 */}
-      <div className="mt-4 space-y-2">
-        <div className="mb-1 text-xs font-medium text-slate-300">镜像与加速</div>
-        {[
-          { key: 'githubAcceleration' as const, label: 'GitHub 加速', desc: 'GitHub 下载自动走 gh-proxy 加速镜像（ComfyUI 便携版等）' },
-          { key: 'mirrorHuggingface' as const, label: 'HuggingFace 国内镜像', desc: 'huggingface.co 自动改用 hf-mirror.com，模型下载更快' },
-          { key: 'mirrorPypi' as const, label: 'PyPI 国内镜像', desc: '环境安装依赖时使用国内 PyPI 源' },
-          { key: 'mirrorGit' as const, label: 'Git 国内镜像', desc: 'Git 克隆走国内镜像，避免 GitHub 拉取失败' },
-          { key: 'mirrorExtensionList' as const, label: '替换扩展列表链接', desc: '扩展列表使用国内加速链接' }
-        ].map((row) => (
-          <label
-            key={row.key}
-            className="flex cursor-pointer items-center justify-between gap-3 rounded-lg border border-white/5 bg-ink-950/30 px-3 py-2.5"
-          >
-            <div className="min-w-0">
-              <div className="text-sm text-slate-200">{row.label}</div>
-              <div className="mt-0.5 text-[11px] text-slate-500">{row.desc}</div>
-            </div>
-            <button
-              type="button"
-              role="switch"
-              aria-checked={net ? net[row.key] : false}
-              disabled={!net}
-              onClick={async () => {
-                if (!net) return
-                const next = !net[row.key]
-                const s = await window.api.networkSave({ [row.key]: next })
-                setNet(s)
-              }}
-              className={`relative h-5 w-10 shrink-0 rounded-full transition-colors ${
-                net && net[row.key] ? 'bg-accent-600' : 'bg-white/15'
-              } disabled:opacity-40`}
-            >
-              <span
-                className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-transform ${
-                  net && net[row.key] ? 'translate-x-5' : 'translate-x-0.5'
-                }`}
-              />
-            </button>
-          </label>
-        ))}
-      </div>
-
-      <div className="mt-4 flex items-center justify-between">
-        <span className="text-[11px] text-slate-500">
-          {netSaved ? '已保存，下载将使用新设置' : '设置自动保存于应用数据目录'}
-        </span>
-        <button
-          className="btn-primary"
-          disabled={!net}
-          onClick={async () => {
-            if (!net) return
-            const s = await window.api.networkSave(net)
-            setNet(s)
-            setNetSaved(true)
-            setTimeout(() => setNetSaved(false), 2000)
-          }}
-        >
-          <Save size={14} />
-          保存全部
-        </button>
-      </div>
-    </div>
-  )
-
   const AboutPanel = (
     <div className="panel p-5">
       <div className="mb-3 flex items-center gap-2 text-sm font-medium text-white">
@@ -522,37 +444,14 @@ export default function Settings(): React.JSX.Element {
   )
 
 
-  if (tab === 'env') {
-    return (
-      <div>
-        <PageHeader title="设置 · 环境检测" desc="ComfyUI 安装、模型下载与节点包" />
-        {tabsBar}
-        <Environment embedded />
-      </div>
-    )
-  }
-
-  if (tab === 'network') {
-    return (
-      <div>
-        <PageHeader title="设置 · 下载源" desc="代理、镜像与加速，解决下载失败或极慢" />
-        {tabsBar}
-        <div className="px-8 pb-8">
-          {net ? NetworkPanel : <div className="panel p-5 text-sm text-slate-400">加载中…</div>}
-        </div>
-      </div>
-    )
-  }
-
   return (
     <div>
-      <PageHeader title="设置" desc="连接、工作流、AI 接入与更新" />
-      {tabsBar}
+      <PageHeader title="设置" desc="ComfyUI 连接、工作流、AI 接入与更新" />
 
       <div className="px-8 pb-8 space-y-4">
-        {/* 一、连接与环境 */}
+        {/* 一、ComfyUI 连接 */}
         <section>
-          <div className="mb-2 text-xs font-medium text-slate-500">一 · 连接与环境</div>
+          <div className="mb-2 text-xs font-medium text-slate-500">一 · ComfyUI 连接</div>
           {ComfyConn}
         </section>
 

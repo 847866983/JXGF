@@ -16,8 +16,25 @@ export function ratioOf(w: number, h: number): string {
   return `${w}:${h}`
 }
 
+/**
+ * 帧数吸附到 17k+5（H3 只接受这个网格）。
+ * 与主进程 src/main/core/h3-prompt.ts 的 alignFrames 同一口径；
+ * renderer 不能 import main，故此处保留一份同实现的纯函数。
+ */
+export function alignFrames(n: number): number {
+  let v = Math.max(5, Math.round(n))
+  while (v % 17 !== 5) v += 1
+  return v
+}
+
+/**
+ * 秒 → 帧。H3 只接受 **17k+5** 的帧数（5, 22, 39, … 124, 141, …），
+ * 落不到网格上的值会被节点拒绝或静默按别的长度跑。
+ * 这里与导演台的 alignFrames() 同一口径：向上吸附到最近的合法格。
+ */
 export function framesFor(durationSec: number, fps: number): number {
-  return Math.max(1, Math.round(durationSec * fps) + 1)
+  const raw = Math.max(1, Math.round(durationSec * fps) + 1)
+  return alignFrames(raw)
 }
 
 export const defaultUpscale: UpscaleSettings = {
@@ -68,8 +85,11 @@ export function defaultSegment(
     bridgeAdapter: '',
     bridgeAlpha: 0,
     bridgeMode: 'full',
+    aliasMode: true,
     pace: 2.5,
     contMode: index === 0 ? 'none' : 'latent',
+    // 承接帧数：取上一段尾部 22 帧钉在本段开头（合法值 5/22/39/56/73…）
+    contFrames: 22,
     pushWhole: false,
     genMode: 'ref2va',
     upscale: { ...defaultUpscale },
@@ -82,5 +102,11 @@ export function getSegment(
   preset: { width: number; height: number; frames: number } | null,
   index: number
 ): SegmentSettings {
-  return shot.segment ?? defaultSegment(shot, preset, index)
+  const s = shot.segment ?? defaultSegment(shot, preset, index)
+  // 老工程可能存着非 17k+5 的帧数（旧版 framesFor 没吸附），读出来统一校正，
+  // 否则 H3 会拒绝或按别的长度跑 —— 与导演台 parseInitial 的 alignFrames 同口径。
+  const aligned = alignFrames(s.frames)
+  if (aligned === s.frames) return s
+  const fps = s.fps || 24
+  return { ...s, frames: aligned, durationSec: Math.round(((aligned - 1) / fps) * 100) / 100 }
 }

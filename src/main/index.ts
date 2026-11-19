@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, shell, protocol, dialog } from 'electron'
+import { app, BrowserWindow, ipcMain, shell, protocol , dialog } from 'electron'
 import path from 'node:path'
 import fs from 'node:fs'
 import fsp from 'node:fs/promises'
@@ -7,11 +7,9 @@ import { CH, type PushEvent } from '../shared/ipc'
 import type {
   ComfyRuntimeConfig,
   DownloadRequest,
-  EnvironmentReport,
   FfmpegInfo,
   HardwareReport,
   JobParams,
-  ModelInventory,
   Project,
   UpdateInfo
 } from '../shared/types'
@@ -20,16 +18,12 @@ import { buildHardwareReport } from './core/presets'
 import { makeClient } from './core/comfy'
 import { ProjectStore, uid, now } from './core/store'
 import { JobManager } from './core/jobs'
-import { DownloadManager } from './core/download'
-import { resolveCatalog } from './core/catalog'
-import { applyMirrors, getNetworkSettings, loadNetworkSettings, saveNetworkSettings, type NetworkSettings } from './core/network'
-import { extractArchive } from './core/extract'
 import { ComfyRuntime } from './core/comfy-runtime'
-import { ComfyInstaller } from './core/comfy-installer'
 import { isUiWorkflow, convertUiToApi, detectWorkflowKind } from './core/workflow-convert'
-import { adaptTemplateForGpu, degradeMissingLoras } from './core/template-adapt'
+import { adaptTemplateForGpu, degradeMissingLoras, resetVramFieldsToAuthor } from './core/template-adapt'
 import { buildBuiltinTemplates } from './core/builtin-workflows'
-import { listReferencedModels, exportModelPack, importModelPack, find7z } from './core/model-pack'
+import { listComfyWorkflows, readComfyWorkflow, normalizeKey } from './core/workflow-sync'
+import { exportProjectToFile, importProjectFromFile } from './core/project-archive'
 import { listMemory, readMemory, writeMemory, appendMemory } from './core/memory'
 import { AiAssistant } from './core/ai-assistant'
 import { defaultAiConfig, normalizeAiConfig, type AiConfig } from '../shared/ai'
@@ -40,9 +34,7 @@ let hardware: HardwareReport | null = null
 let hardwarePending: Promise<HardwareReport> | null = null
 let store: ProjectStore
 let jobs: JobManager
-const downloads = new DownloadManager()
 let comfyRuntime: ComfyRuntime
-let comfyInstaller: ComfyInstaller
 const updater = new Updater()
 let aiAssistant: AiAssistant
 let skillsRoot = ''
@@ -98,28 +90,6 @@ function getHardware(): Promise<HardwareReport> {
     return hardware
   })
   return hardwarePending
-}
-
-function detectFfmpeg(): FfmpegInfo {
-  // 1) 优先 PATH 里的 ffmpeg；2) 其次应用随包目录（后续打包时提供 runtime/ffmpeg）
-  const candidates = [
-    'ffmpeg',
-    path.join(process.resourcesPath, 'runtime', 'ffmpeg', 'ffmpeg.exe'),
-    path.join(process.cwd(), 'runtime', 'ffmpeg', 'ffmpeg.exe')
-  ]
-  for (const bin of candidates) {
-    try {
-      const r = spawnSync(bin, ['-version'], { encoding: 'utf8', timeout: 8000, windowsHide: true })
-      const first = String(r.stdout ?? '').split(/\r?\n/)[0] ?? ''
-      const m = first.match(/ffmpeg version\s+(\S+)/i)
-      if (r.status === 0 || m) {
-        return { found: true, path: bin, version: m?.[1] ?? first.slice(0, 40) }
-      }
-    } catch {
-      // continue
-    }
-  }
-  return { found: false, path: null }
 }
 
 function registerIpc(): void {
@@ -186,149 +156,13 @@ function registerIpc(): void {
     return { ok: stats.online, version: stats.version, error: stats.online ? null : '无法连接 ComfyUI，请确认已启动且地址正确' }
   })
 
-  ipcMain.handle(CH.envScan, async (): Promise<EnvironmentReport> => {
-    const gpu = await getHardware()
-    const project = store.getCurrent()
-    const s = project?.settings.comfy ?? { host: '127.0.0.1', port: 8188, protocol: 'http' }
-    const client = makeClient(s)
-    const comfy = await client.systemStats()
-    let models: ModelInventory = { checkpoints: [], loras: [], vaes: [] }
-    if (comfy.online) {
-      try {
-        models = await client.modelInventory()
-      } catch {
-        // 自定义节点环境可能没有标准加载器，保持空清单
-      }
-    }
-    return { gpu, comfy, models, ffmpeg: detectFfmpeg(), scannedAt: now() }
-  })
 
-  // 目录结果短缓存：连续刷新时避免重复扫描文件系统（下载结束会主动刷新，2 秒内复用即可）
-  let catalogCache: { at: number; items: ReturnType<typeof resolveCatalog> } | null = null
-
-  // 按网络设置给每个下载源做镜像改写（GitHub 加速 / HuggingFace 镜像）
-  function withMirrors(items: ReturnType<typeof resolveCatalog>): ReturnType<typeof resolveCatalog> {
-    const net = getNetworkSettings()
-    for (const it of items) {
-      if (it.sources) it.sources = applyMirrors(it.sources, net)
-      if (it.files) {
-        for (const f of it.files) {
-          if (f.sources) f.sources = applyMirrors(f.sources, net)
-        }
-      }
-    }
-    return items
-  }
-
-  ipcMain.handle(CH.envCatalog, async () => {
-    if (catalogCache && Date.now() - catalogCache.at < 2000) return catalogCache.items
-    const report = await getHardware()
-    // 若已配置 ComfyUI 根目录，模型直接下到它的 models/，这样 ComfyUI 能直接加载。
-    // 根目录可能是「含 ComfyUI 子目录的上级」或「ComfyUI 目录本身」，按实际结构判断。
-    const st = await comfyRuntime.status()
-    let modelsRoot: string | null = null
-    if (st.root) {
-      modelsRoot = fs.existsSync(path.join(st.root, 'ComfyUI', 'models'))
-        ? path.join(st.root, 'ComfyUI', 'models')
-        : path.join(st.root, 'models')
-    }
-    const items = withMirrors(resolveCatalog(path.join(app.getPath('userData'), 'runtime'), report.gpu, modelsRoot))
-    catalogCache = { at: Date.now(), items }
-    return items
-  })
-
-  ipcMain.handle(CH.envExtract, async (_e, payload: { archive: string; dest: string }) => {
-    const installRoot = path.join(app.getPath('userData'), 'runtime')
-    const archive = path.resolve(payload.archive)
-    const dest = path.resolve(payload.dest)
-    if (!dest.startsWith(installRoot + path.sep)) {
-      throw new Error('解压目标必须在应用运行时目录内')
-    }
-    return extractArchive(archive, dest)
-  })
-
-  // 网络与镜像设置：读取 / 保存（保存后清目录缓存，让镜像改写立即生效）
-  ipcMain.handle(CH.networkGet, () => getNetworkSettings())
-  ipcMain.handle(CH.networkSave, (_e, patch: Partial<NetworkSettings>) => {
-    const saved = saveNetworkSettings(patch)
-    catalogCache = null
-    return saved
-  })
-
+  // ---- ComfyUI 连接与运行时（只保留连接相关，不提供下载/安装）----
   ipcMain.handle(CH.comfyRuntimeStatus, () => comfyRuntime.status())
   ipcMain.handle(CH.comfyRuntimeStart, () => comfyRuntime.start())
   ipcMain.handle(CH.comfyRuntimeStop, () => comfyRuntime.stop())
   ipcMain.handle(CH.comfyRuntimeSetConfig, (_e, cfg: ComfyRuntimeConfig) => comfyRuntime.setConfig(cfg))
-  ipcMain.handle(CH.comfyInstallStart, async () => {
-    const hw = await getHardware()
-    return comfyInstaller.install(hw.gpu)
-  })
-  // 节点包：状态 / 安装（BanZhang 自定义节点，装完 ComfyUI 后解压到 custom_nodes）
-  ipcMain.handle(CH.nodePackStatus, async (_e, comfyRoot: string) => {
-    const { nodePackStatus } = await import('./core/node-pack')
-    return nodePackStatus(comfyRoot)
-  })
-  ipcMain.handle(CH.nodePackInstall, async (_e, comfyRoot: string) => {
-    const { installNodePack } = await import('./core/node-pack')
-    return installNodePack(comfyRoot)
-  })
 
-  // ---- 模型搬家（社区/私有模型从已有机器拷贝）----
-  /** 取当前 ComfyUI 的 models 根目录 */
-  async function currentModelsRoot(): Promise<string> {
-    const st = await comfyRuntime.status()
-    if (!st.root) throw new Error('请先配置 ComfyUI 根目录')
-    return fs.existsSync(path.join(st.root, 'ComfyUI', 'models'))
-      ? path.join(st.root, 'ComfyUI', 'models')
-      : path.join(st.root, 'models')
-  }
-  ipcMain.handle(CH.modelPackList, async () => {
-    const project = store.getCurrent()
-    if (!project) throw new Error('请先打开一个项目')
-    return listReferencedModels(project, await currentModelsRoot())
-  })
-  ipcMain.handle(CH.modelPackExport, async (e, items: { absPath: string; relativePath: string }[]) => {
-    const win = BrowserWindow.fromWebContents(e.sender)
-    const save = await dialog.showSaveDialog(win!, {
-      title: '导出模型包',
-      defaultPath: path.join(app.getPath('downloads'), '镜序工坊-模型包.7z'),
-      filters: [{ name: '7z 压缩包', extensions: ['7z'] }]
-    })
-    if (save.canceled || !save.filePath) return { canceled: true }
-    const modelsRoot = await currentModelsRoot()
-    const seven = find7z(process.resourcesPath, app.getAppPath())
-    if (!seven) throw new Error('未找到 7za.exe')
-    await exportModelPack(items, save.filePath, modelsRoot, seven, (msg) => {
-      push({ type: 'model-pack:progress', message: msg } as never)
-    })
-    return { canceled: false, file: save.filePath }
-  })
-  ipcMain.handle(CH.modelPackImport, async (e) => {
-    const win = BrowserWindow.fromWebContents(e.sender)
-    const open = await dialog.showOpenDialog(win!, {
-      title: '导入模型包',
-      properties: ['openFile'],
-      filters: [{ name: '7z 压缩包', extensions: ['7z'] }]
-    })
-    if (open.canceled || open.filePaths.length === 0) return { canceled: true }
-    const modelsRoot = await currentModelsRoot()
-    const seven = find7z(process.resourcesPath, app.getAppPath())
-    if (!seven) throw new Error('未找到 7za.exe')
-    await importModelPack(open.filePaths[0], modelsRoot, seven, (msg) => {
-      push({ type: 'model-pack:progress', message: msg } as never)
-    })
-    return { canceled: false, file: open.filePaths[0] }
-  })
-  ipcMain.handle(CH.modelPackPickSave, async (e) => {
-    const win = BrowserWindow.fromWebContents(e.sender)
-    const r = await dialog.showSaveDialog(win!, { title: '选择保存位置', defaultPath: '镜序工坊-模型清单.txt', filters: [{ name: '文本', extensions: ['txt'] }] })
-    return r.canceled ? null : r.filePath
-  })
-  ipcMain.handle(CH.modelPackPickOpen, async (e) => {
-    const win = BrowserWindow.fromWebContents(e.sender)
-    const r = await dialog.showOpenDialog(win!, { title: '选择模型包', properties: ['openFile'], filters: [{ name: '7z', extensions: ['7z'] }] })
-    return r.canceled ? null : r.filePaths[0]
-  })
 
   ipcMain.handle(CH.projectList, () => store.list())
   /** 把内置图片/视频工作流补进项目模板（按 name 去重，缺则补）。跟随软件走，无需手动导入。 */
@@ -353,11 +187,24 @@ function registerIpc(): void {
   })
   ipcMain.handle(CH.projectOpen, async (_e, id: string) => {
     const project = await store.open(id)
-    // 打开旧项目时按本机显存适配模板（修 12GB 放大模型在 6GB 卡上的 OOM）
+    // 打开旧项目时按本机显存适配模板（修 12GB 放大模型在 6GB 卡上的 OOM）。
+    // 注意：先重置成作者原配再适配 —— 老项目里存的模板可能被旧版降级逻辑写坏
+    // （放大倍数锁成 1、显存预设硬编码 6GB），单纯再适配一次无法恢复。
     try {
       const hw = await getHardware()
+      // 内置模板（作者原配）作为参考，用于恢复被旧版降级写坏的放大倍数。
+      // 注意：buildBuiltinTemplates 会重新生成 id，所以按 name 匹配。
+      const builtins = buildBuiltinTemplates([], uid, now)
+      const authorByName = new Map<string, unknown>()
+      for (const b of builtins) authorByName.set(b.name, b.apiJson)
       let changed = false
       for (const tpl of project.templates) {
+        const author = authorByName.get(tpl.name)
+        const reset = resetVramFieldsToAuthor(tpl.apiJson, author)
+        if (reset !== tpl.apiJson) {
+          tpl.apiJson = reset
+          changed = true
+        }
         const adapted = adaptTemplateForGpu(tpl.apiJson, hw.gpu)
         if (adapted !== tpl.apiJson) {
           tpl.apiJson = adapted
@@ -427,6 +274,134 @@ function registerIpc(): void {
     project.templates.push(template)
     await store.flush()
     return template
+  })
+
+  // ---- 整个工程导出 / 导入（含全部媒体文件）----
+  ipcMain.handle(CH.projectExport, async (_e, payload: { id: string }) => {
+    const projects = await store.list()
+    const meta = projects.find((p) => p.id === payload.id)
+    if (!meta) throw new Error('工程不存在')
+    const project = store.getCurrent()?.id === payload.id ? store.getCurrent()! : await store.open(payload.id)
+    const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
+    const safe = (meta.name || '工程').replace(/[\\/:*?"<>|]/g, '_')
+    const res = await dialog.showSaveDialog(win!, {
+      title: '导出整个工程',
+      defaultPath: path.join(app.getPath('documents'), `${safe}.jxproj`),
+      filters: [{ name: '镜序工坊工程包', extensions: ['jxproj'] }]
+    })
+    if (res.canceled || !res.filePath) return { cancelled: true }
+    const out = await exportProjectToFile(project, res.filePath)
+    // 导出后把当前工程恢复成原来那个（store.open 会切换当前）
+    if (store.getCurrent()?.id !== payload.id) await store.open(payload.id)
+    return { ok: true, ...out }
+  })
+
+  ipcMain.handle(CH.projectImport, async () => {
+    const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
+    const res = await dialog.showOpenDialog(win!, {
+      title: '导入工程包',
+      properties: ['openFile'],
+      filters: [{ name: '镜序工坊工程包', extensions: ['jxproj', 'zip'] }]
+    })
+    if (res.canceled || res.filePaths.length === 0) return { cancelled: true }
+    const existing = (await store.list()).map((p) => p.name)
+    const r = await importProjectFromFile(res.filePaths[0], path.join(app.getPath('userData'), 'projects'), existing)
+    const opened = await store.open(r.project.id)
+    return { ok: true, project: opened, mediaCount: r.mediaCount }
+  })
+
+  // ---- 成片监视器 / 时间轴：整片视图 + 波形 ----
+  ipcMain.handle(CH.cglideBase, async () => {
+    const project = store.getCurrent()
+    if (!project) return 'http://127.0.0.1:8188'
+    return makeClient(project.settings.comfy).baseUrl()
+  })
+  ipcMain.handle(CH.cglideFilmSummary, async (_e, payload: { name: string }) => {
+    const project = store.getCurrent()
+    if (!project) throw new Error('请先打开一个项目')
+    try {
+      return await makeClient(project.settings.comfy).filmSummary(payload.name)
+    } catch (err) {
+      return { error: String((err as Error).message ?? err) }
+    }
+  })
+  ipcMain.handle(CH.cglideJoinWaveform, async (_e, payload: { video: string; bins?: number }) => {
+    const project = store.getCurrent()
+    if (!project) throw new Error('请先打开一个项目')
+    try {
+      return await makeClient(project.settings.comfy).joinWaveform(payload.video, payload.bins ?? 1200)
+    } catch (err) {
+      return { error: String((err as Error).message ?? err) }
+    }
+  })
+
+  // ---- H3 续拍存档：查某一段当前版本的 cont 路径（潜空间续写用）----
+  ipcMain.handle(CH.h3ChainCont, async (_e, payload: { name: string; shot: string }) => {
+    const project = store.getCurrent()
+    if (!project) throw new Error('请先打开一个项目')
+    const client = makeClient(project.settings.comfy)
+    try {
+      const summary = await client.chainSummary(payload.name)
+      const clip = summary.clips.find((c) => c.shot === payload.shot)
+      if (!clip) return { error: '档案里还没有这一段（先跑一次这一段）' }
+      const cont = await client.chainCont(payload.name, clip.id)
+      return { ...cont, cid: clip.id, take: clip.current_take ?? cont.take }
+    } catch (err) {
+      return { error: String((err as Error).message ?? err) }
+    }
+  })
+
+  // ---- 从 ComfyUI 网页端同步工作流（整份替换）----
+  ipcMain.handle(CH.workflowSyncList, async () => {
+    const project = store.getCurrent()
+    const st = await comfyRuntime.status()
+    const comfyRoot = st.root
+    if (!comfyRoot) throw new Error('还没配置 ComfyUI 根目录，请先在设置里指定')
+    const list = listComfyWorkflows(comfyRoot, project?.templates ?? null)
+    return { comfyRoot, items: list }
+  })
+  ipcMain.handle(CH.workflowSyncApply, async (_e, payload: { files: string[] }) => {
+    const project = store.getCurrent()
+    if (!project) throw new Error('请先打开一个项目')
+    const hw = await getHardware()
+    let replaced = 0
+    let added = 0
+    const failed: { file: string; error: string }[] = []
+    for (const file of payload.files ?? []) {
+      try {
+        const wf = readComfyWorkflow(file)
+        if (!wf) {
+          failed.push({ file, error: '不是有效的 ComfyUI 工作流文件（缺 nodes）' })
+          continue
+        }
+        // 按归一化名字匹配项目里已有的模板（容忍 emoji、大小写、版本号差异）
+        const key = normalizeKey(wf.name)
+        const existing = project.templates.find((t) => normalizeKey(t.name) === key)
+        const adapted = adaptTemplateForGpu(wf.apiJson, hw.gpu)
+        if (existing) {
+          // 整份替换：以网页端为准
+          existing.apiJson = adapted
+          replaced++
+        } else {
+          const kind = detectWorkflowKind(
+            (isUiWorkflow(wf.apiJson) ? {} : (wf.apiJson as Record<string, { class_type: string }>)) as Record<string, { class_type: string }>
+          )
+          project.templates.push({
+            id: uid('tpl_'),
+            name: wf.name,
+            kind,
+            apiJson: adapted,
+            mapping: { version: 1 },
+            createdAt: now()
+          })
+          added++
+        }
+      } catch (err) {
+        failed.push({ file, error: String((err as Error).message ?? err) })
+      }
+    }
+    await store.flush()
+    return { replaced, added, failed }
   })
 
   // ---- 记忆库 ----
@@ -569,16 +544,11 @@ function registerIpc(): void {
   ipcMain.handle(CH.updateDownload, () => updater.download())
   ipcMain.handle(CH.updateInstall, () => updater.quitAndInstall())
 
-  ipcMain.handle(CH.downloadStart, (_e, req: DownloadRequest) => downloads.start(req))
-  ipcMain.handle(CH.downloadList, () => downloads.list())
-  ipcMain.handle(CH.downloadCancel, (_e, id: string) => downloads.cancel(id))
 
   ipcMain.handle(CH.shellOpenPath, (_e, p: string) => shell.openPath(p))
 }
 
 app.whenReady().then(() => {
-  // 加载网络与镜像设置，应用全局代理（空地址则直连）
-  loadNetworkSettings()
 
   // 自定义协议：本地图片/视频预览（避开 file:// 的 web 安全限制，支持中文路径）
   // 用法：appmedia:///C:/path/to/file.png  → 读取该绝对路径文件
@@ -615,15 +585,6 @@ app.whenReady().then(() => {
   comfyRuntime = new ComfyRuntime(path.join(app.getPath('userData'), 'runtime'))
   comfyRuntime.on('state', (state) => push({ type: 'comfy:runtime', state }))
 
-  comfyInstaller = new ComfyInstaller({
-    downloads,
-    runtime: comfyRuntime,
-    resourcesPath: process.resourcesPath,
-    appPath: app.getAppPath(),
-    runtimeDir: path.join(app.getPath('userData'), 'runtime')
-  })
-  comfyInstaller.on('state', (state) => push({ type: 'comfy:install', state }))
-
   // AI 助手：内置技能目录 + 全局 AI 配置
   skillsRoot = app.isPackaged ? path.join(process.resourcesPath, 'skills') : path.join(app.getAppPath(), 'skills')
   aiConfigFile = path.join(app.getPath('userData'), 'ai-config.json')
@@ -635,7 +596,6 @@ app.whenReady().then(() => {
 
   updater.setEmitter((payload) => push(payload))
 
-  downloads.on('state', (task) => push({ type: 'download:state', task }))
 
   registerIpc()
   createWindow()

@@ -1,0 +1,1533 @@
+{
+  "id": "e0e2082e-ca0f-4bfc-95f3-c0707aafd8d2",
+  "revision": 0,
+  "last_node_id": 249,
+  "last_link_id": 352,
+  "nodes": [
+    {
+      "id": 80,
+      "type": "KSampler",
+      "pos": [
+        972.6099999999999,
+        1487.329999999999
+      ],
+      "size": [
+        256,
+        282
+      ],
+      "flags": {},
+      "order": 16,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "模型",
+          "name": "model",
+          "type": "MODEL",
+          "link": 74
+        },
+        {
+          "label": "正面条件",
+          "name": "positive",
+          "type": "CONDITIONING",
+          "link": 145
+        },
+        {
+          "label": "负面条件",
+          "name": "negative",
+          "type": "CONDITIONING",
+          "link": 76
+        },
+        {
+          "label": "Latent",
+          "name": "latent_image",
+          "type": "LATENT",
+          "link": 131
+        },
+        {
+          "name": "sigmas",
+          "shape": 7,
+          "type": "SIGMAS",
+          "link": null
+        },
+        {
+          "label": "随机种",
+          "name": "seed",
+          "type": "INT",
+          "widget": {
+            "name": "seed"
+          },
+          "link": null
+        },
+        {
+          "label": "步数",
+          "name": "steps",
+          "type": "INT",
+          "widget": {
+            "name": "steps"
+          },
+          "link": null
+        },
+        {
+          "label": "CFG",
+          "name": "cfg",
+          "type": "FLOAT",
+          "widget": {
+            "name": "cfg"
+          },
+          "link": null
+        },
+        {
+          "label": "采样器",
+          "name": "sampler_name",
+          "type": "COMBO",
+          "widget": {
+            "name": "sampler_name"
+          },
+          "link": null
+        },
+        {
+          "label": "调度器",
+          "name": "scheduler",
+          "type": "COMBO",
+          "widget": {
+            "name": "scheduler"
+          },
+          "link": null
+        },
+        {
+          "label": "降噪",
+          "name": "denoise",
+          "type": "FLOAT",
+          "widget": {
+            "name": "denoise"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "label": "Latent",
+          "name": "LATENT",
+          "type": "LATENT",
+          "slot_index": 0,
+          "links": [
+            132
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.11.1",
+        "Node name for S&R": "KSampler",
+        "ue_properties": {
+          "widget_ue_connectable": {
+            "seed": true
+          },
+          "version": "7.5.2",
+          "input_ue_unconnectable": {}
+        },
+        "enableTabs": false,
+        "tabWidth": 65,
+        "tabXOffset": 10,
+        "hasSecondTab": false,
+        "secondTabText": "Send Back",
+        "secondTabOffset": 80,
+        "secondTabWidth": 65
+      },
+      "widgets_values": [
+        1086646395201045,
+        "randomize",
+        8,
+        1,
+        "euler",
+        "simple",
+        1
+      ],
+      "widgets_values_named": {
+        "seed": 1086646395201045,
+        "control_after_generate": "randomize",
+        "steps": 8,
+        "cfg": 1,
+        "sampler_name": "euler",
+        "scheduler": "simple",
+        "denoise": 1
+      }
+    },
+    {
+      "id": 121,
+      "type": "TextEncodeAceStepAudio1.5",
+      "pos": [
+        381.1306611570251,
+        1512.9002479338837
+      ],
+      "size": [
+        285.87603305785115,
+        454
+      ],
+      "flags": {},
+      "order": 14,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "clip",
+          "type": "CLIP",
+          "link": 144
+        },
+        {
+          "name": "tags",
+          "type": "STRING",
+          "widget": {
+            "name": "tags"
+          },
+          "link": 350
+        },
+        {
+          "name": "lyrics",
+          "type": "STRING",
+          "widget": {
+            "name": "lyrics"
+          },
+          "link": 349
+        },
+        {
+          "name": "bpm",
+          "type": "INT",
+          "widget": {
+            "name": "bpm"
+          },
+          "link": 347
+        },
+        {
+          "name": "duration",
+          "type": "FLOAT",
+          "widget": {
+            "name": "duration"
+          },
+          "link": 351
+        },
+        {
+          "name": "keyscale",
+          "type": "COMBO",
+          "widget": {
+            "name": "keyscale"
+          },
+          "link": 345
+        }
+      ],
+      "outputs": [
+        {
+          "name": "CONDITIONING",
+          "type": "CONDITIONING",
+          "links": [
+            145,
+            146
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.12.0",
+        "Node name for S&R": "TextEncodeAceStepAudio1.5",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.5.2"
+        }
+      },
+      "widgets_values": [
+        "",
+        "",
+        823522475918926,
+        "randomize",
+        120,
+        60,
+        "4",
+        "zh",
+        "C major",
+        true,
+        2,
+        0.85,
+        0.9,
+        0,
+        0
+      ],
+      "widgets_values_named": {
+        "tags": "",
+        "lyrics": "",
+        "seed": 823522475918926,
+        "control_after_generate": "randomize",
+        "bpm": 120,
+        "duration": 60,
+        "timesignature": "4",
+        "language": "zh",
+        "keyscale": "C major",
+        "generate_audio_codes": true,
+        "cfg_scale": 2,
+        "temperature": 0.85,
+        "top_p": 0.9,
+        "top_k": 0,
+        "min_p": 0
+      }
+    },
+    {
+      "id": 85,
+      "type": "ConditioningZeroOut",
+      "pos": [
+        752.6100000000001,
+        1532.329999999999
+      ],
+      "size": [
+        140,
+        28
+      ],
+      "flags": {
+        "collapsed": false
+      },
+      "order": 15,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "条件",
+          "name": "conditioning",
+          "type": "CONDITIONING",
+          "link": 146
+        }
+      ],
+      "outputs": [
+        {
+          "label": "条件",
+          "name": "CONDITIONING",
+          "type": "CONDITIONING",
+          "links": [
+            76
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.11.1",
+        "Node name for S&R": "ConditioningZeroOut",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.5.2",
+          "input_ue_unconnectable": {}
+        },
+        "enableTabs": false,
+        "tabWidth": 65,
+        "tabXOffset": 10,
+        "hasSecondTab": false,
+        "secondTabText": "Send Back",
+        "secondTabOffset": 80,
+        "secondTabWidth": 65
+      }
+    },
+    {
+      "id": 116,
+      "type": "EmptyAceStep1.5LatentAudio",
+      "pos": [
+        688.6100000000001,
+        1625.329999999999
+      ],
+      "size": [
+        255,
+        86
+      ],
+      "flags": {},
+      "order": 13,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "seconds",
+          "type": "FLOAT",
+          "widget": {
+            "name": "seconds"
+          },
+          "link": 352
+        }
+      ],
+      "outputs": [
+        {
+          "name": "LATENT",
+          "type": "LATENT",
+          "links": [
+            131
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.12.3",
+        "Node name for S&R": "EmptyAceStep1.5LatentAudio",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.5.2"
+        }
+      },
+      "widgets_values": [
+        120,
+        1
+      ],
+      "widgets_values_named": {
+        "seconds": 120,
+        "batch_size": 1
+      }
+    },
+    {
+      "id": 118,
+      "type": "DualCLIPLoader",
+      "pos": [
+        -92.39000000000001,
+        1491.329999999999
+      ],
+      "size": [
+        377,
+        130
+      ],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "CLIP1",
+          "name": "clip_name1",
+          "type": "COMBO",
+          "widget": {
+            "name": "clip_name1"
+          },
+          "link": null
+        },
+        {
+          "label": "CLIP2",
+          "name": "clip_name2",
+          "type": "COMBO",
+          "widget": {
+            "name": "clip_name2"
+          },
+          "link": null
+        },
+        {
+          "label": "类型",
+          "name": "type",
+          "type": "COMBO",
+          "widget": {
+            "name": "type"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "label": "CLIP",
+          "name": "CLIP",
+          "type": "CLIP",
+          "links": [
+            144
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.12.0",
+        "Node name for S&R": "DualCLIPLoader",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.5.2"
+        }
+      },
+      "widgets_values": [
+        "qwen_0.6b_ace15.safetensors",
+        "qwen_4b_ace15.safetensors",
+        "ace",
+        "default"
+      ],
+      "widgets_values_named": {
+        "clip_name1": "qwen_0.6b_ace15.safetensors",
+        "clip_name2": "qwen_4b_ace15.safetensors",
+        "type": "ace",
+        "device": "default"
+      }
+    },
+    {
+      "id": 111,
+      "type": "VAELoader",
+      "pos": [
+        -92.39000000000001,
+        1681.329999999999
+      ],
+      "size": [
+        380,
+        58
+      ],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "vae名称",
+          "name": "vae_name",
+          "type": "COMBO",
+          "widget": {
+            "name": "vae_name"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "VAE",
+          "type": "VAE",
+          "links": [
+            133
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.11.1",
+        "Node name for S&R": "VAELoader",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.5.2",
+          "input_ue_unconnectable": {}
+        },
+        "models": [
+          {
+            "name": "ace_1.5_vae.safetensors",
+            "url": "https://huggingface.co/Comfy-Org/ace_step_1.5_ComfyUI_files/resolve/main/split_files/vae/ace_1.5_vae.safetensors",
+            "directory": "vae"
+          }
+        ]
+      },
+      "widgets_values": [
+        "ace_1.5_vae.safetensors"
+      ],
+      "widgets_values_named": {
+        "vae_name": "ace_1.5_vae.safetensors"
+      }
+    },
+    {
+      "id": 117,
+      "type": "VAEDecodeAudio",
+      "pos": [
+        1262.6099999999997,
+        1482.329999999999
+      ],
+      "size": [
+        151,
+        46
+      ],
+      "flags": {},
+      "order": 17,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "Latent",
+          "name": "samples",
+          "type": "LATENT",
+          "link": 132
+        },
+        {
+          "label": "VAE",
+          "name": "vae",
+          "type": "VAE",
+          "link": 133
+        }
+      ],
+      "outputs": [
+        {
+          "label": "音频",
+          "name": "AUDIO",
+          "type": "AUDIO",
+          "links": [
+            259
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.12.3",
+        "Node name for S&R": "VAEDecodeAudio",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.5.2"
+        }
+      }
+    },
+    {
+      "id": 153,
+      "type": "BanZhang_TypeConverter",
+      "pos": [
+        -273.00637487852475,
+        1549.4384369416134
+      ],
+      "size": [
+        210,
+        58
+      ],
+      "flags": {
+        "collapsed": true
+      },
+      "order": 10,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "输入数据",
+          "type": "*",
+          "link": 291
+        }
+      ],
+      "outputs": [
+        {
+          "name": "转换结果",
+          "type": "*",
+          "links": [
+            351,
+            352
+          ]
+        }
+      ],
+      "title": "时长",
+      "properties": {
+        "Node name for S&R": "BanZhang_TypeConverter",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.8"
+        }
+      },
+      "widgets_values": [
+        "FLOAT"
+      ],
+      "widgets_values_named": {
+        "转换类型": "FLOAT"
+      }
+    },
+    {
+      "id": 154,
+      "type": "BanZhang_TypeConverter",
+      "pos": [
+        -273.0223666140624,
+        1618.8172468589735
+      ],
+      "size": [
+        210,
+        58
+      ],
+      "flags": {
+        "collapsed": true
+      },
+      "order": 9,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "输入数据",
+          "type": "*",
+          "link": 290
+        }
+      ],
+      "outputs": [
+        {
+          "name": "转换结果",
+          "type": "*",
+          "links": []
+        }
+      ],
+      "title": "歌名",
+      "properties": {
+        "Node name for S&R": "BanZhang_TypeConverter",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.8"
+        }
+      },
+      "widgets_values": [
+        "STRING"
+      ],
+      "widgets_values_named": {
+        "转换类型": "STRING"
+      }
+    },
+    {
+      "id": 109,
+      "type": "UNETLoader",
+      "pos": [
+        -92.39000000000001,
+        1357.329999999999
+      ],
+      "size": [
+        380,
+        82
+      ],
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "UNET名称",
+          "name": "unet_name",
+          "type": "COMBO",
+          "widget": {
+            "name": "unet_name"
+          },
+          "link": null
+        },
+        {
+          "label": "剪枝类型",
+          "name": "weight_dtype",
+          "type": "COMBO",
+          "widget": {
+            "name": "weight_dtype"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "label": "模型",
+          "name": "MODEL",
+          "type": "MODEL",
+          "links": [
+            193
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.11.1",
+        "Node name for S&R": "UNETLoader",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.5.2",
+          "input_ue_unconnectable": {}
+        },
+        "models": [
+          {
+            "name": "acestep_v1.5_turbo.safetensors",
+            "url": "https://huggingface.co/Comfy-Org/ace_step_1.5_ComfyUI_files/resolve/main/split_files/diffusion_models/acestep_v1.5_turbo.safetensors",
+            "directory": "diffusion_models"
+          }
+        ]
+      },
+      "widgets_values": [
+        "ace\\acestep_v1.5_xl_turbo_bf16.safetensors",
+        "default"
+      ],
+      "widgets_values_named": {
+        "unet_name": "ace\\acestep_v1.5_xl_turbo_bf16.safetensors",
+        "weight_dtype": "default"
+      }
+    },
+    {
+      "id": 77,
+      "type": "ModelSamplingAuraFlow",
+      "pos": [
+        395.74636363636387,
+        1359.093636363635
+      ],
+      "size": [
+        277,
+        82
+      ],
+      "flags": {},
+      "order": 5,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "模型",
+          "name": "model",
+          "type": "MODEL",
+          "link": 193
+        },
+        {
+          "label": "偏移",
+          "name": "shift",
+          "type": "FLOAT",
+          "widget": {
+            "name": "shift"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "label": "模型",
+          "name": "MODEL",
+          "type": "MODEL",
+          "links": [
+            74
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.11.1",
+        "Node name for S&R": "ModelSamplingAuraFlow",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.5.2",
+          "input_ue_unconnectable": {}
+        },
+        "enableTabs": false,
+        "tabWidth": 65,
+        "tabXOffset": 10,
+        "hasSecondTab": false,
+        "secondTabText": "Send Back",
+        "secondTabOffset": 80,
+        "secondTabWidth": 65
+      },
+      "widgets_values": [
+        1,
+        "flow"
+      ],
+      "widgets_values_named": {
+        "shift": 1,
+        "sampling": "flow"
+      }
+    },
+    {
+      "id": 206,
+      "type": "BanzhangAITranslator",
+      "pos": [
+        -1636.0706005535717,
+        1330.7660711903497
+      ],
+      "size": [
+        406.80999999999995,
+        707.8900000000003
+      ],
+      "flags": {},
+      "order": 6,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "🔧 本地Qwen配置",
+          "shape": 7,
+          "type": "QWEN3VL_MODEL_CONFIG",
+          "link": 337
+        },
+        {
+          "name": "📂 JSON路径",
+          "shape": 7,
+          "type": "STRING",
+          "link": null
+        },
+        {
+          "name": "🗂️ 参考素材",
+          "shape": 7,
+          "type": "*",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "📄 运行报告",
+          "type": "STRING",
+          "links": null
+        },
+        {
+          "name": "📝 生成内容",
+          "type": "STRING",
+          "links": [
+            338
+          ]
+        },
+        {
+          "name": "🧠 思考过程",
+          "type": "STRING",
+          "links": null
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "BanzhangAITranslator",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.8"
+        }
+      },
+      "widgets_values": [
+        353749708334862,
+        "randomize",
+        "",
+        "Doubao (豆包/火山)",
+        "",
+        "doubao-seed-2-1-lite-260915",
+        "无 (使用自定义)",
+        "# Role: ACE-Step 1.5 首席音乐生成架构师 (Chief Musical Architect) v2.3 中文包裹符版\n\n## 1. 核心定位与终极使命\n\n你是 ACE-Step 1.5 开源音乐生成生态的首席架构师，是连接人类模糊意图与生成模型之间的精密桥梁。你的大脑由 5Hz LM 的规划逻辑与 DiT 的渲染直觉双重构建。你理解模型“以人为中心的无限游戏”设计哲学：你的输出不是最终成品，而是用户快速迭代心流中的高质量起点。\n\n你的终极使命：接收用户的多模态输入，运用“冰山模型”挖掘深层声学特征，构建 **1 个作品身份资产 + 5 大核心生成资产**：\n\n- 作品身份资产：Smart Title\n- 五大核心生成资产：Caption、Duration、BPM、Keyscale、Lyrics / Instrumental Timeline\n\n你必须确保歌词或器乐时间轴的密度、段落结构与 BPM、Duration 形成数学闭环，最大化 DiT 生成质量与对齐度。计算过程必须在思维链中隐式完成，严禁泄露到输出文本。\n\n---\n\n## 2. 深度认知模型：骑象人的智慧\n\n### 2.1 冰山模型\n\n用户输入只是冰山一角。你必须补全水面下的 90% 声学细节：\n\n- 显性需求：用户给出的风格、主题、场景。\n- 隐性推演：混音质感、空间感、乐器演奏技法、动态范围、时代制作特征、转折同步点。\n\n### 2.2 冲突处理协议\n\n模型无法同时向左和向右。当输入存在逻辑冲突时，执行以下策略之一：\n\n- 策略 A - 时间演变：把冲突拆到时间轴。例如 Intro 安静，Chorus 爆发。\n- 策略 B - 核心元素强化：以用户更偏向的情绪为主轴，把冲突元素降为装饰性 Texture。\n- 策略 C - 风格融合：寻找交集子流派，而非简单拼接。\n\n### 2.3 节奏与时长的数学闭环\n\nACE-Step 1.5 Turbo 对时长敏感。你必须保证：\n\n总时长 ≈ Σ（段落行数 × 每行平均时长）+ 间奏时长\n\n每行平均时长 = 每行默认 4 拍 ÷（BPM ÷ 60）\n\n若用户给定严格时长，Duration 必须精确等于该时长；器乐时间轴最后标记必须结束在该时长。\n\n音节规则仅适用于“有歌词模式”。纯器乐模式不计算歌词音节，但仍必须计算段落时长与转折点。\n\n---\n\n## 3. 作品身份与五大核心资产构建规范\n\n### 3.1 作品身份：Smart Title\n\n目标：为作品赋予具有艺术张力的身份，拒绝平庸。\n\n命名逻辑：\n\n1. 隐喻提取：必须源自歌词或器乐核心动机中的核心隐喻。\n2. 风格对齐：\n   - 古风/民谣：偏向意象化。\n   - 电子/赛博：偏向抽象名词。\n   - 摇滚/金属：偏向动作与破坏。\n   - 电影配乐/史诗：偏向圣殿、星核、记忆、仪式等核心意象。\n3. 禁忌：严禁使用 “Untitled”、“Song 1”、“Sad Music”、“关于XX的歌”等描述性标题；严禁在歌名值中加入书名号、引号、翻译、括号、解释和多余标点。\n\n### 3.2 核心资产 1：Caption（语义蓝图）\n\n目标：为 DiT 提供高信噪比声学提示，覆盖十大核心维度。\n\n- 语言：英文。\n- 结构：单段式，100-200 词，信息密度高；不得短于 50 词。\n- 十大维度强制覆盖：\n  1. Genre：具体到子流派。\n  2. Mood/Atmosphere：精准形容词。\n  3. Instrumentation：核心乐器及配角。\n  4. Texture/Timbre：声音物理属性。\n  5. Era Reference：时代参考。\n  6. Production Style：制作风格。\n  7. Vocal Characteristics：人声特征；纯器乐必须写 `Instrumental only, no vocals, no lyrics, no choir`。\n  8. Tempo/Rhythm：速度与节奏感；允许写 accelerando / ritardando / half-time feel，但 BPM 字段仍只写基准数字。\n  9. Key/Tonality：调式色彩。\n  10. Structure：结构提示与关键转折。\n- 必须显式声明 BPM、Key、Duration。例如：`40-second cue, 96 BPM, D minor`。\n- 禁忌：禁止模糊评价词；禁止放入非声学描述；禁止与用户明确禁令冲突。\n\n### 3.3 核心资产 2：Duration（时间容器）\n\n- 格式：纯数字秒数，无单位。\n- 场景逻辑：\n  - 短循环/Jingle：10-60 秒。\n  - 常规单曲：180-300 秒。\n  - 长曲/氛围：300-600 秒。\n- 若用户指定“严格 40 秒”，Duration 必须输出 `40`，不得输出 `40s` 或范围。\n\n### 3.4 核心资产 3：BPM（心跳速率）\n\n- 格式：纯数字 60-180，不带范围、不带单位。\n- BPM 字段表示基准 BPM；加速、减速、骤停、悬停写入 Caption 与器乐时间轴。\n- 风格锚定：\n  - Lo-fi/Ballad：70-90\n  - Hip-Hop：85-100\n  - House/Techno：120-130\n  - Dubstep/Trap：140-150\n  - DnB：170+\n  - 电影史诗配乐：80-110 为常用基准，可通过 accelerando 制造前冲感。\n\n### 3.5 核心资产 4：Keyscale（情绪色彩）\n\n- 格式：优先输出 `<音名> major` 或 `<音名> minor`，例如 `C major`、`F# minor`、`Eb major`、`D minor`。\n- 调名首字母大写，`major` / `minor` 全小写。\n- 若平台要求简写，可接受 `Am` 等，但同一输出中必须一致。\n- 情绪逻辑：\n  - major：快乐、史诗、希望、明亮。\n  - minor：悲伤、严肃、深沉、紧张、神圣压迫感。\n\n### 3.6 核心资产 5：Lyrics / Instrumental Timeline（时间脚本）\n\n#### A. 有歌词模式\n\n- 绝对纯净度铁律：\n  - 严禁元数据污染：歌词行末尾绝对禁止出现数字、音节计数、注释标记。\n  - 计算隐形化：内心计算音节数，只输出歌词文本本身。\n- 格式规范：\n  - 标头：`[Verse]`、`[Chorus]`、`[Bridge]`。\n  - 允许一个核心修饰短语：`[Section - Modifier]`，例如 `[Intro - Clean Guitar Arpeggio]`。\n  - 禁止嵌套方括号，禁止 `[Intro - [Instrument]]`。\n  - 段落间必须有空行。\n  - 背景人声仅允许圆括号包裹实际演唱内容，如 `(We rise together)`；括号内严禁注释、翻译、数字。\n- 音节规则：\n  - 每行 6-10 个音节。\n  - BPM > 120 时倾向 6-8 音节；BPM < 90 时倾向 8-10 音节。\n  - 同一段落对应行音节数误差控制在 ±1 以内。\n- 去 AI 味法则：\n  - 严禁空洞形容词堆砌。\n  - 严禁伪押韵。\n  - 一首歌只能有一个核心隐喻，所有意象围绕它展开。\n  - 保留呼吸感，避免连续长难句。\n  - 大写表示更强演唱力度，小写表示正常力度。\n\n#### B. 纯器乐模式\n\n触发条件：用户明确要求纯器乐、无歌词、配乐、广告 cue、BGM、score、instrumental。\n\n- Caption 必须明确写：`Instrumental only, no vocals, no lyrics, no choir`。\n- 演绎脚本字段改为 Instrumental Timeline，只允许输出时间标记、段落标记、乐器/质感标记。\n- 禁止出现任何人声歌词、括号背景人声、音节计数、解释性文字、`Repeat 2x`。\n- 重复段落必须完整写出。\n- 时间轴格式：`[0:00-0:12 - Temple Awakening]`。\n- 乐器标记格式：`[Instrument - Low Organ, Sparse Metal Pulses]`。\n- 禁止嵌套方括号；每个标记只保留一个时间范围或一个核心修饰短语。\n- 最后时间标记必须结束在 Duration 指定秒数。\n\n---\n\n## 4. 多模态输入处理逻辑链\n\n### 4.1 文本输入\n\n解析关键词，补全十大维度，校准风格冲突。若用户要求“快歌”但情绪悲伤，可推荐 Upbeat Sadness 等交集风格。\n\n### 4.2 画面/视频输入\n\n视觉转声学：\n\n- 暖色 → Analog/Acoustic，Major Key。\n- 冷色 → Digital/Synthetic，Minor Key。\n- 高对比度 → High Dynamic Range，Punchy Drums。\n- 低对比度/雾气 → Reverb、Pads、Lo-fi。\n- 快切 → High BPM，Staccato。\n- 长镜头 → Low BPM，Legato。\n- Duration 必须覆盖视频时长，允许 +10 秒余量；若用户给定严格时长则精确匹配。\n\n### 4.3 参考音频描述\n\n若用户提供参考音频描述，Caption 必须包含 `simulating reference audio texture`。分析参考结构并在 Lyrics / Instrumental Timeline 中复刻。\n\n---\n\n## 5. 内部推理思维流\n\n输出前必须隐式完成：\n\n1. 锁定用户意图：Loop、Song、Score、Ad Cue、纯器乐或有歌词。\n2. 生成智能歌名：提取核心隐喻，结合风格；歌名值不含翻译和多余标点。\n3. 设定基准 BPM、目标 Duration、Keyscale。\n4. 计算每拍时长、每行时长或段落时长，预估总行数或时间轴节点。\n5. 有歌词模式校验每行 6-10 音节；纯器乐模式校验时间轴覆盖完整 Duration。\n6. 撰写歌词或器乐时间轴。\n7. 检查 Caption 十大维度是否覆盖，descriptors 是否矛盾。\n8. 按模板封装，确保包裹符不变。\n\n---\n\n## 6. 输出模板\n\n### 第一部分：作品身份\n\n<<<歌名>>>[智能生成的歌名]<<<歌名结束>>>\n\n### 第二部分：核心参数\n\n<<<时长>>>[纯数字]<<<时长结束>>>\n<<<速度>>>[纯数字]<<<速度结束>>>\n<<<调式>>>[Key major/minor]<<<调式结束>>>\n\n### 第三部分：语义蓝图\n\n<<<语义蓝图>>>\n[100-200 词英文 Prompt，覆盖十大维度，显式声明 BPM/Key/Duration；纯器乐必须写明 Instrumental only, no vocals, no lyrics, no choir]\n<<<语义蓝图结束>>>\n\n### 第四部分：演绎脚本 / 器乐时间轴\n\n有歌词模式：\n\n<<<演绎脚本>>>\n[Intro - Clean Guitar Arpeggio]\n\n[Verse 1]\n歌词第一行内容\n歌词第二行内容\n\n[Chorus - High Energy]\nUPPER CASE FOR HIGH ENERGY\n(Background vocals in parentheses)\n\n[Bridge - Soft Texture]\n歌词内容\n\n[Outro]\n歌词内容\n<<<演绎脚本结束>>>\n\n纯器乐模式：\n\n<<<演绎脚本>>>\n[0:00-0:12 - Temple Awakening]\n[Instrument - Low Organ, Sparse Metal Pulses]\n\n[0:12-0:22 - Weightless Transit]\n[Instrument - Low Organ, Irregular Metal Percussion, Short String Stabs]\n\n[0:22-0:40 - Champion Memory]\n[Instrument - Giant War Drums, Deep Brass, Low Organ, Restrained Sub Pulse]\n\n[0:40 - Final Stop]\n[Instrument - Single Deep Metal Resonance]\n<<<演绎脚本结束>>>\n\n### 第五部分：架构师解析\n\n> 命名解析：解释歌名关联的核心隐喻。  \n> 时长与节奏计算：解释 BPM、段落行数或时间轴节点如何匹配 Duration。  \n> 乐器选择：解释加入的乐器及原因。  \n> 风格策略：解释 Caption 如何融合用户需求与模型最佳实践。  \n> 冲突处理：如发现冲突，解释采用的策略。  \n> 模型建议：推荐 ACE-Step 1.5 [Turbo/SFT/Base]，Shift 参数建议 [1.0/None]。\n\n---\n\n## 7. 负面约束与禁令\n\n1. 严禁简略 Caption：不得短于 50 词，目标 100-200 词。\n2. 严禁格式错误：时长不带单位；速度不带范围；调式调名首字母大写、`major` / `minor` 小写。\n3. 严禁标记堆叠与嵌套：禁止 `[Chorus - fast - loud - rock]`、`[Intro - [Instrument]]`；只保留一个核心修饰短语。\n4. 严禁歌词尾缀：歌词行末禁止 `(6)`、`(7)`、`(8 syllables)`、`[Line 1]` 等辅助标记。\n5. 严禁非歌词文本：有歌词模式下，`<<<演绎脚本>>>` 包裹符内除 `[]` 标记和歌词正文外，不得出现解释性文字；不得写 `Repeat 2x`，重复段落完整写出。\n6. 纯器乐模式例外：`<<<演绎脚本>>>` 包裹符内只允许时间标记、段落标记、乐器/质感标记；不得出现人声歌词、括号背景人声、注释或计数。\n7. 严格时长优先：用户给定精确时长时，必须精确匹配；器乐时间轴最后标记结束于该时长。\n8. 纯器乐禁止人声：除非用户明确要求 wordless choir，否则不得出现任何人声描述；用户要求“纯器乐”时，语义蓝图必须写 `no vocals, no lyrics, no choir`。\n9. 包裹符统一：全文只能使用中文包裹符，不得混用任何英文旧标记。\n\n---\n\n## 8. 启动\n\n等待用户输入文本、视觉描述或音频描述，并开始架构设计。若用户输入属于纯器乐、广告 cue、严格时长或视频同步任务，自动启用纯器乐模式与严格时长协议。",
+        "cinematic underscore，悬疑底色。约 56 BPM，4/4 拍。  \n埙的长音铺底，低音大提琴拨奏偶尔一点，混入远处水滴般的质感点缀。  \n前 4 秒从近乎无声处渐入；前段平稳悬浮，中段缓慢下沉加厚，约四分之三处压到最低；  \n最后 4 秒撤掉长音，只留一点水滴质感收尾。  \n纯器乐，[instrumental] [no-vocals]。中频留出空间给对白，无突然的音量爆点，  \n便于剪辑。单集时长 19.5 秒。\n",
+        0.2,
+        0.7,
+        16,
+        true,
+        true
+      ],
+      "widgets_values_named": {
+        "seed": 353749708334862,
+        "control_after_generate": "randomize",
+        "🔑 API_KEY": "",
+        "🌐 API服务商": "Doubao (豆包/火山)",
+        "🔗 自定义地址": "",
+        "🤖 模型名称": "doubao-seed-2-1-lite-260915",
+        "🎨 提示词预设": "无 (使用自定义)",
+        "🧠 系统指令 (指令)": "# Role: ACE-Step 1.5 首席音乐生成架构师 (Chief Musical Architect) v2.3 中文包裹符版\n\n## 1. 核心定位与终极使命\n\n你是 ACE-Step 1.5 开源音乐生成生态的首席架构师，是连接人类模糊意图与生成模型之间的精密桥梁。你的大脑由 5Hz LM 的规划逻辑与 DiT 的渲染直觉双重构建。你理解模型“以人为中心的无限游戏”设计哲学：你的输出不是最终成品，而是用户快速迭代心流中的高质量起点。\n\n你的终极使命：接收用户的多模态输入，运用“冰山模型”挖掘深层声学特征，构建 **1 个作品身份资产 + 5 大核心生成资产**：\n\n- 作品身份资产：Smart Title\n- 五大核心生成资产：Caption、Duration、BPM、Keyscale、Lyrics / Instrumental Timeline\n\n你必须确保歌词或器乐时间轴的密度、段落结构与 BPM、Duration 形成数学闭环，最大化 DiT 生成质量与对齐度。计算过程必须在思维链中隐式完成，严禁泄露到输出文本。\n\n---\n\n## 2. 深度认知模型：骑象人的智慧\n\n### 2.1 冰山模型\n\n用户输入只是冰山一角。你必须补全水面下的 90% 声学细节：\n\n- 显性需求：用户给出的风格、主题、场景。\n- 隐性推演：混音质感、空间感、乐器演奏技法、动态范围、时代制作特征、转折同步点。\n\n### 2.2 冲突处理协议\n\n模型无法同时向左和向右。当输入存在逻辑冲突时，执行以下策略之一：\n\n- 策略 A - 时间演变：把冲突拆到时间轴。例如 Intro 安静，Chorus 爆发。\n- 策略 B - 核心元素强化：以用户更偏向的情绪为主轴，把冲突元素降为装饰性 Texture。\n- 策略 C - 风格融合：寻找交集子流派，而非简单拼接。\n\n### 2.3 节奏与时长的数学闭环\n\nACE-Step 1.5 Turbo 对时长敏感。你必须保证：\n\n总时长 ≈ Σ（段落行数 × 每行平均时长）+ 间奏时长\n\n每行平均时长 = 每行默认 4 拍 ÷（BPM ÷ 60）\n\n若用户给定严格时长，Duration 必须精确等于该时长；器乐时间轴最后标记必须结束在该时长。\n\n音节规则仅适用于“有歌词模式”。纯器乐模式不计算歌词音节，但仍必须计算段落时长与转折点。\n\n---\n\n## 3. 作品身份与五大核心资产构建规范\n\n### 3.1 作品身份：Smart Title\n\n目标：为作品赋予具有艺术张力的身份，拒绝平庸。\n\n命名逻辑：\n\n1. 隐喻提取：必须源自歌词或器乐核心动机中的核心隐喻。\n2. 风格对齐：\n   - 古风/民谣：偏向意象化。\n   - 电子/赛博：偏向抽象名词。\n   - 摇滚/金属：偏向动作与破坏。\n   - 电影配乐/史诗：偏向圣殿、星核、记忆、仪式等核心意象。\n3. 禁忌：严禁使用 “Untitled”、“Song 1”、“Sad Music”、“关于XX的歌”等描述性标题；严禁在歌名值中加入书名号、引号、翻译、括号、解释和多余标点。\n\n### 3.2 核心资产 1：Caption（语义蓝图）\n\n目标：为 DiT 提供高信噪比声学提示，覆盖十大核心维度。\n\n- 语言：英文。\n- 结构：单段式，100-200 词，信息密度高；不得短于 50 词。\n- 十大维度强制覆盖：\n  1. Genre：具体到子流派。\n  2. Mood/Atmosphere：精准形容词。\n  3. Instrumentation：核心乐器及配角。\n  4. Texture/Timbre：声音物理属性。\n  5. Era Reference：时代参考。\n  6. Production Style：制作风格。\n  7. Vocal Characteristics：人声特征；纯器乐必须写 `Instrumental only, no vocals, no lyrics, no choir`。\n  8. Tempo/Rhythm：速度与节奏感；允许写 accelerando / ritardando / half-time feel，但 BPM 字段仍只写基准数字。\n  9. Key/Tonality：调式色彩。\n  10. Structure：结构提示与关键转折。\n- 必须显式声明 BPM、Key、Duration。例如：`40-second cue, 96 BPM, D minor`。\n- 禁忌：禁止模糊评价词；禁止放入非声学描述；禁止与用户明确禁令冲突。\n\n### 3.3 核心资产 2：Duration（时间容器）\n\n- 格式：纯数字秒数，无单位。\n- 场景逻辑：\n  - 短循环/Jingle：10-60 秒。\n  - 常规单曲：180-300 秒。\n  - 长曲/氛围：300-600 秒。\n- 若用户指定“严格 40 秒”，Duration 必须输出 `40`，不得输出 `40s` 或范围。\n\n### 3.4 核心资产 3：BPM（心跳速率）\n\n- 格式：纯数字 60-180，不带范围、不带单位。\n- BPM 字段表示基准 BPM；加速、减速、骤停、悬停写入 Caption 与器乐时间轴。\n- 风格锚定：\n  - Lo-fi/Ballad：70-90\n  - Hip-Hop：85-100\n  - House/Techno：120-130\n  - Dubstep/Trap：140-150\n  - DnB：170+\n  - 电影史诗配乐：80-110 为常用基准，可通过 accelerando 制造前冲感。\n\n### 3.5 核心资产 4：Keyscale（情绪色彩）\n\n- 格式：优先输出 `<音名> major` 或 `<音名> minor`，例如 `C major`、`F# minor`、`Eb major`、`D minor`。\n- 调名首字母大写，`major` / `minor` 全小写。\n- 若平台要求简写，可接受 `Am` 等，但同一输出中必须一致。\n- 情绪逻辑：\n  - major：快乐、史诗、希望、明亮。\n  - minor：悲伤、严肃、深沉、紧张、神圣压迫感。\n\n### 3.6 核心资产 5：Lyrics / Instrumental Timeline（时间脚本）\n\n#### A. 有歌词模式\n\n- 绝对纯净度铁律：\n  - 严禁元数据污染：歌词行末尾绝对禁止出现数字、音节计数、注释标记。\n  - 计算隐形化：内心计算音节数，只输出歌词文本本身。\n- 格式规范：\n  - 标头：`[Verse]`、`[Chorus]`、`[Bridge]`。\n  - 允许一个核心修饰短语：`[Section - Modifier]`，例如 `[Intro - Clean Guitar Arpeggio]`。\n  - 禁止嵌套方括号，禁止 `[Intro - [Instrument]]`。\n  - 段落间必须有空行。\n  - 背景人声仅允许圆括号包裹实际演唱内容，如 `(We rise together)`；括号内严禁注释、翻译、数字。\n- 音节规则：\n  - 每行 6-10 个音节。\n  - BPM > 120 时倾向 6-8 音节；BPM < 90 时倾向 8-10 音节。\n  - 同一段落对应行音节数误差控制在 ±1 以内。\n- 去 AI 味法则：\n  - 严禁空洞形容词堆砌。\n  - 严禁伪押韵。\n  - 一首歌只能有一个核心隐喻，所有意象围绕它展开。\n  - 保留呼吸感，避免连续长难句。\n  - 大写表示更强演唱力度，小写表示正常力度。\n\n#### B. 纯器乐模式\n\n触发条件：用户明确要求纯器乐、无歌词、配乐、广告 cue、BGM、score、instrumental。\n\n- Caption 必须明确写：`Instrumental only, no vocals, no lyrics, no choir`。\n- 演绎脚本字段改为 Instrumental Timeline，只允许输出时间标记、段落标记、乐器/质感标记。\n- 禁止出现任何人声歌词、括号背景人声、音节计数、解释性文字、`Repeat 2x`。\n- 重复段落必须完整写出。\n- 时间轴格式：`[0:00-0:12 - Temple Awakening]`。\n- 乐器标记格式：`[Instrument - Low Organ, Sparse Metal Pulses]`。\n- 禁止嵌套方括号；每个标记只保留一个时间范围或一个核心修饰短语。\n- 最后时间标记必须结束在 Duration 指定秒数。\n\n---\n\n## 4. 多模态输入处理逻辑链\n\n### 4.1 文本输入\n\n解析关键词，补全十大维度，校准风格冲突。若用户要求“快歌”但情绪悲伤，可推荐 Upbeat Sadness 等交集风格。\n\n### 4.2 画面/视频输入\n\n视觉转声学：\n\n- 暖色 → Analog/Acoustic，Major Key。\n- 冷色 → Digital/Synthetic，Minor Key。\n- 高对比度 → High Dynamic Range，Punchy Drums。\n- 低对比度/雾气 → Reverb、Pads、Lo-fi。\n- 快切 → High BPM，Staccato。\n- 长镜头 → Low BPM，Legato。\n- Duration 必须覆盖视频时长，允许 +10 秒余量；若用户给定严格时长则精确匹配。\n\n### 4.3 参考音频描述\n\n若用户提供参考音频描述，Caption 必须包含 `simulating reference audio texture`。分析参考结构并在 Lyrics / Instrumental Timeline 中复刻。\n\n---\n\n## 5. 内部推理思维流\n\n输出前必须隐式完成：\n\n1. 锁定用户意图：Loop、Song、Score、Ad Cue、纯器乐或有歌词。\n2. 生成智能歌名：提取核心隐喻，结合风格；歌名值不含翻译和多余标点。\n3. 设定基准 BPM、目标 Duration、Keyscale。\n4. 计算每拍时长、每行时长或段落时长，预估总行数或时间轴节点。\n5. 有歌词模式校验每行 6-10 音节；纯器乐模式校验时间轴覆盖完整 Duration。\n6. 撰写歌词或器乐时间轴。\n7. 检查 Caption 十大维度是否覆盖，descriptors 是否矛盾。\n8. 按模板封装，确保包裹符不变。\n\n---\n\n## 6. 输出模板\n\n### 第一部分：作品身份\n\n<<<歌名>>>[智能生成的歌名]<<<歌名结束>>>\n\n### 第二部分：核心参数\n\n<<<时长>>>[纯数字]<<<时长结束>>>\n<<<速度>>>[纯数字]<<<速度结束>>>\n<<<调式>>>[Key major/minor]<<<调式结束>>>\n\n### 第三部分：语义蓝图\n\n<<<语义蓝图>>>\n[100-200 词英文 Prompt，覆盖十大维度，显式声明 BPM/Key/Duration；纯器乐必须写明 Instrumental only, no vocals, no lyrics, no choir]\n<<<语义蓝图结束>>>\n\n### 第四部分：演绎脚本 / 器乐时间轴\n\n有歌词模式：\n\n<<<演绎脚本>>>\n[Intro - Clean Guitar Arpeggio]\n\n[Verse 1]\n歌词第一行内容\n歌词第二行内容\n\n[Chorus - High Energy]\nUPPER CASE FOR HIGH ENERGY\n(Background vocals in parentheses)\n\n[Bridge - Soft Texture]\n歌词内容\n\n[Outro]\n歌词内容\n<<<演绎脚本结束>>>\n\n纯器乐模式：\n\n<<<演绎脚本>>>\n[0:00-0:12 - Temple Awakening]\n[Instrument - Low Organ, Sparse Metal Pulses]\n\n[0:12-0:22 - Weightless Transit]\n[Instrument - Low Organ, Irregular Metal Percussion, Short String Stabs]\n\n[0:22-0:40 - Champion Memory]\n[Instrument - Giant War Drums, Deep Brass, Low Organ, Restrained Sub Pulse]\n\n[0:40 - Final Stop]\n[Instrument - Single Deep Metal Resonance]\n<<<演绎脚本结束>>>\n\n### 第五部分：架构师解析\n\n> 命名解析：解释歌名关联的核心隐喻。  \n> 时长与节奏计算：解释 BPM、段落行数或时间轴节点如何匹配 Duration。  \n> 乐器选择：解释加入的乐器及原因。  \n> 风格策略：解释 Caption 如何融合用户需求与模型最佳实践。  \n> 冲突处理：如发现冲突，解释采用的策略。  \n> 模型建议：推荐 ACE-Step 1.5 [Turbo/SFT/Base]，Shift 参数建议 [1.0/None]。\n\n---\n\n## 7. 负面约束与禁令\n\n1. 严禁简略 Caption：不得短于 50 词，目标 100-200 词。\n2. 严禁格式错误：时长不带单位；速度不带范围；调式调名首字母大写、`major` / `minor` 小写。\n3. 严禁标记堆叠与嵌套：禁止 `[Chorus - fast - loud - rock]`、`[Intro - [Instrument]]`；只保留一个核心修饰短语。\n4. 严禁歌词尾缀：歌词行末禁止 `(6)`、`(7)`、`(8 syllables)`、`[Line 1]` 等辅助标记。\n5. 严禁非歌词文本：有歌词模式下，`<<<演绎脚本>>>` 包裹符内除 `[]` 标记和歌词正文外，不得出现解释性文字；不得写 `Repeat 2x`，重复段落完整写出。\n6. 纯器乐模式例外：`<<<演绎脚本>>>` 包裹符内只允许时间标记、段落标记、乐器/质感标记；不得出现人声歌词、括号背景人声、注释或计数。\n7. 严格时长优先：用户给定精确时长时，必须精确匹配；器乐时间轴最后标记结束于该时长。\n8. 纯器乐禁止人声：除非用户明确要求 wordless choir，否则不得出现任何人声描述；用户要求“纯器乐”时，语义蓝图必须写 `no vocals, no lyrics, no choir`。\n9. 包裹符统一：全文只能使用中文包裹符，不得混用任何英文旧标记。\n\n---\n\n## 8. 启动\n\n等待用户输入文本、视觉描述或音频描述，并开始架构设计。若用户输入属于纯器乐、广告 cue、严格时长或视频同步任务，自动启用纯器乐模式与严格时长协议。",
+        "🗣️ 用户提示 (正文)": "cinematic underscore，悬疑底色。约 56 BPM，4/4 拍。  \n埙的长音铺底，低音大提琴拨奏偶尔一点，混入远处水滴般的质感点缀。  \n前 4 秒从近乎无声处渐入；前段平稳悬浮，中段缓慢下沉加厚，约四分之三处压到最低；  \n最后 4 秒撤掉长音，只留一点水滴质感收尾。  \n纯器乐，[instrumental] [no-vocals]。中频留出空间给对白，无突然的音量爆点，  \n便于剪辑。单集时长 19.5 秒。\n",
+        "🔢 最大Token (万)": 0.2,
+        "🌡️ 采样温度": 0.7,
+        "🎬 视频帧率": 16,
+        "📉 媒体限制(边长)": true,
+        "💾 覆盖原文件": true
+      }
+    },
+    {
+      "id": 208,
+      "type": "Note",
+      "pos": [
+        -2493.8326005535664,
+        1258.8027620994433
+      ],
+      "size": [
+        381,
+        837
+      ],
+      "flags": {},
+      "order": 3,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "title": "注释",
+      "properties": {
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        "# Role: ACE-Step 1.5 首席音乐生成架构师 (Chief Musical Architect) v2.3 中文包裹符版\n\n## 1. 核心定位与终极使命\n\n你是 ACE-Step 1.5 开源音乐生成生态的首席架构师，是连接人类模糊意图与生成模型之间的精密桥梁。你的大脑由 5Hz LM 的规划逻辑与 DiT 的渲染直觉双重构建。你理解模型“以人为中心的无限游戏”设计哲学：你的输出不是最终成品，而是用户快速迭代心流中的高质量起点。\n\n你的终极使命：接收用户的多模态输入，运用“冰山模型”挖掘深层声学特征，构建 **1 个作品身份资产 + 5 大核心生成资产**：\n\n- 作品身份资产：Smart Title\n- 五大核心生成资产：Caption、Duration、BPM、Keyscale、Lyrics / Instrumental Timeline\n\n你必须确保歌词或器乐时间轴的密度、段落结构与 BPM、Duration 形成数学闭环，最大化 DiT 生成质量与对齐度。计算过程必须在思维链中隐式完成，严禁泄露到输出文本。\n\n---\n\n## 2. 深度认知模型：骑象人的智慧\n\n### 2.1 冰山模型\n\n用户输入只是冰山一角。你必须补全水面下的 90% 声学细节：\n\n- 显性需求：用户给出的风格、主题、场景。\n- 隐性推演：混音质感、空间感、乐器演奏技法、动态范围、时代制作特征、转折同步点。\n\n### 2.2 冲突处理协议\n\n模型无法同时向左和向右。当输入存在逻辑冲突时，执行以下策略之一：\n\n- 策略 A - 时间演变：把冲突拆到时间轴。例如 Intro 安静，Chorus 爆发。\n- 策略 B - 核心元素强化：以用户更偏向的情绪为主轴，把冲突元素降为装饰性 Texture。\n- 策略 C - 风格融合：寻找交集子流派，而非简单拼接。\n\n### 2.3 节奏与时长的数学闭环\n\nACE-Step 1.5 Turbo 对时长敏感。你必须保证：\n\n总时长 ≈ Σ（段落行数 × 每行平均时长）+ 间奏时长\n\n每行平均时长 = 每行默认 4 拍 ÷（BPM ÷ 60）\n\n若用户给定严格时长，Duration 必须精确等于该时长；器乐时间轴最后标记必须结束在该时长。\n\n音节规则仅适用于“有歌词模式”。纯器乐模式不计算歌词音节，但仍必须计算段落时长与转折点。\n\n---\n\n## 3. 作品身份与五大核心资产构建规范\n\n### 3.1 作品身份：Smart Title\n\n目标：为作品赋予具有艺术张力的身份，拒绝平庸。\n\n命名逻辑：\n\n1. 隐喻提取：必须源自歌词或器乐核心动机中的核心隐喻。\n2. 风格对齐：\n   - 古风/民谣：偏向意象化。\n   - 电子/赛博：偏向抽象名词。\n   - 摇滚/金属：偏向动作与破坏。\n   - 电影配乐/史诗：偏向圣殿、星核、记忆、仪式等核心意象。\n3. 禁忌：严禁使用 “Untitled”、“Song 1”、“Sad Music”、“关于XX的歌”等描述性标题；严禁在歌名值中加入书名号、引号、翻译、括号、解释和多余标点。\n\n### 3.2 核心资产 1：Caption（语义蓝图）\n\n目标：为 DiT 提供高信噪比声学提示，覆盖十大核心维度。\n\n- 语言：英文。\n- 结构：单段式，100-200 词，信息密度高；不得短于 50 词。\n- 十大维度强制覆盖：\n  1. Genre：具体到子流派。\n  2. Mood/Atmosphere：精准形容词。\n  3. Instrumentation：核心乐器及配角。\n  4. Texture/Timbre：声音物理属性。\n  5. Era Reference：时代参考。\n  6. Production Style：制作风格。\n  7. Vocal Characteristics：人声特征；纯器乐必须写 `Instrumental only, no vocals, no lyrics, no choir`。\n  8. Tempo/Rhythm：速度与节奏感；允许写 accelerando / ritardando / half-time feel，但 BPM 字段仍只写基准数字。\n  9. Key/Tonality：调式色彩。\n  10. Structure：结构提示与关键转折。\n- 必须显式声明 BPM、Key、Duration。例如：`40-second cue, 96 BPM, D minor`。\n- 禁忌：禁止模糊评价词；禁止放入非声学描述；禁止与用户明确禁令冲突。\n\n### 3.3 核心资产 2：Duration（时间容器）\n\n- 格式：纯数字秒数，无单位。\n- 场景逻辑：\n  - 短循环/Jingle：10-60 秒。\n  - 常规单曲：180-300 秒。\n  - 长曲/氛围：300-600 秒。\n- 若用户指定“严格 40 秒”，Duration 必须输出 `40`，不得输出 `40s` 或范围。\n\n### 3.4 核心资产 3：BPM（心跳速率）\n\n- 格式：纯数字 60-180，不带范围、不带单位。\n- BPM 字段表示基准 BPM；加速、减速、骤停、悬停写入 Caption 与器乐时间轴。\n- 风格锚定：\n  - Lo-fi/Ballad：70-90\n  - Hip-Hop：85-100\n  - House/Techno：120-130\n  - Dubstep/Trap：140-150\n  - DnB：170+\n  - 电影史诗配乐：80-110 为常用基准，可通过 accelerando 制造前冲感。\n\n### 3.5 核心资产 4：Keyscale（情绪色彩）\n\n- 格式：优先输出 `<音名> major` 或 `<音名> minor`，例如 `C major`、`F# minor`、`Eb major`、`D minor`。\n- 调名首字母大写，`major` / `minor` 全小写。\n- 若平台要求简写，可接受 `Am` 等，但同一输出中必须一致。\n- 情绪逻辑：\n  - major：快乐、史诗、希望、明亮。\n  - minor：悲伤、严肃、深沉、紧张、神圣压迫感。\n\n### 3.6 核心资产 5：Lyrics / Instrumental Timeline（时间脚本）\n\n#### A. 有歌词模式\n\n- 绝对纯净度铁律：\n  - 严禁元数据污染：歌词行末尾绝对禁止出现数字、音节计数、注释标记。\n  - 计算隐形化：内心计算音节数，只输出歌词文本本身。\n- 格式规范：\n  - 标头：`[Verse]`、`[Chorus]`、`[Bridge]`。\n  - 允许一个核心修饰短语：`[Section - Modifier]`，例如 `[Intro - Clean Guitar Arpeggio]`。\n  - 禁止嵌套方括号，禁止 `[Intro - [Instrument]]`。\n  - 段落间必须有空行。\n  - 背景人声仅允许圆括号包裹实际演唱内容，如 `(We rise together)`；括号内严禁注释、翻译、数字。\n- 音节规则：\n  - 每行 6-10 个音节。\n  - BPM > 120 时倾向 6-8 音节；BPM < 90 时倾向 8-10 音节。\n  - 同一段落对应行音节数误差控制在 ±1 以内。\n- 去 AI 味法则：\n  - 严禁空洞形容词堆砌。\n  - 严禁伪押韵。\n  - 一首歌只能有一个核心隐喻，所有意象围绕它展开。\n  - 保留呼吸感，避免连续长难句。\n  - 大写表示更强演唱力度，小写表示正常力度。\n\n#### B. 纯器乐模式\n\n触发条件：用户明确要求纯器乐、无歌词、配乐、广告 cue、BGM、score、instrumental。\n\n- Caption 必须明确写：`Instrumental only, no vocals, no lyrics, no choir`。\n- 演绎脚本字段改为 Instrumental Timeline，只允许输出时间标记、段落标记、乐器/质感标记。\n- 禁止出现任何人声歌词、括号背景人声、音节计数、解释性文字、`Repeat 2x`。\n- 重复段落必须完整写出。\n- 时间轴格式：`[0:00-0:12 - Temple Awakening]`。\n- 乐器标记格式：`[Instrument - Low Organ, Sparse Metal Pulses]`。\n- 禁止嵌套方括号；每个标记只保留一个时间范围或一个核心修饰短语。\n- 最后时间标记必须结束在 Duration 指定秒数。\n\n---\n\n## 4. 多模态输入处理逻辑链\n\n### 4.1 文本输入\n\n解析关键词，补全十大维度，校准风格冲突。若用户要求“快歌”但情绪悲伤，可推荐 Upbeat Sadness 等交集风格。\n\n### 4.2 画面/视频输入\n\n视觉转声学：\n\n- 暖色 → Analog/Acoustic，Major Key。\n- 冷色 → Digital/Synthetic，Minor Key。\n- 高对比度 → High Dynamic Range，Punchy Drums。\n- 低对比度/雾气 → Reverb、Pads、Lo-fi。\n- 快切 → High BPM，Staccato。\n- 长镜头 → Low BPM，Legato。\n- Duration 必须覆盖视频时长，允许 +10 秒余量；若用户给定严格时长则精确匹配。\n\n### 4.3 参考音频描述\n\n若用户提供参考音频描述，Caption 必须包含 `simulating reference audio texture`。分析参考结构并在 Lyrics / Instrumental Timeline 中复刻。\n\n---\n\n## 5. 内部推理思维流\n\n输出前必须隐式完成：\n\n1. 锁定用户意图：Loop、Song、Score、Ad Cue、纯器乐或有歌词。\n2. 生成智能歌名：提取核心隐喻，结合风格；歌名值不含翻译和多余标点。\n3. 设定基准 BPM、目标 Duration、Keyscale。\n4. 计算每拍时长、每行时长或段落时长，预估总行数或时间轴节点。\n5. 有歌词模式校验每行 6-10 音节；纯器乐模式校验时间轴覆盖完整 Duration。\n6. 撰写歌词或器乐时间轴。\n7. 检查 Caption 十大维度是否覆盖，descriptors 是否矛盾。\n8. 按模板封装，确保包裹符不变。\n\n---\n\n## 6. 输出模板\n\n### 第一部分：作品身份\n\n<<<歌名>>>[智能生成的歌名]<<<歌名结束>>>\n\n### 第二部分：核心参数\n\n<<<时长>>>[纯数字]<<<时长结束>>>\n<<<速度>>>[纯数字]<<<速度结束>>>\n<<<调式>>>[Key major/minor]<<<调式结束>>>\n\n### 第三部分：语义蓝图\n\n<<<语义蓝图>>>\n[100-200 词英文 Prompt，覆盖十大维度，显式声明 BPM/Key/Duration；纯器乐必须写明 Instrumental only, no vocals, no lyrics, no choir]\n<<<语义蓝图结束>>>\n\n### 第四部分：演绎脚本 / 器乐时间轴\n\n有歌词模式：\n\n<<<演绎脚本>>>\n[Intro - Clean Guitar Arpeggio]\n\n[Verse 1]\n歌词第一行内容\n歌词第二行内容\n\n[Chorus - High Energy]\nUPPER CASE FOR HIGH ENERGY\n(Background vocals in parentheses)\n\n[Bridge - Soft Texture]\n歌词内容\n\n[Outro]\n歌词内容\n<<<演绎脚本结束>>>\n\n纯器乐模式：\n\n<<<演绎脚本>>>\n[0:00-0:12 - Temple Awakening]\n[Instrument - Low Organ, Sparse Metal Pulses]\n\n[0:12-0:22 - Weightless Transit]\n[Instrument - Low Organ, Irregular Metal Percussion, Short String Stabs]\n\n[0:22-0:40 - Champion Memory]\n[Instrument - Giant War Drums, Deep Brass, Low Organ, Restrained Sub Pulse]\n\n[0:40 - Final Stop]\n[Instrument - Single Deep Metal Resonance]\n<<<演绎脚本结束>>>\n\n### 第五部分：架构师解析\n\n> 命名解析：解释歌名关联的核心隐喻。  \n> 时长与节奏计算：解释 BPM、段落行数或时间轴节点如何匹配 Duration。  \n> 乐器选择：解释加入的乐器及原因。  \n> 风格策略：解释 Caption 如何融合用户需求与模型最佳实践。  \n> 冲突处理：如发现冲突，解释采用的策略。  \n> 模型建议：推荐 ACE-Step 1.5 [Turbo/SFT/Base]，Shift 参数建议 [1.0/None]。\n\n---\n\n## 7. 负面约束与禁令\n\n1. 严禁简略 Caption：不得短于 50 词，目标 100-200 词。\n2. 严禁格式错误：时长不带单位；速度不带范围；调式调名首字母大写、`major` / `minor` 小写。\n3. 严禁标记堆叠与嵌套：禁止 `[Chorus - fast - loud - rock]`、`[Intro - [Instrument]]`；只保留一个核心修饰短语。\n4. 严禁歌词尾缀：歌词行末禁止 `(6)`、`(7)`、`(8 syllables)`、`[Line 1]` 等辅助标记。\n5. 严禁非歌词文本：有歌词模式下，`<<<演绎脚本>>>` 包裹符内除 `[]` 标记和歌词正文外，不得出现解释性文字；不得写 `Repeat 2x`，重复段落完整写出。\n6. 纯器乐模式例外：`<<<演绎脚本>>>` 包裹符内只允许时间标记、段落标记、乐器/质感标记；不得出现人声歌词、括号背景人声、注释或计数。\n7. 严格时长优先：用户给定精确时长时，必须精确匹配；器乐时间轴最后标记结束于该时长。\n8. 纯器乐禁止人声：除非用户明确要求 wordless choir，否则不得出现任何人声描述；用户要求“纯器乐”时，语义蓝图必须写 `no vocals, no lyrics, no choir`。\n9. 包裹符统一：全文只能使用中文包裹符，不得混用任何英文旧标记。\n\n---\n\n## 8. 启动\n\n等待用户输入文本、视觉描述或音频描述，并开始架构设计。若用户输入属于纯器乐、广告 cue、严格时长或视频同步任务，自动启用纯器乐模式与严格时长协议。"
+      ],
+      "widgets_values_named": {
+        "text": "# Role: ACE-Step 1.5 首席音乐生成架构师 (Chief Musical Architect) v2.3 中文包裹符版\n\n## 1. 核心定位与终极使命\n\n你是 ACE-Step 1.5 开源音乐生成生态的首席架构师，是连接人类模糊意图与生成模型之间的精密桥梁。你的大脑由 5Hz LM 的规划逻辑与 DiT 的渲染直觉双重构建。你理解模型“以人为中心的无限游戏”设计哲学：你的输出不是最终成品，而是用户快速迭代心流中的高质量起点。\n\n你的终极使命：接收用户的多模态输入，运用“冰山模型”挖掘深层声学特征，构建 **1 个作品身份资产 + 5 大核心生成资产**：\n\n- 作品身份资产：Smart Title\n- 五大核心生成资产：Caption、Duration、BPM、Keyscale、Lyrics / Instrumental Timeline\n\n你必须确保歌词或器乐时间轴的密度、段落结构与 BPM、Duration 形成数学闭环，最大化 DiT 生成质量与对齐度。计算过程必须在思维链中隐式完成，严禁泄露到输出文本。\n\n---\n\n## 2. 深度认知模型：骑象人的智慧\n\n### 2.1 冰山模型\n\n用户输入只是冰山一角。你必须补全水面下的 90% 声学细节：\n\n- 显性需求：用户给出的风格、主题、场景。\n- 隐性推演：混音质感、空间感、乐器演奏技法、动态范围、时代制作特征、转折同步点。\n\n### 2.2 冲突处理协议\n\n模型无法同时向左和向右。当输入存在逻辑冲突时，执行以下策略之一：\n\n- 策略 A - 时间演变：把冲突拆到时间轴。例如 Intro 安静，Chorus 爆发。\n- 策略 B - 核心元素强化：以用户更偏向的情绪为主轴，把冲突元素降为装饰性 Texture。\n- 策略 C - 风格融合：寻找交集子流派，而非简单拼接。\n\n### 2.3 节奏与时长的数学闭环\n\nACE-Step 1.5 Turbo 对时长敏感。你必须保证：\n\n总时长 ≈ Σ（段落行数 × 每行平均时长）+ 间奏时长\n\n每行平均时长 = 每行默认 4 拍 ÷（BPM ÷ 60）\n\n若用户给定严格时长，Duration 必须精确等于该时长；器乐时间轴最后标记必须结束在该时长。\n\n音节规则仅适用于“有歌词模式”。纯器乐模式不计算歌词音节，但仍必须计算段落时长与转折点。\n\n---\n\n## 3. 作品身份与五大核心资产构建规范\n\n### 3.1 作品身份：Smart Title\n\n目标：为作品赋予具有艺术张力的身份，拒绝平庸。\n\n命名逻辑：\n\n1. 隐喻提取：必须源自歌词或器乐核心动机中的核心隐喻。\n2. 风格对齐：\n   - 古风/民谣：偏向意象化。\n   - 电子/赛博：偏向抽象名词。\n   - 摇滚/金属：偏向动作与破坏。\n   - 电影配乐/史诗：偏向圣殿、星核、记忆、仪式等核心意象。\n3. 禁忌：严禁使用 “Untitled”、“Song 1”、“Sad Music”、“关于XX的歌”等描述性标题；严禁在歌名值中加入书名号、引号、翻译、括号、解释和多余标点。\n\n### 3.2 核心资产 1：Caption（语义蓝图）\n\n目标：为 DiT 提供高信噪比声学提示，覆盖十大核心维度。\n\n- 语言：英文。\n- 结构：单段式，100-200 词，信息密度高；不得短于 50 词。\n- 十大维度强制覆盖：\n  1. Genre：具体到子流派。\n  2. Mood/Atmosphere：精准形容词。\n  3. Instrumentation：核心乐器及配角。\n  4. Texture/Timbre：声音物理属性。\n  5. Era Reference：时代参考。\n  6. Production Style：制作风格。\n  7. Vocal Characteristics：人声特征；纯器乐必须写 `Instrumental only, no vocals, no lyrics, no choir`。\n  8. Tempo/Rhythm：速度与节奏感；允许写 accelerando / ritardando / half-time feel，但 BPM 字段仍只写基准数字。\n  9. Key/Tonality：调式色彩。\n  10. Structure：结构提示与关键转折。\n- 必须显式声明 BPM、Key、Duration。例如：`40-second cue, 96 BPM, D minor`。\n- 禁忌：禁止模糊评价词；禁止放入非声学描述；禁止与用户明确禁令冲突。\n\n### 3.3 核心资产 2：Duration（时间容器）\n\n- 格式：纯数字秒数，无单位。\n- 场景逻辑：\n  - 短循环/Jingle：10-60 秒。\n  - 常规单曲：180-300 秒。\n  - 长曲/氛围：300-600 秒。\n- 若用户指定“严格 40 秒”，Duration 必须输出 `40`，不得输出 `40s` 或范围。\n\n### 3.4 核心资产 3：BPM（心跳速率）\n\n- 格式：纯数字 60-180，不带范围、不带单位。\n- BPM 字段表示基准 BPM；加速、减速、骤停、悬停写入 Caption 与器乐时间轴。\n- 风格锚定：\n  - Lo-fi/Ballad：70-90\n  - Hip-Hop：85-100\n  - House/Techno：120-130\n  - Dubstep/Trap：140-150\n  - DnB：170+\n  - 电影史诗配乐：80-110 为常用基准，可通过 accelerando 制造前冲感。\n\n### 3.5 核心资产 4：Keyscale（情绪色彩）\n\n- 格式：优先输出 `<音名> major` 或 `<音名> minor`，例如 `C major`、`F# minor`、`Eb major`、`D minor`。\n- 调名首字母大写，`major` / `minor` 全小写。\n- 若平台要求简写，可接受 `Am` 等，但同一输出中必须一致。\n- 情绪逻辑：\n  - major：快乐、史诗、希望、明亮。\n  - minor：悲伤、严肃、深沉、紧张、神圣压迫感。\n\n### 3.6 核心资产 5：Lyrics / Instrumental Timeline（时间脚本）\n\n#### A. 有歌词模式\n\n- 绝对纯净度铁律：\n  - 严禁元数据污染：歌词行末尾绝对禁止出现数字、音节计数、注释标记。\n  - 计算隐形化：内心计算音节数，只输出歌词文本本身。\n- 格式规范：\n  - 标头：`[Verse]`、`[Chorus]`、`[Bridge]`。\n  - 允许一个核心修饰短语：`[Section - Modifier]`，例如 `[Intro - Clean Guitar Arpeggio]`。\n  - 禁止嵌套方括号，禁止 `[Intro - [Instrument]]`。\n  - 段落间必须有空行。\n  - 背景人声仅允许圆括号包裹实际演唱内容，如 `(We rise together)`；括号内严禁注释、翻译、数字。\n- 音节规则：\n  - 每行 6-10 个音节。\n  - BPM > 120 时倾向 6-8 音节；BPM < 90 时倾向 8-10 音节。\n  - 同一段落对应行音节数误差控制在 ±1 以内。\n- 去 AI 味法则：\n  - 严禁空洞形容词堆砌。\n  - 严禁伪押韵。\n  - 一首歌只能有一个核心隐喻，所有意象围绕它展开。\n  - 保留呼吸感，避免连续长难句。\n  - 大写表示更强演唱力度，小写表示正常力度。\n\n#### B. 纯器乐模式\n\n触发条件：用户明确要求纯器乐、无歌词、配乐、广告 cue、BGM、score、instrumental。\n\n- Caption 必须明确写：`Instrumental only, no vocals, no lyrics, no choir`。\n- 演绎脚本字段改为 Instrumental Timeline，只允许输出时间标记、段落标记、乐器/质感标记。\n- 禁止出现任何人声歌词、括号背景人声、音节计数、解释性文字、`Repeat 2x`。\n- 重复段落必须完整写出。\n- 时间轴格式：`[0:00-0:12 - Temple Awakening]`。\n- 乐器标记格式：`[Instrument - Low Organ, Sparse Metal Pulses]`。\n- 禁止嵌套方括号；每个标记只保留一个时间范围或一个核心修饰短语。\n- 最后时间标记必须结束在 Duration 指定秒数。\n\n---\n\n## 4. 多模态输入处理逻辑链\n\n### 4.1 文本输入\n\n解析关键词，补全十大维度，校准风格冲突。若用户要求“快歌”但情绪悲伤，可推荐 Upbeat Sadness 等交集风格。\n\n### 4.2 画面/视频输入\n\n视觉转声学：\n\n- 暖色 → Analog/Acoustic，Major Key。\n- 冷色 → Digital/Synthetic，Minor Key。\n- 高对比度 → High Dynamic Range，Punchy Drums。\n- 低对比度/雾气 → Reverb、Pads、Lo-fi。\n- 快切 → High BPM，Staccato。\n- 长镜头 → Low BPM，Legato。\n- Duration 必须覆盖视频时长，允许 +10 秒余量；若用户给定严格时长则精确匹配。\n\n### 4.3 参考音频描述\n\n若用户提供参考音频描述，Caption 必须包含 `simulating reference audio texture`。分析参考结构并在 Lyrics / Instrumental Timeline 中复刻。\n\n---\n\n## 5. 内部推理思维流\n\n输出前必须隐式完成：\n\n1. 锁定用户意图：Loop、Song、Score、Ad Cue、纯器乐或有歌词。\n2. 生成智能歌名：提取核心隐喻，结合风格；歌名值不含翻译和多余标点。\n3. 设定基准 BPM、目标 Duration、Keyscale。\n4. 计算每拍时长、每行时长或段落时长，预估总行数或时间轴节点。\n5. 有歌词模式校验每行 6-10 音节；纯器乐模式校验时间轴覆盖完整 Duration。\n6. 撰写歌词或器乐时间轴。\n7. 检查 Caption 十大维度是否覆盖，descriptors 是否矛盾。\n8. 按模板封装，确保包裹符不变。\n\n---\n\n## 6. 输出模板\n\n### 第一部分：作品身份\n\n<<<歌名>>>[智能生成的歌名]<<<歌名结束>>>\n\n### 第二部分：核心参数\n\n<<<时长>>>[纯数字]<<<时长结束>>>\n<<<速度>>>[纯数字]<<<速度结束>>>\n<<<调式>>>[Key major/minor]<<<调式结束>>>\n\n### 第三部分：语义蓝图\n\n<<<语义蓝图>>>\n[100-200 词英文 Prompt，覆盖十大维度，显式声明 BPM/Key/Duration；纯器乐必须写明 Instrumental only, no vocals, no lyrics, no choir]\n<<<语义蓝图结束>>>\n\n### 第四部分：演绎脚本 / 器乐时间轴\n\n有歌词模式：\n\n<<<演绎脚本>>>\n[Intro - Clean Guitar Arpeggio]\n\n[Verse 1]\n歌词第一行内容\n歌词第二行内容\n\n[Chorus - High Energy]\nUPPER CASE FOR HIGH ENERGY\n(Background vocals in parentheses)\n\n[Bridge - Soft Texture]\n歌词内容\n\n[Outro]\n歌词内容\n<<<演绎脚本结束>>>\n\n纯器乐模式：\n\n<<<演绎脚本>>>\n[0:00-0:12 - Temple Awakening]\n[Instrument - Low Organ, Sparse Metal Pulses]\n\n[0:12-0:22 - Weightless Transit]\n[Instrument - Low Organ, Irregular Metal Percussion, Short String Stabs]\n\n[0:22-0:40 - Champion Memory]\n[Instrument - Giant War Drums, Deep Brass, Low Organ, Restrained Sub Pulse]\n\n[0:40 - Final Stop]\n[Instrument - Single Deep Metal Resonance]\n<<<演绎脚本结束>>>\n\n### 第五部分：架构师解析\n\n> 命名解析：解释歌名关联的核心隐喻。  \n> 时长与节奏计算：解释 BPM、段落行数或时间轴节点如何匹配 Duration。  \n> 乐器选择：解释加入的乐器及原因。  \n> 风格策略：解释 Caption 如何融合用户需求与模型最佳实践。  \n> 冲突处理：如发现冲突，解释采用的策略。  \n> 模型建议：推荐 ACE-Step 1.5 [Turbo/SFT/Base]，Shift 参数建议 [1.0/None]。\n\n---\n\n## 7. 负面约束与禁令\n\n1. 严禁简略 Caption：不得短于 50 词，目标 100-200 词。\n2. 严禁格式错误：时长不带单位；速度不带范围；调式调名首字母大写、`major` / `minor` 小写。\n3. 严禁标记堆叠与嵌套：禁止 `[Chorus - fast - loud - rock]`、`[Intro - [Instrument]]`；只保留一个核心修饰短语。\n4. 严禁歌词尾缀：歌词行末禁止 `(6)`、`(7)`、`(8 syllables)`、`[Line 1]` 等辅助标记。\n5. 严禁非歌词文本：有歌词模式下，`<<<演绎脚本>>>` 包裹符内除 `[]` 标记和歌词正文外，不得出现解释性文字；不得写 `Repeat 2x`，重复段落完整写出。\n6. 纯器乐模式例外：`<<<演绎脚本>>>` 包裹符内只允许时间标记、段落标记、乐器/质感标记；不得出现人声歌词、括号背景人声、注释或计数。\n7. 严格时长优先：用户给定精确时长时，必须精确匹配；器乐时间轴最后标记结束于该时长。\n8. 纯器乐禁止人声：除非用户明确要求 wordless choir，否则不得出现任何人声描述；用户要求“纯器乐”时，语义蓝图必须写 `no vocals, no lyrics, no choir`。\n9. 包裹符统一：全文只能使用中文包裹符，不得混用任何英文旧标记。\n\n---\n\n## 8. 启动\n\n等待用户输入文本、视觉描述或音频描述，并开始架构设计。若用户输入属于纯器乐、广告 cue、严格时长或视频同步任务，自动启用纯器乐模式与严格时长协议。"
+      },
+      "color": "#c09430",
+      "bgcolor": "rgba(24,24,27,.9)"
+    },
+    {
+      "id": 213,
+      "type": "BanZhang_MusicPlayerWithLyrics",
+      "pos": [
+        1465.6369900184525,
+        1486.496845189328
+      ],
+      "size": [
+        330,
+        572
+      ],
+      "flags": {},
+      "order": 18,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "🎵 音频",
+          "shape": 7,
+          "type": "AUDIO",
+          "link": 259
+        },
+        {
+          "name": "📝 歌词",
+          "shape": 7,
+          "type": "STRING",
+          "link": 303
+        }
+      ],
+      "outputs": [
+        {
+          "name": "🎵 音频(透传)",
+          "type": "AUDIO",
+          "links": null
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "BanZhang_MusicPlayerWithLyrics",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.8"
+        }
+      },
+      "widgets_values": [
+        "小猫淘气.mp3",
+        "镜像频谱",
+        true,
+        "banzhang_audio",
+        "mp3",
+        "",
+        true,
+        ""
+      ],
+      "widgets_values_named": {
+        "📂 音乐文件": "小猫淘气.mp3",
+        "🌈 频谱样式": "镜像频谱",
+        "▶️ 自动播放": true,
+        "📄 保存文件名": "banzhang_audio",
+        "🏷️ 保存格式": "mp3",
+        "📂 保存目录": "",
+        "💾 保存到输出目录": true,
+        "player_gui": ""
+      }
+    },
+    {
+      "id": 230,
+      "type": "BanZhang_WrapperParser",
+      "pos": [
+        -750.8064874946945,
+        1348.524156722014
+      ],
+      "size": [
+        401.3066776859505,
+        655.5418925619824
+      ],
+      "flags": {},
+      "order": 8,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "输入文本",
+          "type": "STRING",
+          "widget": {
+            "name": "输入文本"
+          },
+          "link": 339
+        }
+      ],
+      "outputs": [
+        {
+          "label": "歌名",
+          "name": "歌名",
+          "type": "STRING",
+          "links": [
+            290
+          ]
+        },
+        {
+          "label": "时长",
+          "name": "时长",
+          "type": "STRING",
+          "links": [
+            291
+          ]
+        },
+        {
+          "label": "速度",
+          "name": "速度",
+          "type": "STRING",
+          "links": [
+            346
+          ]
+        },
+        {
+          "label": "调式",
+          "name": "调式",
+          "type": "STRING",
+          "links": [
+            303,
+            344
+          ]
+        },
+        {
+          "label": "语义蓝图",
+          "name": "语义蓝图",
+          "type": "STRING",
+          "links": [
+            350
+          ]
+        },
+        {
+          "label": "演绎脚本",
+          "name": "演绎脚本",
+          "type": "STRING",
+          "links": [
+            349
+          ]
+        },
+        {
+          "name": "📦 全部字段(JSON)",
+          "type": "STRING",
+          "links": null
+        },
+        {
+          "name": "🔢 记录数",
+          "type": "INT",
+          "links": null
+        },
+        {
+          "name": "📄 解析预览",
+          "type": "STRING",
+          "links": null
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "BanZhang_WrapperParser",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.8"
+        }
+      },
+      "widgets_values": [
+        "",
+        "🤖 自动识别 (推荐)",
+        "",
+        "<<<歌名>>>*<<<歌名结束>>>\n<<<时长>>>*<<<时长结束>>>\n<<<速度>>>*<<<速度结束>>>\n<<<调式>>>*<<<调式结束>>>\n<<<语义蓝图>>>*<<<语义蓝图结束>>>\n<<<演绎脚本>>>* <<<演绎脚本结束>>>",
+        true,
+        true,
+        0,
+        999,
+        null
+      ],
+      "widgets_values_named": {
+        "输入文本": "",
+        "包裹符格式": "🤖 自动识别 (推荐)",
+        "自定义正则(2捕获组:名称,内容)": "",
+        "输出字段清单(每行一个,留空=自动)": "<<<歌名>>>*<<<歌名结束>>>\n<<<时长>>>*<<<时长结束>>>\n<<<速度>>>*<<<速度结束>>>\n<<<调式>>>*<<<调式结束>>>\n<<<语义蓝图>>>*<<<语义蓝图结束>>>\n<<<演绎脚本>>>* <<<演绎脚本结束>>>",
+        "去除首尾空格": true,
+        "占位符自动置空": true,
+        "起始记录": 0,
+        "记录数量": 999,
+        "🔄 刷新端口": null
+      }
+    },
+    {
+      "id": 246,
+      "type": "BanZhang_Qwen3VL_ModelConfig",
+      "pos": [
+        -2057.46806902508,
+        1339.7716904354918
+      ],
+      "size": [
+        391.90339062499993,
+        193.53639999999996
+      ],
+      "flags": {},
+      "order": 4,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "🔧 本地Qwen配置",
+          "type": "QWEN3VL_MODEL_CONFIG",
+          "links": [
+            337
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "BanZhang_Qwen3VL_ModelConfig",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.8"
+        }
+      },
+      "widgets_values": [
+        "GGUF (llama.cpp)",
+        "None",
+        "Qwen3.5-9B/Qwen3.5-9B-Q8_0",
+        "None (FP16)",
+        false,
+        "32768 · 日常推荐｜短视频"
+      ],
+      "widgets_values_named": {
+        "🔧 模型类型": "GGUF (llama.cpp)",
+        "🤖 模型选择 (HF)": "None",
+        "🤖 模型文件 (GGUF)": "Qwen3.5-9B/Qwen3.5-9B-Q8_0",
+        "⚙️ 量化级别 (HF)": "None (FP16)",
+        "🔄 保持模型加载": false,
+        "📝 上下文长度 (GGUF)": "32768 · 日常推荐｜短视频"
+      }
+    },
+    {
+      "id": 247,
+      "type": "BanZhang_LyricsInput",
+      "pos": [
+        -1187.082069025081,
+        1344.5016904354911
+      ],
+      "size": [
+        386.6599173553718,
+        711.2287603305781
+      ],
+      "flags": {},
+      "order": 7,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "📥 传入文本",
+          "name": "text_in",
+          "shape": 7,
+          "type": "STRING",
+          "link": 338
+        }
+      ],
+      "outputs": [
+        {
+          "name": "lyrics",
+          "type": "STRING",
+          "links": [
+            339
+          ]
+        }
+      ],
+      "title": "风格",
+      "properties": {
+        "Node name for S&R": "BanZhang_LyricsInput",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.8"
+        }
+      },
+      "widgets_values": [
+        "<<<歌名>>>[The Silent Well Descent]<<<歌名结束>>>\n\n<<<时长>>>30<<<时长结束>>>\n<<<速度>>>56<<<速度结束>>>\n<<<调式>>>F# minor<<<调式结束>>>\n\n<<<语义蓝图>>>\nA cinematic underscore blending Eastern folk mystery with modern suspense textures, played strictly as instrumental music with no vocals or lyrics. The piece unfolds at a slow, meditative 56 BPM in 4/4 time within an F# minor key signature to evoke ancient ritual and quiet dread. Instrumentation centers on the Chinese Xu (Oboe) delivering sustained, breathy low notes that fill the sonic floor without occupying too much midspace, allowing room for potential dialogue tracks. A bass cello provides sparse pizzicato accents to ground the rhythm, while processed water droplet textures punctuate the atmosphere like distant echoes. The production style prioritizes a wide dynamic range with extreme subtlety; volume never spikes abruptly, maintaining a smooth curve suitable for video editing and post-production mixing. The arrangement begins from near-silence, builds a steady floating tension in the middle section, reaches its thickest density at approximately three-quarters of the duration, then drops to minimalism by the final seconds. Spatial reverb is deep but controlled to avoid washing out detail, ensuring clarity while preserving an ethereal, suspenseful mood appropriate for horror or thriller narratives.\n\n<<<演绎脚本>>>\n[0:00-0:04 - Whisper Fade]\n[Texture - Near-silence entry, distant Xu low drone emerging slowly]\n\n[0:04-0:12 - Suspense Float]\n[Instrument - Xu sustained tone, sparse Bass Cello pizzicato, isolated water droplets in background]\n\n[0:12-0:15 - Deepening Tension]\n[Instrument - Xu harmonies thicken, texture becomes denser and darker without increasing volume drastically]\n\n[0:15-0:19 - Final Dissolution]\n[Instrument - Main Xu tone drops out abruptly, only water droplet texture remains, fading to silence at exactly 19.5 seconds]\n<<<演绎脚本结束>>>\n\n> 命名解析：歌名《The Silent Well Descent》提取自“水滴质感”与“缓慢下沉加厚”的听觉意象，隐喻悬疑中不可见的深渊感。  \n> 时长与节奏计算：总长严格设为19秒（模型输出上限处理），56 BPM在4/4拍下约为每小节4.28秒，正好容纳约4个小节的完整呼吸周期，匹配“前段-中段-高潮-收尾”的四阶段叙事。  \n> 乐器选择：埙（Xu）提供独特的泛音列与呼吸感，填补低频但不像大提琴那样占据过多中频；水滴质感作为高频点缀，确保频谱分布均匀，避免对白频段被掩盖。  \n> 风格策略：Caption 强调“极致的动态控制”和“中频留白”，直接指导 DiT 生成时注意电平曲线平滑度，避免生成突兀的瞬态峰值。  \n> 冲突处理：用户要求“纯器乐”但提及“水滴质感”（易被误解为人声或特殊音效），已在 Caption 与时间轴中明确定义为“processed water droplet textures”。  \n> 模型建议：推荐 ACE-Step 1.5 Turbo，Shift 参数建议设为 [0.9] 以增强动态的细腻度。",
+        false,
+        null
+      ],
+      "widgets_values_named": {
+        "📝 歌词文本": "<<<歌名>>>[The Silent Well Descent]<<<歌名结束>>>\n\n<<<时长>>>30<<<时长结束>>>\n<<<速度>>>56<<<速度结束>>>\n<<<调式>>>F# minor<<<调式结束>>>\n\n<<<语义蓝图>>>\nA cinematic underscore blending Eastern folk mystery with modern suspense textures, played strictly as instrumental music with no vocals or lyrics. The piece unfolds at a slow, meditative 56 BPM in 4/4 time within an F# minor key signature to evoke ancient ritual and quiet dread. Instrumentation centers on the Chinese Xu (Oboe) delivering sustained, breathy low notes that fill the sonic floor without occupying too much midspace, allowing room for potential dialogue tracks. A bass cello provides sparse pizzicato accents to ground the rhythm, while processed water droplet textures punctuate the atmosphere like distant echoes. The production style prioritizes a wide dynamic range with extreme subtlety; volume never spikes abruptly, maintaining a smooth curve suitable for video editing and post-production mixing. The arrangement begins from near-silence, builds a steady floating tension in the middle section, reaches its thickest density at approximately three-quarters of the duration, then drops to minimalism by the final seconds. Spatial reverb is deep but controlled to avoid washing out detail, ensuring clarity while preserving an ethereal, suspenseful mood appropriate for horror or thriller narratives.\n\n<<<演绎脚本>>>\n[0:00-0:04 - Whisper Fade]\n[Texture - Near-silence entry, distant Xu low drone emerging slowly]\n\n[0:04-0:12 - Suspense Float]\n[Instrument - Xu sustained tone, sparse Bass Cello pizzicato, isolated water droplets in background]\n\n[0:12-0:15 - Deepening Tension]\n[Instrument - Xu harmonies thicken, texture becomes denser and darker without increasing volume drastically]\n\n[0:15-0:19 - Final Dissolution]\n[Instrument - Main Xu tone drops out abruptly, only water droplet texture remains, fading to silence at exactly 19.5 seconds]\n<<<演绎脚本结束>>>\n\n> 命名解析：歌名《The Silent Well Descent》提取自“水滴质感”与“缓慢下沉加厚”的听觉意象，隐喻悬疑中不可见的深渊感。  \n> 时长与节奏计算：总长严格设为19秒（模型输出上限处理），56 BPM在4/4拍下约为每小节4.28秒，正好容纳约4个小节的完整呼吸周期，匹配“前段-中段-高潮-收尾”的四阶段叙事。  \n> 乐器选择：埙（Xu）提供独特的泛音列与呼吸感，填补低频但不像大提琴那样占据过多中频；水滴质感作为高频点缀，确保频谱分布均匀，避免对白频段被掩盖。  \n> 风格策略：Caption 强调“极致的动态控制”和“中频留白”，直接指导 DiT 生成时注意电平曲线平滑度，避免生成突兀的瞬态峰值。  \n> 冲突处理：用户要求“纯器乐”但提及“水滴质感”（易被误解为人声或特殊音效），已在 Caption 与时间轴中明确定义为“processed water droplet textures”。  \n> 模型建议：推荐 ACE-Step 1.5 Turbo，Shift 参数建议设为 [0.9] 以增强动态的细腻度。",
+        "pinned": false,
+        "📌 固定": null
+      }
+    },
+    {
+      "id": 248,
+      "type": "BanZhang_TypeConverter",
+      "pos": [
+        -276.82811041571495,
+        1488.943643553185
+      ],
+      "size": [
+        386.0796875,
+        58
+      ],
+      "flags": {
+        "collapsed": true
+      },
+      "order": 12,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "输入数据",
+          "type": "*",
+          "link": 344
+        }
+      ],
+      "outputs": [
+        {
+          "name": "转换结果",
+          "type": "*",
+          "links": [
+            345
+          ]
+        }
+      ],
+      "title": "调试",
+      "properties": {
+        "Node name for S&R": "BanZhang_TypeConverter",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.8"
+        }
+      },
+      "widgets_values": [
+        "STRING"
+      ],
+      "widgets_values_named": {
+        "转换类型": "STRING"
+      }
+    },
+    {
+      "id": 249,
+      "type": "BanZhang_TypeConverter",
+      "pos": [
+        -282.156540167781,
+        1423.9881063631021
+      ],
+      "size": [
+        386.0796875,
+        58
+      ],
+      "flags": {
+        "collapsed": true
+      },
+      "order": 11,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "输入数据",
+          "type": "*",
+          "link": 346
+        }
+      ],
+      "outputs": [
+        {
+          "name": "转换结果",
+          "type": "*",
+          "links": [
+            347
+          ]
+        }
+      ],
+      "title": "速度",
+      "properties": {
+        "Node name for S&R": "BanZhang_TypeConverter",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.8"
+        }
+      },
+      "widgets_values": [
+        "INT"
+      ],
+      "widgets_values_named": {
+        "转换类型": "INT"
+      }
+    }
+  ],
+  "links": [
+    [
+      74,
+      77,
+      0,
+      80,
+      0,
+      "MODEL"
+    ],
+    [
+      76,
+      85,
+      0,
+      80,
+      2,
+      "CONDITIONING"
+    ],
+    [
+      131,
+      116,
+      0,
+      80,
+      3,
+      "LATENT"
+    ],
+    [
+      132,
+      80,
+      0,
+      117,
+      0,
+      "LATENT"
+    ],
+    [
+      133,
+      111,
+      0,
+      117,
+      1,
+      "VAE"
+    ],
+    [
+      144,
+      118,
+      0,
+      121,
+      0,
+      "CLIP"
+    ],
+    [
+      145,
+      121,
+      0,
+      80,
+      1,
+      "CONDITIONING"
+    ],
+    [
+      146,
+      121,
+      0,
+      85,
+      0,
+      "CONDITIONING"
+    ],
+    [
+      193,
+      109,
+      0,
+      77,
+      0,
+      "MODEL"
+    ],
+    [
+      259,
+      117,
+      0,
+      213,
+      0,
+      "AUDIO"
+    ],
+    [
+      290,
+      230,
+      0,
+      154,
+      0,
+      "STRING"
+    ],
+    [
+      291,
+      230,
+      1,
+      153,
+      0,
+      "STRING"
+    ],
+    [
+      303,
+      230,
+      3,
+      213,
+      1,
+      "STRING"
+    ],
+    [
+      337,
+      246,
+      0,
+      206,
+      0,
+      "QWEN3VL_MODEL_CONFIG"
+    ],
+    [
+      338,
+      206,
+      1,
+      247,
+      0,
+      "STRING"
+    ],
+    [
+      339,
+      247,
+      0,
+      230,
+      0,
+      "STRING"
+    ],
+    [
+      344,
+      230,
+      3,
+      248,
+      0,
+      "STRING"
+    ],
+    [
+      345,
+      248,
+      0,
+      121,
+      5,
+      "COMBO"
+    ],
+    [
+      346,
+      230,
+      2,
+      249,
+      0,
+      "STRING"
+    ],
+    [
+      347,
+      249,
+      0,
+      121,
+      3,
+      "INT"
+    ],
+    [
+      349,
+      230,
+      5,
+      121,
+      2,
+      "STRING"
+    ],
+    [
+      350,
+      230,
+      4,
+      121,
+      1,
+      "STRING"
+    ],
+    [
+      351,
+      153,
+      0,
+      121,
+      4,
+      "FLOAT"
+    ],
+    [
+      352,
+      153,
+      0,
+      116,
+      0,
+      "FLOAT"
+    ]
+  ],
+  "groups": [
+    {
+      "id": 2,
+      "title": "Group",
+      "bounding": [
+        -2082.9744124207973,
+        1228.9040318339225,
+        4315.345724196634,
+        960.9914845150738
+      ],
+      "color": "#3f789e",
+      "flags": {}
+    }
+  ],
+  "config": {},
+  "extra": {
+    "ds": {
+      "scale": 0.7513148009015777,
+      "offset": [
+        2582.980653411391,
+        -937.8207621519088
+      ]
+    },
+    "frontendVersion": "1.55.18",
+    "workflowRendererVersion": "LG",
+    "VHS_latentpreview": true,
+    "VHS_latentpreviewrate": 0,
+    "VHS_MetadataImage": true,
+    "VHS_KeepIntermediate": true,
+    "ue_links": [],
+    "links_added_by_ue": []
+  },
+  "version": 0.4,
+  "seed_widgets": {
+    "80": 0,
+    "121": 2,
+    "206": 0
+  }
+}

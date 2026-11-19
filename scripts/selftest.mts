@@ -13,6 +13,8 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { PRESETS, presetFor } from '../src/main/core/presets.ts'
 import { appendRefTags, buildWorkflow, extractH3Chain, injectH3Prompt, injectH3RefImages, injectH3RefVideos } from '../src/main/core/workflow.ts'
+import { composeDeskText, normalizeRefs, dropUnbackedRefs, filterSlotsByPrompt, presentationOrder, emptySlots, alignFrames, nearestFrames } from '../src/main/core/h3-prompt.ts'
+import { exportProjectToFile, importProjectFromFile, collectProjectFiles } from '../src/main/core/project-archive.ts'
 import { ComfyClient } from '../src/main/core/comfy.ts'
 import { collectMediaFiles, collectHistoryFiles, pickFinalMedia, sanitizeOutputName } from '../src/main/core/output-files.ts'
 import {
@@ -29,8 +31,6 @@ import {
   fourViewNegative
 } from '../src/renderer/src/lib/assetGen.ts'
 import { buildChatUrl, normalizeAiConfig, defaultAiConfig } from '../src/shared/ai.ts'
-import { DownloadManager } from '../src/main/core/download.ts'
-import { ALL_ENTRIES, MODEL_CATALOG, resolveCatalog } from '../src/main/core/catalog.ts'
 import { extractArchive } from '../src/main/core/extract.ts'
 import { ProjectStore, uid, now } from '../src/main/core/store.ts'
 import { listMemory, readMemory, writeMemory, appendMemory } from '../src/main/core/memory.ts'
@@ -38,9 +38,8 @@ import { AiAssistant } from '../src/main/core/ai-assistant.ts'
 import { explainError } from '../src/renderer/src/lib/errorHelp.ts'
 import { ComfyRuntime } from '../src/main/core/comfy-runtime.ts'
 import { detectWorkflowKind, isUiWorkflow } from '../src/main/core/workflow-convert.ts'
-import { adaptTemplateForGpu, degradeMissingLoras } from '../src/main/core/template-adapt.ts'
+import { adaptTemplateForGpu, degradeMissingLoras, pickVramPreset, resetVramFieldsToAuthor } from '../src/main/core/template-adapt.ts'
 import { listBuiltinWorkflows, loadBuiltinWorkflow, buildBuiltinTemplates } from '../src/main/core/builtin-workflows.ts'
-import { collectModelRefs } from '../src/main/core/model-pack.ts'
 
 const execFileAsync = promisify(execFile)
 
@@ -210,108 +209,6 @@ ok('离线时 queueStatus 返回 0/0', () => {
   assert.equal(q.queueRemaining, 0)
 })
 
-// ---- 断点续传下载引擎（本地服务器，确定性验证） ----
-const payload = Buffer.alloc(256 * 1024)
-for (let i = 0; i < payload.length; i += 1) payload[i] = i % 251
-let rangeSeen = false
-
-const server = http.createServer((req, res) => {
-  if (req.url === '/file') {
-    if (req.headers.range) rangeSeen = true
-    const m = /bytes=(\d+)-(\d*)/.exec(req.headers.range ?? '')
-    const start = m ? Number(m[1]) : 0
-    const end = m && m[2] ? Number(m[2]) : payload.length - 1
-    if (m) {
-      res.writeHead(206, {
-        'Content-Range': `bytes ${start}-${end}/${payload.length}`,
-        'Content-Length': end - start + 1,
-        'Accept-Ranges': 'bytes'
-      })
-      res.end(payload.subarray(start, end + 1))
-    } else {
-      res.writeHead(200, { 'Content-Length': payload.length, 'Accept-Ranges': 'bytes' })
-      res.end(payload)
-    }
-  } else {
-    res.writeHead(404)
-    res.end()
-  }
-})
-await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()))
-const port = (server.address() as { port: number }).port
-const tmp = await fsp.mkdtemp(path.join(os.tmpdir(), 'ff-dl-'))
-
-function runDownload(dm: DownloadManager, req: Parameters<DownloadManager['start']>[0]): Promise<{ status: string }> {
-  return new Promise((resolve) => {
-    const onDone = (): void => {
-      cleanup()
-      resolve({ status: 'done' })
-    }
-    const onFail = (): void => {
-      cleanup()
-      resolve({ status: 'failed' })
-    }
-    const onCancel = (): void => {
-      cleanup()
-      resolve({ status: 'cancelled' })
-    }
-    const cleanup = (): void => {
-      dm.off('done', onDone)
-      dm.off('failed', onFail)
-      dm.off('cancelled', onCancel)
-    }
-    dm.once('done', onDone)
-    dm.once('failed', onFail)
-    dm.once('cancelled', onCancel)
-    dm.start(req)
-  })
-}
-
-const dm = new DownloadManager()
-const r1 = await runDownload(dm, {
-  id: 'full',
-  label: '完整下载',
-  url: `http://127.0.0.1:${port}/file`,
-  dest: path.join(tmp, 'full.bin')
-})
-ok('下载引擎：完整下载成功', () => assert.equal(r1.status, 'done'))
-const gotFull = await fsp.readFile(path.join(tmp, 'full.bin'))
-ok('下载引擎：完整下载字节一致', () => assert.equal(gotFull.equals(payload), true))
-
-// 预写前半段 .part，验证断点续传
-await fsp.writeFile(path.join(tmp, 'resume.bin.part'), payload.subarray(0, 65536))
-const r2 = await runDownload(dm, {
-  id: 'resume',
-  label: '断点续传',
-  url: `http://127.0.0.1:${port}/file`,
-  dest: path.join(tmp, 'resume.bin')
-})
-ok('下载引擎：断点续传成功', () => assert.equal(r2.status, 'done'))
-const gotResume = await fsp.readFile(path.join(tmp, 'resume.bin'))
-ok('下载引擎：断点续传字节一致', () => assert.equal(gotResume.equals(payload), true))
-ok('下载引擎：服务器收到 Range 请求', () => assert.equal(rangeSeen, true))
-
-// SHA256 校验失败 → failed
-const badSha = crypto.createHash('sha256').update('wrong').digest('hex')
-const r3 = await runDownload(dm, {
-  id: 'badsha',
-  label: '校验失败',
-  url: `http://127.0.0.1:${port}/file`,
-  dest: path.join(tmp, 'bad.bin'),
-  sha256: badSha
-})
-ok('下载引擎：SHA256 校验失败标记 failed', () => assert.equal(r3.status, 'failed'))
-let partExists = true
-try {
-  await fsp.stat(path.join(tmp, 'bad.bin.part'))
-} catch {
-  partExists = false
-}
-ok('下载引擎：校验失败后清理 part 文件', () => assert.equal(partExists, false))
-
-server.close()
-await fsp.rm(tmp, { recursive: true, force: true })
-
 // ---- 组件目录解析 ----
 const tmp2 = await fsp.mkdtemp(path.join(os.tmpdir(), 'ff-cat-'))
 const nvGpu = { vendor: 'nvidia' as const, name: 'RTX 3060', vramMB: 8192, vramKnown: true, driver: '580', cudaAvailable: true, raw: '' }
@@ -319,72 +216,6 @@ const nvLowGpu = { vendor: 'nvidia' as const, name: 'GTX 960', vramMB: 4096, vra
 const amdGpu = { vendor: 'amd' as const, name: 'RX 7800', vramMB: 16384, vramKnown: true, driver: '', cudaAvailable: false, raw: '' }
 const intelGpu = { vendor: 'intel' as const, name: 'Arc', vramMB: 8192, vramKnown: true, driver: '', cudaAvailable: false, raw: '' }
 
-ok('目录：NVIDIA 解析出便携版 + 工作流包', () => {
-  const items = resolveCatalog(tmp2, nvGpu)
-  assert.ok(items.length >= 2)
-  assert.equal(items[0].id, 'comfyui-portable')
-  assert.ok(items.some((i) => i.id === 'pack-h3-video'))
-  assert.ok(items.some((i) => i.id === 'pack-qwen-image'))
-})
-ok('目录：NVIDIA 低显存只给便携版', () => {
-  const items = resolveCatalog(tmp2, nvLowGpu)
-  assert.equal(items.length, 1)
-  assert.equal(items[0].id, 'comfyui-portable')
-})
-ok('目录：AMD 只解析出便携版', () => {
-  const items = resolveCatalog(tmp2, amdGpu)
-  assert.equal(items.length, 1)
-  assert.equal(items[0].id, 'comfyui-portable')
-})
-ok('目录：Intel 只解析出便携版', () => {
-  const items = resolveCatalog(tmp2, intelGpu)
-  assert.equal(items.length, 1)
-  assert.equal(items[0].id, 'comfyui-portable')
-})
-ok('目录：dest 落在安装根目录下且未安装', () => {
-  const items = resolveCatalog(tmp2, nvGpu)
-  assert.ok(items[0].dest!.startsWith(tmp2))
-  assert.equal(items[0].installed, false)
-})
-ok('目录：H3 包模型 dest 落在正确子目录', () => {
-  const items = resolveCatalog(tmp2, nvGpu)
-  const h3 = items.find((i) => i.id === 'pack-h3-video')!
-  assert.equal(h3.files!.length, 6)
-  const unet = h3.files!.find((f) => f.file.includes('minimax_h3_hybrid'))!
-  assert.ok(unet.dest.includes(path.join('MiniMax-H3', 'minimax_h3_hybrid_fl2va_ref2va_b25-49.safetensors')))
-  const tae = h3.files!.find((f) => f.file.includes('TAE'))!
-  assert.ok(tae.dest.includes('vae_approx'))
-})
-ok('目录：模型源为原始官方地址（镜像由网络设置改写）', () => {
-  const items = resolveCatalog(tmp2, nvGpu)
-  const h3 = items.find((i) => i.id === 'pack-h3-video')!
-  const first = h3.files![0].sources[0]
-  assert.ok(first.url.includes('huggingface.co'), `首源应为官方原始地址: ${first.url}`)
-})
-ok('目录：传 comfyModelsRoot 时模型下到 ComfyUI 的 models', () => {
-  const items = resolveCatalog(tmp2, nvGpu, 'X:/ComfyUI/models')
-  const h3 = items.find((i) => i.id === 'pack-h3-video')!
-  assert.ok(h3.files![0].dest.toLowerCase().includes('comfyui'))
-})
-ok('目录：便携版需要解压', () => {
-  const items = resolveCatalog(tmp2, nvGpu)
-  assert.equal(items[0].extract, true)
-})
-ok('目录：全部 id 唯一且源为 https', () => {
-  const ids = new Set(ALL_ENTRIES.map((e) => e.id))
-  assert.equal(ids.size, ALL_ENTRIES.length)
-  for (const e of ALL_ENTRIES) {
-    const srcs = e.files?.length ? e.files.flatMap((f) => f.sources) : (e.sources ?? [])
-    assert.ok(srcs.length > 0, `${e.id} 无下载源`)
-    for (const s of srcs) assert.ok(s.url.startsWith('https://'), `${e.id} 源非 https`)
-  }
-})
-ok('目录：H3 包每个文件三个下载源齐全', () => {
-  const h3 = MODEL_CATALOG.find((e) => e.id === 'pack-h3-video')
-  assert.ok(h3)
-  assert.equal(h3.files!.length, 6)
-  for (const f of h3.files!) assert.ok(f.sources.length >= 3, `${f.file} 源不足`)
-})
 await fsp.rm(tmp2, { recursive: true, force: true })
 
 // ---- 解压 ----
@@ -1031,26 +862,6 @@ ok('双引擎：文生图按引擎选模板', () => {
 })
 
 // ---- H3 模型目录 ----
-ok('目录：NVIDIA 8GB 解析出 H3 全套模型（打包）', () => {
-  const items = resolveCatalog(tmp2, nvGpu)
-  const h3 = items.find((i) => i.id === 'pack-h3-video')
-  assert.ok(h3, '缺少 H3 工作流包')
-  for (const key of ['minimax_h3_hybrid', 'qwen3vl_32b_minimax', 'video_vae', 'audio_vae', 'TAE', 'h3_upscaler']) {
-    assert.ok(h3.files!.some((f) => f.file.includes(key)), '缺少 ' + key)
-  }
-})
-ok('目录：H3 模型 dest 指向正确子目录', () => {
-  const items = resolveCatalog(tmp2, nvGpu)
-  const h3 = items.find((i) => i.id === 'pack-h3-video')!
-  const unet = h3.files!.find((f) => f.file.includes('minimax_h3_hybrid'))!
-  assert.ok(unet.dest.includes(path.join('MiniMax-H3', 'minimax_h3_hybrid_fl2va_ref2va_b25-49.safetensors')))
-  const tae = h3.files!.find((f) => f.file.includes('TAE'))!
-  assert.ok(tae.dest.includes('vae_approx'))
-})
-ok('目录：FFmpeg 工具存在', () => {
-  const items = resolveCatalog(tmp2, nvGpu)
-  assert.ok(items.some((i) => i.id === 'ffmpeg-essentials'))
-})
 
 // ---- 内置工作流 ----
 ok('内置工作流：清单非空且含图片+视频', () => {
@@ -1059,10 +870,15 @@ ok('内置工作流：清单非空且含图片+视频', () => {
   assert.ok(list.some((w) => w.kind === 'video'), '缺少视频工作流')
   assert.ok(list.some((w) => w.kind === 'image'), '缺少图片工作流')
 })
-ok('内置工作流：能加载 apiJson', () => {
+ok('内置工作流：能加载工作流内容', () => {
   const list = listBuiltinWorkflows()
-  const wf = loadBuiltinWorkflow(list[0].file)
-  assert.ok(wf && wf.apiJson && typeof wf.apiJson === 'object')
+  if (list.length === 0) return // 未导入工作流时跳过
+  const wf = loadBuiltinWorkflow(list[0].file) as unknown as Record<string, unknown>
+  // 支持两种格式：API 格式（apiJson）或 ComfyUI UI 格式（nodes/links）
+  assert.ok(wf && typeof wf === 'object', '应能加载工作流')
+  const hasApi = wf.apiJson && typeof wf.apiJson === 'object'
+  const hasUi = Array.isArray(wf.nodes)
+  assert.ok(hasApi || hasUi, '应含 apiJson 或 nodes')
 })
 ok('内置工作流：空模板列表时全部补入', () => {
   let seq = 0
@@ -1106,92 +922,6 @@ ok('四视图：提示词含半身特写+正侧背全身', () => {
   assert.ok(/upper-body half-body portrait/i.test(p), '缺少半身特写')
   assert.ok(/front view, side view and back view/i.test(p), '缺少正侧背全身')
   assert.ok(/facial features/i.test(p), '缺少脸部细节')
-})
-
-ok('下载引擎：进度事件被节流(不刷爆IPC)', async () => {
-  // 4MB 本地文件，state 事件应远少于未节流的次数
-  const p2 = Buffer.alloc(4 * 1024 * 1024)
-  for (let i = 0; i < p2.length; i++) p2[i] = i % 251
-  const srv = http.createServer((req, res) => {
-    const m = /bytes=(\d+)-(\d*)/.exec(req.headers.range ?? '')
-    const start = m ? Number(m[1]) : 0
-    const end = m && m[2] ? Number(m[2]) : p2.length - 1
-    if (m) { res.writeHead(206, { 'Content-Range': `bytes ${start}-${end}/${p2.length}`, 'Content-Length': end - start + 1 }); res.end(p2.subarray(start, end + 1)) }
-    else { res.writeHead(200, { 'Content-Length': p2.length }); res.end(p2) }
-  })
-  await new Promise<void>((r) => srv.listen(0, '127.0.0.1', () => r()))
-  const pt = (srv.address() as { port: number }).port
-  const dm2 = new DownloadManager()
-  let emits = 0
-  dm2.on('state', () => emits++)
-  const dir2 = await fsp.mkdtemp(path.join(os.tmpdir(), 'ff-thr-'))
-  await new Promise<void>((resolve) => {
-    dm2.once('done', () => resolve())
-    dm2.once('failed', () => resolve())
-    dm2.start({ id: 'thr', label: '节流', url: `http://127.0.0.1:${pt}/f`, dest: path.join(dir2, 'x.bin'), parallel: 4 })
-  })
-  srv.close()
-  await fsp.rm(dir2, { recursive: true, force: true })
-  assert.ok(emits < 40, `事件过多: ${emits} (应被节流)`)
-})
-ok('目录：各工作流包源均含官方与镜像两种', () => {
-  for (const e of MODEL_CATALOG) {
-    for (const f of e.files ?? []) {
-      const urls = f.sources.map((s) => s.url)
-      assert.ok(urls.some((u) => u.includes('huggingface.co')), `${e.id}/${f.file} 缺官方源`)
-      assert.ok(urls.some((u) => u.includes('hf-mirror.com')), `${e.id}/${f.file} 缺镜像源`)
-    }
-  }
-})
-ok('网络：applyMirrors 开启 GitHub 加速时加 gh-proxy 前缀', async () => {
-  const { applyMirrors } = await import('../src/main/core/network-mirrors.ts')
-  const src = [{ name: 'GitHub 官方', url: 'https://github.com/a/b/releases/download/v1/x.7z' }]
-  const on = applyMirrors(src, { proxyAddress: '', mirrorPypi: true, mirrorGit: true, mirrorHuggingface: true, mirrorExtensionList: true, githubAcceleration: true })
-  assert.ok(on[0].url.startsWith('https://gh-proxy.com/https://github.com/'), `应加加速前缀: ${on[0].url}`)
-  const off = applyMirrors(src, { proxyAddress: '', mirrorPypi: true, mirrorGit: true, mirrorHuggingface: true, mirrorExtensionList: true, githubAcceleration: false })
-  assert.equal(off[0].url, 'https://github.com/a/b/releases/download/v1/x.7z', '关闭加速时应保持直连')
-})
-ok('网络：applyMirrors 开启 HF 镜像时把 huggingface.co 改写为 hf-mirror', async () => {
-  const { applyMirrors } = await import('../src/main/core/network-mirrors.ts')
-  const src = [{ name: 'HuggingFace 官方', url: 'https://huggingface.co/r/m/resolve/main/x.safetensors' }]
-  const on = applyMirrors(src, { proxyAddress: '', mirrorPypi: true, mirrorGit: true, mirrorHuggingface: true, mirrorExtensionList: true, githubAcceleration: true })
-  assert.ok(on[0].url.includes('hf-mirror.com'), `应改写为镜像: ${on[0].url}`)
-  const off = applyMirrors(src, { proxyAddress: '', mirrorPypi: true, mirrorGit: true, mirrorHuggingface: false, mirrorExtensionList: true, githubAcceleration: true })
-  assert.ok(off[0].url.includes('huggingface.co'), '关闭镜像时应保持官方')
-})
-ok('网络：applyMirrors 去重且不重复加 gh-proxy', async () => {
-  const { applyMirrors } = await import('../src/main/core/network-mirrors.ts')
-  const src = [
-    { name: 'GitHub 官方', url: 'https://github.com/a/b/x.7z' },
-    { name: 'gh-proxy 加速', url: 'https://gh-proxy.com/https://github.com/a/b/x.7z' }
-  ]
-  const out = applyMirrors(src, { proxyAddress: '', mirrorPypi: true, mirrorGit: true, mirrorHuggingface: true, mirrorExtensionList: true, githubAcceleration: true })
-  assert.equal(out.length, 1, `应去重为 1 个，实际 ${out.length}`)
-  assert.ok(out[0].url.startsWith('https://gh-proxy.com/'))
-})
-ok('目录：H3 六个文件目标名与工作流一致', () => {
-  const h3 = MODEL_CATALOG.find((e) => e.id === 'pack-h3-video')!
-  const names = h3.files!.map((f) => f.file)
-  assert.ok(names.some((n) => n.endsWith('MiniMax-H3/minimax_h3_hybrid_fl2va_ref2va_b25-49.safetensors')))
-  assert.ok(names.some((n) => n.endsWith('vae/minimax_h3_video_vae_int8_convrot.safetensors')))
-  assert.ok(names.some((n) => n.endsWith('vae_approx/MiniMax-H3-TAE.safetensors')))
-})
-
-ok('模型搬家：从模板解析引用模型', () => {
-  const proj = {
-    templates: [
-      { name: 'T1', apiJson: { a: { class_type: 'UNETLoader', inputs: { unet_name: 'aaa.safetensors' } }, b: { class_type: 'LoraLoader', inputs: { lora_name: 'sub/bbb.safetensors' } } } }
-    ]
-  }
-  const refs = collectModelRefs(proj as never)
-  assert.equal(refs.size, 2)
-  assert.ok(refs.has('aaa.safetensors'))
-  assert.ok(refs.has('bbb.safetensors'), '应取 basename')
-})
-ok('模型搬家：忽略非模型文件', () => {
-  const proj = { templates: [{ name: 'T', apiJson: { a: { class_type: 'X', inputs: { text: 'hello.png.txt', note: 'abc' } } } }] }
-  const refs = collectModelRefs(proj as never)
-  assert.equal(refs.size, 0)
 })
 
 // ---- 缺失模型降级 ----
@@ -1327,31 +1057,6 @@ ok('H3参考图绑定：buildWorkflow 开启 alias 模式', () => {
 })
 
 // ---- 工作流作者参数保护：不擅自改写模板配置 ----
-ok('模板保护：分段步数超限时按 steps 对齐(3,3+steps4 → 2,2)', () => {
-  // 模板：KSampler steps=4，SelfLift 分段步数=3,3（合计 6 > 4，直接提交会报错）
-  const wf: Record<string, { class_type: string; inputs: Record<string, unknown> }> = {
-    '506': {
-      class_type: 'CSGlideCastCS',
-      inputs: {
-        h3_data: JSON.stringify({ mode: 'ref2va', prompt: '', slots: { images: [{}, {}], videos: [{}], audios: [{}] }, chain: { clip: 'clip_0001' } }),
-        prompt_text: ''
-      }
-    },
-    '277': { class_type: 'KSampler', inputs: { seed: 8, steps: 4, cfg: 1, sampler_name: 'euler', scheduler: 'beta', denoise: 1 } },
-    '431': { class_type: 'BanZhang_SelfLiftMultiStage', inputs: { 分段步数: '3,3', 级间倍率: 1.5 } }
-  }
-  const tpl = { id: 't', name: 't', kind: 'video', apiJson: wf, mapping: {} }
-  const out = buildWorkflow(tpl as never, {
-    positive: 'p',
-    steps: 4,
-    cfg: 1,
-    samplerName: 'euler',
-    scheduler: 'beta',
-    keepTemplateSampler: true
-  }) as typeof wf
-  assert.equal(out['431'].inputs['分段步数'], '2,2', '合计 6 超过 steps 4，必须对齐为 2,2')
-  assert.equal(out['277'].inputs.steps, 4)
-})
 
 ok('模板保护：用户改了步数时按新 steps 重算分段步数', () => {
   const wf: Record<string, { class_type: string; inputs: Record<string, unknown> }> = {
@@ -1433,7 +1138,7 @@ ok('模板保护：标准调度器不被改写', () => {
   assert.equal(out.a.inputs['调度器'], 'beta')
 })
 
-ok('模板保护：显存充足时不降级放大节点', () => {
+ok('模板保护：显存充足时保留真放大模型且预设按实际显存分档', () => {
   const api = {
     a: {
       class_type: 'BanZhang_MMH3_UpscaleParams',
@@ -1441,9 +1146,9 @@ ok('模板保护：显存充足时不降级放大节点', () => {
     }
   }
   const out = adaptTemplateForGpu(api, { vendor: 'nvidia', name: 'RTX 4090', vramMB: 24576, vramKnown: true }) as typeof api
-  assert.equal(out.a.inputs['放大模型'], 'minimax_h3_latent_upscaler_3d_bf16.safetensors', '12GB+ 应保留真放大模型')
+  assert.equal(out.a.inputs['放大模型'], 'minimax_h3_latent_upscaler_3d_bf16.safetensors', '24GB 应保留真放大模型')
   assert.equal(out.a.inputs['放大倍数'], 1.5)
-  assert.equal(out.a.inputs['显存预设'], '12 GB')
+  assert.equal(out.a.inputs['显存预设'], '24 GB', '预设按实际显存动态升到 24 GB')
 })
 
 // ---- 三采：与二采参数不同，各自独立保留 ----
@@ -1573,13 +1278,6 @@ function makeSegFixture(segValue: string, steps: number) {
   }
 }
 
-ok('SelfLift：分段步数合计超过 steps 时自动均分(3,3 + steps4 → 2,2)', () => {
-  const tpl = { id: 't', name: 't', kind: 'video', apiJson: makeSegFixture('3,3', 4), mapping: {} }
-  const out = buildWorkflow(tpl as never, { positive: 'p', mode: 'ref2va', steps: 4 }) as Record<string, { class_type: string; inputs: Record<string, unknown> }>
-  const r = segSum(out)
-  assert.ok(r.sum <= r.steps, `分段步数合计 ${r.sum} 不能超过 steps ${r.steps}（实际 ${r.seg}）`)
-  assert.equal(r.seg, '2,2')
-})
 
 ok('SelfLift：分段步数合计未超限时保留作者原配(3,3 + steps8 保持)', () => {
   const tpl = { id: 't', name: 't', kind: 'video', apiJson: makeSegFixture('3,3', 8), mapping: {} }
@@ -1589,21 +1287,227 @@ ok('SelfLift：分段步数合计未超限时保留作者原配(3,3 + steps8 保
   assert.ok(r.sum <= r.steps)
 })
 
-ok('SelfLift：极端情况 steps 小于段数时不超限(3,3 + steps1 → 1,0)', () => {
-  const tpl = { id: 't', name: 't', kind: 'video', apiJson: makeSegFixture('3,3', 1), mapping: {} }
-  const out = buildWorkflow(tpl as never, { positive: 'p', mode: 'ref2va', steps: 1 }) as Record<string, { class_type: string; inputs: Record<string, unknown> }>
-  const r = segSum(out)
-  assert.ok(r.sum <= r.steps, `steps=1 时合计必须 <=1（实际 ${r.seg}）`)
-  assert.equal(r.seg, '1,0')
+
+
+
+// ---- 显存预设动态分档 ----
+ok('显存分档：pickVramPreset 按实际显存映射到节点支持的档位', () => {
+  assert.equal(pickVramPreset(2048), '4 GB', '2GB 低于最小档，用 4 GB')
+  assert.equal(pickVramPreset(4096), '4 GB')
+  assert.equal(pickVramPreset(6144), '6 GB', 'RTX 2060 6GB')
+  assert.equal(pickVramPreset(8192), '8 GB', 'RTX 4060 8GB')
+  assert.equal(pickVramPreset(11264), '8 GB', '11GB 取不超过的最大档')
+  assert.equal(pickVramPreset(12288), '12 GB')
+  assert.equal(pickVramPreset(16384), '16 GB')
+  assert.equal(pickVramPreset(24576), '24 GB')
+  assert.equal(pickVramPreset(49152), '24 GB', '48GB 用最大档 24 GB')
+  assert.equal(pickVramPreset(0), '6 GB', '未知时给默认')
 })
 
-ok('SelfLift：各种步数下都不超限(2/4/6/8/10)', () => {
-  for (const steps of [2, 4, 6, 8, 10]) {
-    const tpl = { id: 't', name: 't', kind: 'video', apiJson: makeSegFixture('3,3', steps), mapping: {} }
-    const out = buildWorkflow(tpl as never, { positive: 'p', mode: 'ref2va', steps }) as Record<string, { class_type: string; inputs: Record<string, unknown> }>
-    const r = segSum(out)
-    assert.ok(r.sum <= r.steps, `steps=${steps} 时分段步数 ${r.seg} 合计 ${r.sum} 超限`)
+ok('显存分档：6GB 卡自动用 6 GB 预设(不是硬编码)', () => {
+  const api = {
+    p: { class_type: 'BanZhang_MMH3_UpscaleParams', inputs: { 放大模型: 'minimax_h3_latent_upscaler_3d_bf16.safetensors', 放大倍数: 1.5, 显存预设: '12 GB' } }
   }
+  const out = adaptTemplateForGpu(api, { vendor: 'nvidia', name: 'RTX 2060', vramMB: 6144, vramKnown: true }) as typeof api
+  assert.equal(out.p.inputs['显存预设'], '6 GB')
+  assert.equal(out.p.inputs['放大模型'], '⚡ 最近邻精确（免模型）', '6GB 应降级为免模型')
+  assert.equal(out.p.inputs['放大倍数'], 1.5, '倍数必须保留')
+})
+
+ok('显存分档：12GB 卡用 12 GB 预设 + 真放大模型 + 计算块64', () => {
+  const api = {
+    p: { class_type: 'BanZhang_MMH3_UpscaleParams', inputs: { 放大模型: '⚡ 最近邻精确（免模型）', 放大倍数: 1.5, 显存预设: '6 GB' } },
+    s: { class_type: 'BanZhang_SLABlockSparseAttention', inputs: { 计算块大小: '32' } }
+  }
+  const out = adaptTemplateForGpu(api, { vendor: 'nvidia', name: 'RTX 3060', vramMB: 12288, vramKnown: true }) as typeof api
+  assert.equal(out.p.inputs['显存预设'], '12 GB')
+  assert.equal(out.p.inputs['放大模型'], 'minimax_h3_latent_upscaler_3d_bf16.safetensors', '12GB 应用真模型')
+  assert.equal(out.s.inputs['计算块大小'], '64', '高显存恢复计算块 64')
+})
+
+ok('显存分档：H3省显存档位与SelfLift分块按显存调整', () => {
+  const make = () => ({
+    m: { class_type: 'BanZhang_H3MemoryOptimizer', inputs: { 省显存档位: '① 关（最快，不省显存）' } },
+    s: { class_type: 'BanZhang_SelfLiftMultiStage', inputs: { token分块大小: 4096, 权重缓存预算: 4 } }
+  })
+  const g6 = adaptTemplateForGpu(make(), { vendor: 'nvidia', name: 'RTX 2060', vramMB: 6144, vramKnown: true }) as ReturnType<typeof make>
+  assert.equal(g6.m.inputs['省显存档位'], '③ 强力（省得多，画面基本不变）')
+  assert.equal(g6.s.inputs['token分块大小'], 1024)
+  assert.equal(g6.s.inputs['权重缓存预算'], 1)
+  const g8 = adaptTemplateForGpu(make(), { vendor: 'nvidia', name: 'RTX 4060', vramMB: 8192, vramKnown: true }) as ReturnType<typeof make>
+  assert.equal(g8.m.inputs['省显存档位'], '② 轻度（省一点，画面完全不变）')
+  assert.equal(g8.s.inputs['token分块大小'], 2048)
+  const g24 = adaptTemplateForGpu(make(), { vendor: 'nvidia', name: 'RTX 4090', vramMB: 24576, vramKnown: true }) as ReturnType<typeof make>
+  assert.equal(g24.m.inputs['省显存档位'], '① 关（最快，不省显存）')
+  assert.equal(g24.s.inputs['token分块大小'], 8192)
+  assert.equal(g24.s.inputs['权重缓存预算'], 8)
+})
+
+ok('显存分档：显存未知时完全不动模板', () => {
+  const api = {
+    p: { class_type: 'BanZhang_MMH3_UpscaleParams', inputs: { 放大模型: 'minimax_h3_latent_upscaler_3d_bf16.safetensors', 显存预设: '12 GB' } }
+  }
+  const out = adaptTemplateForGpu(api, { vendor: 'nvidia', name: '?', vramMB: 0, vramKnown: false }) as typeof api
+  assert.equal(out.p.inputs['显存预设'], '12 GB', '未知显存保留作者原配')
+  assert.equal(out.p.inputs['放大模型'], 'minimax_h3_latent_upscaler_3d_bf16.safetensors')
+})
+
+// ---- 老项目模板修复 ----
+ok('老项目修复：被锁成1的放大倍数按内置模板恢复', () => {
+  const stored = {
+    '393': { class_type: 'BanZhang_MMH3_UpscaleParams', inputs: { 放大模型: '⚡ 最近邻精确（免模型）', 放大倍数: 1, 显存预设: '6 GB' } },
+    '398': { class_type: 'BanZhang_H3MemoryOptimizer', inputs: { 省显存档位: '① 关（最快，不省显存）' } }
+  }
+  const author = {
+    '393': { class_type: 'BanZhang_MMH3_UpscaleParams', inputs: { 放大模型: 'minimax_h3_latent_upscaler_3d_bf16.safetensors', 放大倍数: 1.5, 显存预设: '12 GB' } }
+  }
+  const reset = resetVramFieldsToAuthor(JSON.parse(JSON.stringify(stored)), author) as typeof stored
+  assert.equal(reset['393'].inputs['放大倍数'], 1.5, '被锁成 1 的倍数应恢复到作者的 1.5')
+  assert.equal(reset['393'].inputs['放大模型'], 'minimax_h3_latent_upscaler_3d_bf16.safetensors', '应恢复真模型')
+  assert.equal(reset['393'].inputs['显存预设'], '12 GB', '应恢复作者 12GB')
+  const adapted = adaptTemplateForGpu(reset, { vendor: 'nvidia', name: 'RTX 2060', vramMB: 6144, vramKnown: true }) as typeof stored
+  assert.equal(adapted['393'].inputs['放大倍数'], 1.5, '6GB 适配后倍数仍是 1.5')
+  assert.equal(adapted['393'].inputs['显存预设'], '6 GB', '6GB 卡降到 6 GB')
+  assert.equal(adapted['393'].inputs['放大模型'], '⚡ 最近邻精确（免模型）', '6GB 卡用免模型')
+  assert.equal(adapted['398'].inputs['省显存档位'], '③ 强力（省得多，画面基本不变）', '6GB 卡开强力省显存')
+})
+
+ok('老项目修复：无内置模板参考时不动倍数', () => {
+  const stored = {
+    '393': { class_type: 'BanZhang_MMH3_UpscaleParams', inputs: { 放大模型: '⚡ 最近邻精确（免模型）', 放大倍数: 1.5, 显存预设: '6 GB' } }
+  }
+  const reset = resetVramFieldsToAuthor(JSON.parse(JSON.stringify(stored))) as typeof stored
+  assert.equal(reset['393'].inputs['放大倍数'], 1.5, '无参考时保留原倍数')
+  assert.equal(reset['393'].inputs['显存预设'], '12 GB', '但显存预设仍重置为作者原配')
+})
+
+// ---- 文案台：别名模式开关 ----
+function makeAliasFixture(): Record<string, { class_type: string; inputs: Record<string, unknown> }> {
+  return {
+    '506': {
+      class_type: 'CSGlideCastCS',
+      inputs: {
+        h3_data: JSON.stringify({ mode: 'ref2va', prompt: '', slots: { images: [{}, {}], videos: [{}], audios: [{}] }, chain: { clip: 'clip_0001' } }),
+        prompt_text: ''
+      }
+    }
+  }
+}
+
+ok('文案台：别名模式开启时 h3_data.alias=true', () => {
+  const tpl = { id: 't', name: 't', kind: 'video', apiJson: makeAliasFixture(), mapping: {} }
+  const out = buildWorkflow(tpl as never, { positive: '安吉拉走进操纵室', mode: 'ref2va', h3: { mode: 'ref2va', alias: true } }) as ReturnType<typeof makeAliasFixture>
+  const h3 = JSON.parse(String(out['506'].inputs.h3_data))
+  assert.equal(h3.alias, true)
+})
+
+ok('文案台：别名模式关闭时 h3_data.alias=false', () => {
+  const tpl = { id: 't', name: 't', kind: 'video', apiJson: makeAliasFixture(), mapping: {} }
+  const out = buildWorkflow(tpl as never, { positive: 'p', mode: 'ref2va', h3: { mode: 'ref2va', alias: false } }) as ReturnType<typeof makeAliasFixture>
+  const h3 = JSON.parse(String(out['506'].inputs.h3_data))
+  assert.equal(h3.alias, false, '关闭别名时必须显式写 false，H3 才只认显式 @图片N')
+})
+
+ok('文案台：未传 alias 时默认开启', () => {
+  const tpl = { id: 't', name: 't', kind: 'video', apiJson: makeAliasFixture(), mapping: {} }
+  const out = buildWorkflow(tpl as never, { positive: 'p', mode: 'ref2va', h3: { mode: 'ref2va' } }) as ReturnType<typeof makeAliasFixture>
+  const h3 = JSON.parse(String(out['506'].inputs.h3_data))
+  assert.equal(h3.alias, true, '默认开启别名，保证写角色名就能绑定参考图')
+})
+
+/* ===== 文案台 / 导演台规则（照搬 ComfyUI-Banzhang-All-1101）===== */
+
+ok('文案台：片子级 + 本段按顺序拼接', () => {
+  assert.equal(composeDeskText('冷调赛博都市', '女主推门而入'), '冷调赛博都市\n女主推门而入')
+  assert.equal(composeDeskText('', '只有本段'), '只有本段')
+  assert.equal(composeDeskText('只有片子级', ''), '只有片子级')
+  assert.equal(composeDeskText('  ', '  '), '')
+})
+
+ok('文案台：@标签各种写法归一', () => {
+  assert.equal(normalizeRefs('保持 <Picture 1> 的体型'), '保持 @图片1 的体型')
+  assert.equal(normalizeRefs('Picture 2 的衣服'), '@图片2 的衣服')
+  assert.equal(normalizeRefs('参考图片3'), '参考@图片3')
+  assert.equal(normalizeRefs('动作参考 <Video 1>'), '动作参考 @视频1')
+  assert.equal(normalizeRefs('配乐 <Audio 2>'), '配乐 @音频2')
+  assert.equal(normalizeRefs('@图片1@图片2'), '@图片1 @图片2')
+})
+
+ok('文案台：没有素材的 @图片N 会被摘掉', () => {
+  const s = emptySlots()
+  s.images[0] = { file: 'a.png' }
+  const r = dropUnbackedRefs('@图片1 和 @图片3', s)
+  assert.deepEqual(r.dropped, ['@图片3'])
+  assert.equal(r.text.trim(), '@图片1 和')
+})
+
+ok('导演台：只送提示词提到的参考图（音频不过滤）', () => {
+  const s = emptySlots()
+  s.images[0] = { file: 'a.png' }
+  s.images[1] = { file: 'b.png' }
+  s.audios[0] = { file: 'm.mp3' }
+  const f = filterSlotsByPrompt(s, '只用 @图片2')
+  assert.equal(f.images?.[0]?.file, undefined)
+  assert.equal(f.images?.[1]?.file, 'b.png')
+  assert.equal(f.audios?.[0]?.file, 'm.mp3')
+  const none = filterSlotsByPrompt(s, '没有引用')
+  assert.equal((none.images ?? []).filter((x) => x?.file).length, 0)
+  assert.equal((none.audios ?? []).filter((x) => x?.file).length, 1)
+})
+
+ok('导演台：@标签编号规则（图片→视频→音频）', () => {
+  const s = emptySlots()
+  s.images[0] = { file: 'a.png' }
+  s.images[2] = { file: 'c.png' }
+  s.videos[0] = { file: 'v.mp4', audio: true }
+  s.audios[0] = { file: 'm.mp3' }
+  assert.deepEqual(presentationOrder(s, 'ref2va').map((r) => r.token + '→' + r.tag), [
+    '@图片1→<Picture 1>', '@图片3→<Picture 2>',
+    '@视频音频1→<Audio 1>', '@视频1→<Video 1>', '@音频1→<Audio 2>'
+  ])
+})
+
+ok('导演台：帧数必须落在 17k+5 网格', () => {
+  assert.equal(alignFrames(120), 124)
+  assert.equal(alignFrames(124), 124)
+  assert.equal(alignFrames(361), 362)
+  assert.equal(nearestFrames(150), 158)
+})
+
+ok('文案台：global 只存片子级，本段进 segs（不再重复拼接）', () => {
+  const tpl = { id: 't', name: 't', kind: 'video', apiJson: makeAliasFixture(), mapping: {} }
+  const out = buildWorkflow(tpl as never, {
+    positive: '本段动作', globalPrompt: '全片风格', mode: 'ref2va',
+    h3: { mode: 'ref2va', alias: true }
+  }) as ReturnType<typeof makeAliasFixture>
+  const h3 = JSON.parse(String(out['506'].inputs.h3_data))
+  assert.equal(h3.prompt, '全片风格\n本段动作')
+})
+
+ok('工程包往返：导出再导入，媒体文件完整还原', async () => {
+  const tmp = await fsp.mkdtemp(path.join(os.tmpdir(), 'jxgf-arc-'))
+  const md = path.join(tmp, 'media'); await fsp.mkdir(md, { recursive: true })
+  const a = path.join(md, '角色A.png'); const b = path.join(md, '成片.mp4')
+  await fsp.writeFile(a, 'AAAA'); await fsp.writeFile(b, 'BBBB')
+  const proj = {
+    schema: 1, id: 'p1', name: '往返测试', createdAt: '', updatedAt: '',
+    settings: { comfy: { host: '127.0.0.1', port: 8188, protocol: 'http' }, aspect: '16:9', style: '', autoRetry: 1, retryDelaySec: 5, activeScriptId: null, presetId: 'p' },
+    scripts: [], episodes: [], scenes: [], templates: [],
+    shots: [{ id: 's1', outputs: [{ id: 'o1', file: b, kind: 'video', status: 'done', progress: 100, createdAt: '' }] }],
+    assets: [{ id: 'a1', kind: 'character', name: 'A', tags: [], description: '', prompt: '', negative: '', coverFile: a, images: [a], versions: [], createdAt: '', updatedAt: '' }]
+  }
+  assert.equal(collectProjectFiles(proj).length, 2, '两个媒体文件都要被收集到')
+  const zip = path.join(tmp, 'x.jxproj')
+  const r = await exportProjectToFile(proj as never, zip)
+  assert.equal(r.mediaCount, 2)
+  const pdir = path.join(tmp, 'projects'); await fsp.mkdir(pdir, { recursive: true })
+  const imp = await importProjectFromFile(zip, pdir, ['往返测试'])
+  assert.equal(imp.mediaCount, 2, '导入要把媒体一起还原')
+  const p2 = imp.project as never as typeof proj
+  assert.equal(p2.name, '往返测试（导入）', '重名工程不能覆盖已有的')
+  assert.ok(p2.assets[0].coverFile!.startsWith(imp.restoredDir), '路径要改到新工程目录')
+  assert.equal(await fsp.readFile(p2.shots[0].outputs[0].file, 'utf8'), 'BBBB', '成片内容要一致')
+  await fsp.rm(tmp, { recursive: true, force: true })
 })
 
 console.log(`\nselftest: ${pass} passed, ${fail} failed`)

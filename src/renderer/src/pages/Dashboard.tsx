@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Cpu, FolderKanban, FolderPlus, Gauge, HardDrive, ListOrdered, RefreshCw } from 'lucide-react'
+import { Cpu, Download, FolderKanban, FolderPlus, Gauge, HardDrive, ListOrdered, RefreshCw, Upload } from 'lucide-react'
 import type { ProjectSummary } from '@shared/types'
 import { useApp } from '../store/app'
 import { EmptyState, PageHeader, StatCard } from '../components/ui'
@@ -16,6 +16,42 @@ export default function Dashboard(): React.JSX.Element {
 
   const [projects, setProjects] = useState<ProjectSummary[]>([])
   const [newName, setNewName] = useState('')
+  /** 正在导出/导入的工程 id（'import' 表示导入） */
+  const [busy, setBusy] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
+
+  /** 导出整个工程（含全部媒体文件）为单个 .jxproj */
+  const exportProject = async (id: string, name: string): Promise<void> => {
+    setBusy(id)
+    setNotice(null)
+    try {
+      const r = await window.api.projectExport(id)
+      if (r.cancelled) return
+      const mb = ((r.totalBytes ?? 0) / 1024 / 1024).toFixed(1)
+      setNotice(`已导出「${name}」：${r.mediaCount ?? 0} 个媒体文件 · ${mb}MB\n${r.outPath ?? ''}`)
+    } catch (e) {
+      setNotice(`导出失败：${String((e as Error).message ?? e)}`)
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  /** 导入工程包 */
+  const importProject = async (): Promise<void> => {
+    setBusy('import')
+    setNotice(null)
+    try {
+      const r = await window.api.projectImport()
+      if (r.cancelled) return
+      loadProjects()
+      const nm = (r.project as { name?: string } | undefined)?.name ?? ''
+      setNotice(`已导入工程「${nm}」：${r.mediaCount ?? 0} 个媒体文件`)
+    } catch (e) {
+      setNotice(`导入失败：${String((e as Error).message ?? e)}`)
+    } finally {
+      setBusy(null)
+    }
+  }
 
   const loadProjects = (): void => {
     void window.api.projectList().then(setProjects)
@@ -142,6 +178,10 @@ export default function Dashboard(): React.JSX.Element {
                 }
               }}
             />
+            <button className="btn-ghost" disabled={busy === 'import'} onClick={() => void importProject()}>
+              <Upload size={15} />
+              {busy === 'import' ? '导入中…' : '导入工程'}
+            </button>
             <button
               className="btn-primary"
               disabled={!newName.trim()}
@@ -157,6 +197,12 @@ export default function Dashboard(): React.JSX.Element {
             </button>
           </div>
         </div>
+
+        {notice && (
+          <div className="mb-3 whitespace-pre-wrap rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-xs text-slate-300">
+            {notice}
+          </div>
+        )}
 
         {projects.length === 0 ? (
           <EmptyState title="还没有项目" desc="点击右上角「新建」创建你的第一个视频项目" />
@@ -214,6 +260,15 @@ export default function Dashboard(): React.JSX.Element {
                   >
                     <ListOrdered size={13} />
                     剧本分镜
+                  </button>
+                  <button
+                    className="btn-ghost flex-1 !px-2 !py-1.5 text-xs"
+                    disabled={busy === p.id}
+                    title="导出整个工程（含资产图、参考图、成片等全部媒体）"
+                    onClick={() => void exportProject(p.id, p.name)}
+                  >
+                    <Download size={13} />
+                    {busy === p.id ? '导出中…' : '导出'}
                   </button>
                 </div>
               </div>

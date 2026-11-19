@@ -1,7 +1,10 @@
 import type { Template, UpscaleSettings, RifeSettings } from '@shared/types'
 import { sanitizeOutputName } from './output-files.ts'
+import { composeDeskText } from './h3-prompt.ts'
 
 export interface WorkflowParams {
+  /** 片子级提示词（文案台 global）：全片统一风格，拼在本段提示词前面 */
+  globalPrompt?: string
   positive?: string
   negative?: string
   width?: number
@@ -31,7 +34,7 @@ export interface WorkflowParams {
   loras?: { file: string; strength: number }[]
 }
 
-type WorkflowNode = { id: string; class_type: string; inputs: Record<string, unknown> }
+type WorkflowNode = { id: string; class_type: string; inputs: Record<string, unknown>; title?: string }
 type Workflow = Record<string, WorkflowNode>
 
 function isWorkflowObject(v: unknown): v is Record<string, WorkflowNode> {
@@ -112,6 +115,55 @@ function injectQwenEdit(clone: Workflow, params: WorkflowParams): void {
 }
 
 /**
+ * 音乐工作流提示词注入（只改提示词，不动任何生成参数）。
+ *
+ * 覆盖两种节点：
+ *   - ACE Step 1.5：TextEncodeAceStepAudio1.5，提示词在 `tags`（索引 1）
+ *   - YuE2 乐谱：BanZhang_LyricsInput（title 含「风格」/「歌词」），提示词在 widgets[0]
+ *
+ * 返回 true 表示命中过音乐节点。
+ */
+function injectMusicPrompt(clone: Workflow, positive: string): boolean {
+  if (!positive) return false
+  let hit = false
+  for (const node of Object.values(clone)) {
+    const ct = String(node.class_type)
+    // ACE Step：tags 是风格/标签描述，就是用户写的提示词
+    if (/TextEncodeAceStepAudio/i.test(ct)) {
+      if (typeof node.inputs.tags === 'string') {
+        node.inputs.tags = positive
+        hit = true
+      }
+      continue
+    }
+    // YuE2：歌词/风格输入节点，text_in 承载文本
+    if (/BanZhang_LyricsInput/i.test(ct)) {
+      const title = String(node.title ?? '')
+      // 只写「风格」节点；「歌词」和「ABC」由工作流自己的 LLM 规划，不覆盖
+      if (/风格/.test(title) && typeof node.inputs.text_in === 'string') {
+        node.inputs.text_in = positive
+        hit = true
+      }
+      continue
+    }
+    // YuE2 智能规划节点：style 字段
+    if (/BanzhangYuE2SmartPlan/i.test(ct)) {
+      for (const key of Object.keys(node.inputs)) {
+        if (typeof node.inputs[key] !== 'string') continue
+        const data = tryParse<Record<string, unknown>>(node.inputs[key] as string)
+        if (data && typeof data === 'object' && 'plan_mode' in data) {
+          data.style = positive
+          node.inputs[key] = JSON.stringify(data)
+          hit = true
+          break
+        }
+      }
+    }
+  }
+  return hit
+}
+
+/**
  * 找到节点里存放 h3_data 的字段名（不同版本叫法不同：h3_data 或 first_frame）。
  */
 function h3DataField(node: WorkflowNode): string | null {
@@ -132,10 +184,16 @@ function deskDataField(node: WorkflowNode): string | null {
 }
 
 /**
- * 把 MiniMax-H3 工作流的提示词写进 CSGlideDeskCS 的 desk_data.segs。
+ * 把 MiniMax-H3 工作流的提示词写进 CSGlideCastCS 的 h3_data.prompt。
+ *
+ * 提示词口径照搬「✍️ H3 文案台」：
+ *   片子级（全片风格/基调） + 本段（这一段发生的事） = 最终提示词
+ * 片子级在前 —— 反过来写会让每段开头都重复世界观，段与段的差别被稀释。
  */
-export function injectH3Prompt(clone: unknown, positive: string): boolean {
+export function injectH3Prompt(clone: unknown, positive: string, globalPrompt = ''): boolean {
   if (!isWorkflowObject(clone)) return false
+  // 文案台的 compose_text：片子级 + 本段
+  const finalPrompt = composeDeskText(globalPrompt, positive)
   // ① 关键：写进 CSGlideCastCS.h3_data.prompt —— 这是真正驱动画面的提示词字段。
   //    之前只写 desk_data.segs 导致 h3_data.prompt 一直为空，模型用了模板残留内容。
   let wroteCast = false
@@ -145,20 +203,19 @@ export function injectH3Prompt(clone: unknown, positive: string): boolean {
     if (!field) continue
     const h3 = tryParse<H3Data>(node.inputs[field])
     if (!h3) continue
-    h3.prompt = positive
+    h3.prompt = finalPrompt
     node.inputs[field] = JSON.stringify(h3)
     // 关键：断开 prompt_text 的连线（模板里接 DeskCS 输出[1]，其内容为空/残留），
     // 改为直接字符串提示词，确保模型真正收到本次提示词。
-    if ('prompt_text' in node.inputs) {
-      node.inputs.prompt_text = positive
-    }
+    // 节点输入的键名随版本变过：英文 prompt_text / 中文「外接提示词」都写一遍
+    if ('prompt_text' in node.inputs) node.inputs.prompt_text = finalPrompt
+    if ('外接提示词' in node.inputs) node.inputs['外接提示词'] = finalPrompt
     // h3_override 若存在也写，避免旧覆盖值干扰
-    if (typeof node.inputs.h3_override === 'string') {
-      node.inputs.h3_override = positive
-    }
+    if (typeof node.inputs.h3_override === 'string') node.inputs.h3_override = finalPrompt
+    if (typeof node.inputs['🎛️ 外接导演配置'] === 'string') node.inputs['🎛️ 外接导演配置'] = finalPrompt
     wroteCast = true
   }
-  // ② 同时写进 CSGlideDeskCS.desk_data.segs（导演台分段提示词，供界面显示/续接）
+  // ② 同时写进 CSGlideDeskCS.desk_data（文案台自己的存档：global = 片子级，segs = 本段）
   for (const node of Object.values(clone)) {
     if (String(node.class_type) !== 'CSGlideDeskCS') continue
     const field = deskDataField(node)
@@ -169,8 +226,10 @@ export function injectH3Prompt(clone: unknown, positive: string): boolean {
     const clip = desk.chain?.clip ?? 'clip_0001'
     desk.segs = desk.segs ?? {}
     desk.segs[clip] = positive
-    // global 是整片提示词（无分段时生效），segs 是按段提示词 —— 两处都写确保生效
-    desk.global = positive
+    // global 是**片子级**提示词（全片统一风格），不是本段词 ——
+    // 以前把本段词抄进 global，等于把这一段的内容当成整片基调，
+    // 且文案台按 global+seg 拼接时会重复一遍。
+    desk.global = globalPrompt
     if (desk.chain) desk.chain.shot = clip
     node.inputs[field] = JSON.stringify(desk)
   }
@@ -191,8 +250,9 @@ function injectH3Data(clone: Workflow, params: WorkflowParams): void {
     if (params.height) h3.height = params.height
     if (params.frames) h3.length = params.frames
     if (params.mode) h3.mode = params.mode
-    // 显式开启别名模式：H3 才会把提示词里的资产名/角色名展开成 @图片N → <Picture N>
-    h3.alias = true
+    // 别名模式：文案台的「别名」开关显式传了就用它，否则默认开启
+    // （H3 才会把提示词里的资产名/角色名展开成 @图片N → <Picture N>）
+    h3.alias = params.h3?.alias === false ? false : true
     // 分段导演台覆盖字段（画布比例/保留头尾/参考/语义桥/续接/整片潜空间/链身份）
     if (params.h3) {
       for (const [k, v] of Object.entries(params.h3)) {
@@ -480,62 +540,6 @@ function applyRifeParams(clone: Workflow, rife: RifeSettings): void {
 }
 
 /**
- * H3 参数一致性修正。
- *
- * SelfLift「分段步数」是硬约束：**各段合计不能超过 KSampler 的 steps**，
- * 否则 Banzhang 节点直接抛「分段步数合计 X 步，超过本次调度的 Y 步」。
- *
- * 模板里作者填的 3,3（合计 6）只有在 steps≥6 时才成立；如果导演台把 steps 调成 4，
- * 就必须重新分配成 2,2。所以这里不能"原样保留"，而要按当前 steps 校验并按需对齐：
- *   - 合计 <= steps：保留作者原配（例如 steps=8 时 3,3 合法，不动）
- *   - 合计 >  steps：按段数均分到 steps 以内（例如 steps=4 时 3,3 → 2,2）
- */
-function fixH3Params(clone: Workflow): void {
-  let ksamplerSteps: number | null = null
-  for (const node of Object.values(clone)) {
-    if (String(node.class_type) === 'KSampler' && typeof node.inputs.steps === 'number') {
-      ksamplerSteps = node.inputs.steps
-      break
-    }
-  }
-  for (const node of Object.values(clone)) {
-    const inputs = node.inputs
-    if (typeof inputs['分段步数'] === 'string' && ksamplerSteps !== null && ksamplerSteps > 0) {
-      const raw = inputs['分段步数']
-      const parts = raw
-        .split(/[,，]/)
-        .map((x) => Number(x.trim()))
-        .filter((x) => Number.isFinite(x) && x >= 0)
-      if (parts.length > 0) {
-        const sum = parts.reduce((a, b) => a + b, 0)
-        if (sum > ksamplerSteps) {
-          // 超过采样步数 → 重新分配到 steps 以内
-          const n = parts.length
-          let next: number[]
-          if (ksamplerSteps < n) {
-            // 极端情况：steps 比段数还少（如 steps=1、两段）→ 只给前几步各 1，其余 0
-            next = new Array(n).fill(0)
-            for (let i = 0; i < ksamplerSteps; i++) next[i] = 1
-          } else {
-            // 正常情况：按段数均分，余数从前往后加
-            const base = Math.floor(ksamplerSteps / n)
-            next = new Array(n).fill(base)
-            let rest = ksamplerSteps - base * n
-            for (let i = 0; i < n && rest > 0; i++) {
-              next[i] += 1
-              rest -= 1
-            }
-          }
-          inputs['分段步数'] = next.join(',')
-        }
-        // 合计 <= steps：保留作者原配（如 steps=8 时 3,3 合法）
-      }
-    }
-    // 无效调度器（第三方插件才有）已在 template-adapt 里兜底映射，这里不再重复改写
-  }
-}
-
-/**
  * 通用采样器细参注入：对 KSampler / KSamplerAdvanced 设置 steps/cfg/sampler_name/scheduler。
  * 放在 H3 参数修正之前，这样 SelfLift 分段步数能按新 steps 对齐。
  */
@@ -563,6 +567,16 @@ export function buildWorkflow(template: Template, params: WorkflowParams): unkno
     throw new Error('模板不是有效的 API 工作流（缺少 nodes 结构）')
   }
   const clone: Workflow = JSON.parse(JSON.stringify(template.apiJson)) as Workflow
+
+  // UI→API 转换器可能产出没有 inputs 的节点（Reroute / Note / 占位节点）。
+  // 后面几十处都写 `'x' in node.inputs`，缺一个就会抛
+  // 「Cannot use 'in' operator to search for 'frames' in undefined」把整次生成打断。
+  // 统一补空对象，比在每个循环里各加一道守卫可靠。
+  for (const node of Object.values(clone)) {
+    if (node && typeof node === 'object' && (!node.inputs || typeof node.inputs !== 'object')) {
+      node.inputs = {}
+    }
+  }
 
   // 先注入采样器细参（steps/cfg/sampler/scheduler），H3 的 SelfLift 会据此对齐
   applySamplerParams(clone, params)
@@ -598,7 +612,7 @@ export function buildWorkflow(template: Template, params: WorkflowParams): unkno
 
   if (isH3) {
     if (params.positive !== undefined) {
-      injectH3Prompt(clone, params.positive)
+      injectH3Prompt(clone, params.positive, params.globalPrompt ?? '')
     }
     injectH3Data(clone, params)
     syncH3DeskChain(clone)
@@ -607,8 +621,8 @@ export function buildWorkflow(template: Template, params: WorkflowParams): unkno
     // 生成模式可能只通过 h3.mode 传入（导演台），t2v 时必须清空参考图残留
     const effMode = (params.h3?.mode as string | undefined) ?? params.mode
     clearH3Refs(clone, effMode)
-    // SelfLift 分段步数合计不能超过采样步数，超了就按段数均分（硬约束，否则节点报错）
-    fixH3Params(clone)
+    // 注意：SelfLift「分段步数」保持工作流作者原配，不自动改写。
+    // 若步数与 KSampler steps 不匹配，由 ComfyUI 节点自己报错提示，软件不静默改配置。
     // H3 的种子在 KSampler 节点
     if (params.seed !== undefined) {
       for (const node of Object.values(clone)) {
@@ -626,18 +640,23 @@ export function buildWorkflow(template: Template, params: WorkflowParams): unkno
   //   - EmptySD3LatentImage 决定输出画幅（保留模板默认）
   const isKrea2 = Object.values(clone).some((n) => /Krea2EditGroundedEncode|Krea2EditModelPatch/i.test(String(n.class_type)))
   if (isKrea2) {
-    for (const node of Object.values(clone)) {
+    // 正向节点判定：优先看「谁接了 KSampler.positive」，其次看 grounding_px。
+    // 注意 grounding_px 经 UI→API 转换后可能是 undefined（widget 未落到 inputs），
+    // 所以不能只靠它判断，否则会把正向提示词写进负向节点。
+    const positiveIds = new Set<string>()
+    for (const [id, node] of Object.entries(clone)) {
+      if (!/^KSampler(Advanced)?$/i.test(String(node.class_type))) continue
+      const pos = node.inputs.positive
+      if (Array.isArray(pos) && pos.length >= 1) positiveIds.add(String(pos[0]))
+    }
+    for (const [id, node] of Object.entries(clone)) {
       const ct = String(node.class_type)
-      if (ct === 'LoadImage' && params.refImages && params.refImages.length > 0) {
-        // 此处 refImages 里是已上传到 ComfyUI 的文件名（由 injectH3RefImages 之后处理），先占位
-      }
       if (/^Krea2EditGroundedEncode$/i.test(ct) && params.positive) {
-        // Krea2 的 GroundedEncode：grounding_px=0 的节点接 KSampler.positive（正向），
-        // grounding_px>0 的接 negative（负向）。正向提示词必须写进 px=0 的那个。
-        const gp = Number(node.inputs.grounding_px ?? 0)
-        if (gp === 0) node.inputs.prompt = params.positive
+        const gp = Number(node.inputs.grounding_px ?? NaN)
+        const isPositive = positiveIds.has(id) || gp === 0
+        if (isPositive) node.inputs.prompt = params.positive
       }
-      // 注意：Krea2 是 turbo 模型，负向编码器(grounding_px>0)保持模板原样，不注入资产负词
+      // 注意：Krea2 是 turbo 模型，负向编码器保持模板原样，不注入资产负词
       if (ct === 'EmptySD3LatentImage') {
         if (params.width && 'width' in node.inputs) node.inputs.width = params.width
         if (params.height && 'height' in node.inputs) node.inputs.height = params.height
@@ -687,20 +706,27 @@ export function buildWorkflow(template: Template, params: WorkflowParams): unkno
     }
   }
   if (!injectedQwen) {
-    const textNodes = Object.values(clone).filter((n) => String(n.class_type).includes('CLIPTextEncode'))
-    if (params.positive !== undefined && textNodes[0]) {
-      const t = textNodes[0].inputs
-      const key = Object.keys(t).find((k) => /text|prompt/i.test(k)) ?? 'text'
-      t[key] = params.positive
-    }
-    if (params.negative !== undefined && textNodes[1]) {
-      const t = textNodes[1].inputs
-      const key = Object.keys(t).find((k) => /text|prompt/i.test(k)) ?? 'text'
-      t[key] = params.negative
+    // 音乐工作流（ACE Step / YuE2）：提示词进 tags / 风格输入，不走 CLIPTextEncode
+    const injectedMusic = params.positive ? injectMusicPrompt(clone, params.positive) : false
+    if (!injectedMusic) {
+      const textNodes = Object.values(clone).filter((n) => String(n.class_type).includes('CLIPTextEncode'))
+      if (params.positive !== undefined && textNodes[0]) {
+        const t = textNodes[0].inputs
+        const key = Object.keys(t).find((k) => /text|prompt/i.test(k)) ?? 'text'
+        t[key] = params.positive
+      }
+      if (params.negative !== undefined && textNodes[1]) {
+        const t = textNodes[1].inputs
+        const key = Object.keys(t).find((k) => /text|prompt/i.test(k)) ?? 'text'
+        t[key] = params.negative
+      }
     }
   }
 
   for (const node of Object.values(clone)) {
+    // 兜底守卫：UI 格式的顶层对象（config / extra / seed_widgets）不是节点，
+    // 没有 inputs；这里跳过，别让 `'frames' in undefined` 把整次生成打断。
+    if (!node || typeof node !== 'object' || !node.inputs || typeof node.inputs !== 'object') continue
     const ct = String(node.class_type).toLowerCase()
     if (ct.includes('emptylatentimage') || ct.includes('latent')) {
       if (params.width && 'width' in node.inputs) node.inputs.width = params.width

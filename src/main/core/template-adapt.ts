@@ -3,14 +3,81 @@ import path from 'node:path'
 import type { GpuInfo } from '@shared/types'
 
 /**
- * 按本机显存自动适配导入的工作流模板（目前针对 H3 三采的 BanZhang 放大节点）。
+ * 按本机显存自动适配工作流模板（H3 三采的 BanZhang 放大 / 稀疏注意力 / 显存守卫）。
  *
- * 背景：H3 模板默认按 12GB 显存配置，放大节点加载真实放大模型
- *   minimax_h3_latent_upscaler_3d_bf16.safetensors（约 2-3GB 显存），
- *   在 6GB 显卡上必然 OOM（实测 BanZhang_MMH3_Upscale Allocation on device）。
- * 处理：显存 < 10GB 时，把放大节点改成「最近邻精确（免模型）」+ 倍数 1 + 显存预设 6GB，
- *   避免加载大模型，视频质量略降但能稳定出片。
+ * 背景：H3 模板按 12GB 显存配置。放大节点加载真实放大模型
+ *   minimax_h3_latent_upscaler_3d_bf16.safetensors（约 659MB）在低显存卡上会 OOM。
+ *
+ * 显存预设档位来自 BanZhang 节点定义（banzhang_mmh3_upscale.py 的 _VRAM_PRESETS）：
+ *   4 GB / 6 GB / 8 GB / 12 GB / 16 GB / 24 GB
+ * 这里按启动时检测到的实际显存**动态选最接近的档位**，而不是硬编码 6GB。
  */
+
+/** BanZhang 放大节点支持的显存预设档位（与节点 _VRAM_PRESETS 一致） */
+const VRAM_PRESET_TIERS = [4, 6, 8, 12, 16, 24] as const
+
+/** 免模型的最近邻放大（不加载任何模型，几乎不吃显存） */
+const NEAREST_MODEL = '⚡ 最近邻精确（免模型）'
+
+/** 作者原配的真放大模型（12GB+ 显存用，画质更好） */
+const AUTHOR_UPSCALE_MODEL = 'minimax_h3_latent_upscaler_3d_bf16.safetensors'
+
+/**
+ * 把显存（MB）映射到最合适的预设档位。
+ * 规则：取**不超过实际显存的最大档位**（宁可保守，避免 OOM）；
+ * 若显存小于最小档位，用最小档位。
+ */
+export function pickVramPreset(vramMB: number): string {
+  if (!Number.isFinite(vramMB) || vramMB <= 0) return '6 GB'
+  const gb = vramMB / 1024
+  let best: number = VRAM_PRESET_TIERS[0]
+  for (const t of VRAM_PRESET_TIERS) {
+    if (gb >= t) best = t
+  }
+  return `${best} GB`
+}
+
+/** 显存是否足够加载真放大模型（12GB 及以上按作者原配，不再降级） */
+function isHighVram(vramMB: number): boolean {
+  return vramMB >= 12 * 1024
+}
+
+/**
+ * 按显存选 H3 主模型的「省显存档位」（BanZhang_H3MemoryOptimizer）。
+ *
+ * 档位定义（banzhang_selflift.py 的 _MEM_PRESETS）：
+ *   ① 关（最快，不省显存）          前馈分块 1 / 头分组 1
+ *   ② 轻度（省一点，画面完全不变）   前馈分块 2 / 头分组 4
+ *   ③ 强力（省得多，画面基本不变）   前馈分块 4 / 头分组 8
+ */
+function pickMemPreset(vramMB: number): string {
+  const gb = vramMB / 1024
+  if (gb >= 16) return '① 关（最快，不省显存）'
+  if (gb >= 12) return '② 轻度（省一点，画面完全不变）'
+  if (gb >= 8) return '② 轻度（省一点，画面完全不变）'
+  return '③ 强力（省得多，画面基本不变）'
+}
+
+/** 按显存选 SelfLift 的 token 分块大小（越小越省显存，越慢） */
+function pickTokenChunk(vramMB: number): number {
+  const gb = vramMB / 1024
+  if (gb >= 24) return 8192
+  if (gb >= 16) return 4096
+  if (gb >= 12) return 4096
+  if (gb >= 8) return 2048
+  return 1024
+}
+
+/** 按显存选 SelfLift 的权重缓存预算 */
+function pickWeightCache(vramMB: number): number {
+  const gb = vramMB / 1024
+  if (gb >= 24) return 8
+  if (gb >= 16) return 6
+  if (gb >= 12) return 4
+  if (gb >= 8) return 2
+  return 1
+}
+
 /**
  * 第三方插件调度器 → ComfyUI 标准调度器 的兜底映射。
  *
@@ -29,38 +96,151 @@ const EXTERNAL_SCHEDULER_FALLBACK: Record<string, string> = {
   'beta57': 'beta'
 }
 
+/**
+ * 把模板里的「显存相关字段」重置成作者原配值。
+ *
+ * 用途：项目里存的老模板可能被旧版本的降级逻辑写坏（放大倍数被锁成 1、
+ * 显存预设硬编码 6GB、省显存关、计算块 32），单纯再跑一次 adaptTemplateForGpu
+ * 无法恢复（它只降不升）。所以打开项目时先用本函数重置为作者原配，再按实际显存适配。
+ *
+ * @param apiJson 项目里存的模板
+ * @param authorRef 内置模板的 apiJson（用来取作者原配的放大倍数）；缺省则不修倍数
+ *
+ * 只重置「纯显存/性能相关」的字段，不碰提示词、采样参数、连线等作者配置。
+ */
+export function resetVramFieldsToAuthor(apiJson: unknown, authorRef?: unknown): unknown {
+  if (!apiJson || typeof apiJson !== 'object' || Array.isArray(apiJson)) return apiJson
+  const api = apiJson as Record<string, { class_type?: string; inputs?: Record<string, unknown> }>
+  // 内置模板里各放大参数节点的作者原配倍数（按节点 ID 对应）
+  const authorScale = new Map<string, number>()
+  if (authorRef && typeof authorRef === 'object' && !Array.isArray(authorRef)) {
+    for (const [id, n] of Object.entries(authorRef as Record<string, { class_type?: string; inputs?: Record<string, unknown> }>)) {
+      if (/BanZhang_MMH3_UpscaleParams/i.test(String(n.class_type ?? ''))) {
+        const v = n.inputs?.['放大倍数']
+        if (typeof v === 'number') authorScale.set(id, v)
+      }
+    }
+  }
+  let changed = false
+  for (const [id, node] of Object.entries(api)) {
+    const inputs = node.inputs
+    if (!inputs) continue
+    const ct = String(node.class_type ?? '')
+    if (/BanZhang_MMH3_UpscaleParams/i.test(ct)) {
+      // 作者原配：真放大模型 + 12GB 预设
+      if (inputs['放大模型'] === NEAREST_MODEL) {
+        inputs['放大模型'] = AUTHOR_UPSCALE_MODEL
+        changed = true
+      }
+      if (inputs['显存预设'] !== '12 GB') {
+        inputs['显存预设'] = '12 GB'
+        changed = true
+      }
+      // 放大倍数：旧版降级曾把它锁成 1，这里按内置模板的作者原配恢复
+      const want = authorScale.get(id)
+      if (want !== undefined && inputs['放大倍数'] !== want) {
+        inputs['放大倍数'] = want
+        changed = true
+      }
+    }
+    if (/BanZhang_SLABlockSparseAttention/i.test(ct) && inputs['计算块大小'] === '32') {
+      inputs['计算块大小'] = '64'
+      changed = true
+    }
+    if (/BanZhang_H3MemoryOptimizer/i.test(ct) && inputs['省显存档位'] !== '① 关（最快，不省显存）') {
+      inputs['省显存档位'] = '① 关（最快，不省显存）'
+      changed = true
+    }
+    if (/BanZhang_SelfLiftMultiStage/i.test(ct)) {
+      if (inputs['token分块大小'] !== 4096) {
+        inputs['token分块大小'] = 4096
+        changed = true
+      }
+      if (inputs['权重缓存预算'] !== 4) {
+        inputs['权重缓存预算'] = 4
+        changed = true
+      }
+    }
+    if (/BanZhang_VRAM_Guard/i.test(ct) && typeof inputs['预留容量_GB'] === 'number' && inputs['预留容量_GB'] !== 0.5) {
+      inputs['预留容量_GB'] = 0.5
+      changed = true
+    }
+  }
+  return changed ? api : apiJson
+}
+
 export function adaptTemplateForGpu(apiJson: unknown, gpu: GpuInfo): unknown {
   if (!apiJson || typeof apiJson !== 'object' || Array.isArray(apiJson)) return apiJson
   const api = apiJson as Record<string, { class_type?: string; inputs?: Record<string, unknown> }>
-  if (!gpu.vramKnown || gpu.vramMB >= 10 * 1024) return apiJson // 显存够，不动
+  if (!gpu.vramKnown) return apiJson // 显存未知，不动模板
+
+  const preset = pickVramPreset(gpu.vramMB)
+  const highVram = isHighVram(gpu.vramMB)
 
   let changed = false
   for (const node of Object.values(api)) {
     const inputs = node.inputs
     if (!inputs) continue
     if (/BanZhang_MMH3_UpscaleParams/i.test(String(node.class_type))) {
-      // 只把「要加载大模型的放大」换成免模型的最近邻放大。
-      // 注意：**保留作者配的放大倍数**（截图里二采是 1.50）——
-      // 最近邻放大本身几乎不吃显存，把倍数锁成 1 会让二采/三采变成无意义重采样，
-      // 画质白白损失，也偏离作者原意。
-      if (typeof inputs['放大模型'] === 'string' && inputs['放大模型'] !== '⚡ 最近邻精确（免模型）') {
-        inputs['放大模型'] = '⚡ 最近邻精确（免模型）'
+      // 放大模型：低显存（<12GB）用免模型的最近邻放大避免 OOM；
+      // 高显存（>=12GB）恢复作者原配的真放大模型（画质更好）。
+      // 注意：**始终保留作者配的放大倍数**（二采 1.50、三采 1.00）——
+      // 最近邻放大几乎不吃显存，锁成 1 会让二采/三采变成无意义重采样。
+      const curModel = typeof inputs['放大模型'] === 'string' ? inputs['放大模型'] : ''
+      if (highVram) {
+        // 恢复真模型（模板里作者原配）
+        if (curModel === NEAREST_MODEL && AUTHOR_UPSCALE_MODEL) {
+          inputs['放大模型'] = AUTHOR_UPSCALE_MODEL
+          changed = true
+        }
+      } else if (curModel && curModel !== NEAREST_MODEL) {
+        inputs['放大模型'] = NEAREST_MODEL
         changed = true
       }
-      if (inputs['显存预设'] !== '6 GB') {
-        inputs['显存预设'] = '6 GB'
+      // 显存预设按实际显存动态分档（4/6/8/12/16/24 GB）
+      if (inputs['显存预设'] !== preset) {
+        inputs['显存预设'] = preset
         changed = true
       }
     }
     if (/BanZhang_SLABlockSparseAttention/i.test(String(node.class_type))) {
-      if (inputs['计算块大小'] === '64') {
-        inputs['计算块大小'] = '32'
+      // 稀疏注意力计算块：低显存减半（64→32），高显存恢复 64
+      if (!highVram) {
+        if (inputs['计算块大小'] === '64') {
+          inputs['计算块大小'] = '32'
+          changed = true
+        }
+      } else if (inputs['计算块大小'] === '32') {
+        inputs['计算块大小'] = '64'
         changed = true
       }
     }
     if (/BanZhang_VRAM_Guard/i.test(String(node.class_type))) {
-      if (typeof inputs['预留容量_GB'] === 'number' && inputs['预留容量_GB'] < 0.5) {
-        inputs['预留容量_GB'] = 0.5
+      // 显存越小，预留越多（防止峰值 OOM）
+      const reserve = gpu.vramMB >= 16 * 1024 ? 0.5 : gpu.vramMB >= 12 * 1024 ? 0.5 : gpu.vramMB >= 8 * 1024 ? 0.8 : 1.0
+      if (typeof inputs['预留容量_GB'] === 'number' && inputs['预留容量_GB'] < reserve) {
+        inputs['预留容量_GB'] = reserve
+        changed = true
+      }
+    }
+    // H3 主模型省显存档位：低显存开启前馈分块/注意力头分组
+    if (/BanZhang_H3MemoryOptimizer/i.test(String(node.class_type))) {
+      const preset = pickMemPreset(gpu.vramMB)
+      if (typeof inputs['省显存档位'] === 'string' && inputs['省显存档位'] !== preset) {
+        inputs['省显存档位'] = preset
+        changed = true
+      }
+    }
+    // SelfLift：token 分块 / 权重缓存预算按显存调整
+    if (/BanZhang_SelfLiftMultiStage/i.test(String(node.class_type))) {
+      const chunk = pickTokenChunk(gpu.vramMB)
+      if (typeof inputs['token分块大小'] === 'number' && inputs['token分块大小'] !== chunk) {
+        inputs['token分块大小'] = chunk
+        changed = true
+      }
+      const cache = pickWeightCache(gpu.vramMB)
+      if (typeof inputs['权重缓存预算'] === 'number' && inputs['权重缓存预算'] !== cache) {
+        inputs['权重缓存预算'] = cache
         changed = true
       }
     }

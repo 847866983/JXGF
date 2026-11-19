@@ -1,7 +1,13 @@
 import { app } from 'electron'
+import fs from 'node:fs'
+import path from 'node:path'
 import type { UpdateInfo } from '@shared/types'
 
 type Emit = (payload: { type: 'update:state'; info: UpdateInfo }) => void
+
+/** 内置发布源（与 electron-builder.yml 的 publish 段保持一致） */
+const GITHUB_OWNER = '847866983'
+const GITHUB_REPO = 'JXGF'
 
 /**
  * 在线自动更新：基于 electron-updater。
@@ -19,6 +25,31 @@ export class Updater {
       currentVersion: app.getVersion(),
       version: app.getVersion(),
       releaseNotes: app.isPackaged ? '' : '开发模式：自动更新未启用（打包后生效）'
+    }
+  }
+
+  /**
+   * 确保 app-update.yml 存在。
+   *
+   * electron-builder 正式打包会把 publish 配置写成 resources/app-update.yml；
+   * 但某些构建方式（如 --dir、或自定义 extraResources）可能漏掉它，
+   * 这时 electron-updater 会直接抛 ENOENT。这里在缺失时补一份内置配置，
+   * 让在线更新在打包环境下始终可用。
+   */
+  private ensureUpdateConfig(): void {
+    try {
+      const dir = path.join(process.resourcesPath, 'app-update.yml')
+      if (fs.existsSync(dir)) return
+      const yml = [
+        'provider: github',
+        `owner: ${GITHUB_OWNER}`,
+        `repo: ${GITHUB_REPO}`,
+        'releaseType: release',
+        ''
+      ].join('\n')
+      fs.writeFileSync(dir, yml, 'utf8')
+    } catch {
+      // 只读目录等情况下写入失败，交给 electron-updater 自己报错
     }
   }
 
@@ -41,6 +72,7 @@ export class Updater {
       this.set({ available: false, releaseNotes: '开发模式：自动更新未启用（打包后生效）' })
       return this.current
     }
+    this.ensureUpdateConfig()
     try {
       const autoUpdater = (await this.loadAutoUpdater()) as any
       if (!autoUpdater) {
@@ -80,6 +112,7 @@ export class Updater {
   }
 
   async download(): Promise<UpdateInfo> {
+    this.ensureUpdateConfig()
     try {
       const autoUpdater = (await this.loadAutoUpdater()) as any
       if (!autoUpdater) {

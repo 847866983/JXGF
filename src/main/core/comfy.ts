@@ -159,6 +159,74 @@ export class ComfyClient extends EventEmitter {
     return data.id
   }
 
+  /**
+   * 查一个工程里已登记的段（/cglide/chain/summary）。
+   * 用来把「本段」和 H3 导演台档案里的段 id 对上——只有拿到段 id 才能查续拍存档。
+   */
+  async chainSummary(name: string): Promise<{ clips: { id: string; shot?: string; current_take?: number }[] }> {
+    const url = new URL(`${this.base}/cglide/chain/summary`)
+    url.searchParams.set('name', name)
+    const res = await fetch(url, { signal: AbortSignal.timeout(8000) })
+    if (!res.ok) throw new Error(`读取工程档案失败：HTTP ${res.status}`)
+    const data = (await res.json()) as { clips?: { id: string; shot?: string; current_take?: number }[] }
+    return { clips: Array.isArray(data.clips) ? data.clips : [] }
+  }
+
+  /**
+   * 取某一段当前版本的续拍存档路径（相对 output）。
+   * 这就是「潜空间续写」的源：下一段把这个路径写进 cont.latent_file 就能承接。
+   */
+  async chainCont(name: string, cid: string): Promise<{ cont_path?: string; take?: number; error?: string }> {
+    const url = new URL(`${this.base}/cglide/chain/cont`)
+    url.searchParams.set('name', name)
+    url.searchParams.set('id', cid)
+    const res = await fetch(url, { signal: AbortSignal.timeout(8000) })
+    if (!res.ok) return { error: `HTTP ${res.status}` }
+    return (await res.json()) as { cont_path?: string; take?: number; error?: string }
+  }
+
+  /**
+   * 整片成片视图（导演台监视器/时间轴的数据源）。
+   * 每段返回在全片里的净起止帧、累积成片路径、可播状态、承接帧数与版本号。
+   */
+  async filmSummary(name: string): Promise<Record<string, unknown>> {
+    const url = new URL(`${this.base}/cglide/chain/film_summary`)
+    url.searchParams.set('name', name)
+    const res = await fetch(url, { signal: AbortSignal.timeout(12000) })
+    if (!res.ok) throw new Error(`读取成片时间轴失败：HTTP ${res.status}`)
+    return (await res.json()) as Record<string, unknown>
+  }
+
+  /** 单条成片的音频峰值包络（时间轴波形层用） */
+  async joinWaveform(video: string, bins = 1200): Promise<{ bins?: number[]; duration?: number; error?: string }> {
+    const url = new URL(`${this.base}/cglide/join/waveform`)
+    url.searchParams.set('video', video)
+    url.searchParams.set('bins', String(bins))
+    const res = await fetch(url, { signal: AbortSignal.timeout(20000) })
+    if (!res.ok) return { error: `HTTP ${res.status}` }
+    return (await res.json()) as { bins?: number[]; duration?: number; error?: string }
+  }
+
+  /** ComfyUI 的基地址（渲染进程拼 <img>/<video> 的直链用） */
+  baseUrl(): string {
+    return this.base
+  }
+
+  /**
+   * 成片登记：按 prompt_id 让中央档案把这次渲染的成片认领到某一段。
+   * 时间轴/监视器读的 film_summary 里那段有没有 film 就靠这一步。
+   * 幂等：同一 prompt_id 重复调用只收一次。
+   */
+  async collectRun(name: string, cid: string, promptId: string): Promise<Record<string, unknown>> {
+    const res = await fetch(`${this.base}/cglide/chain/collect_run`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, id: cid, prompt_id: promptId })
+    })
+    if (!res.ok) throw new Error(`成片登记失败：HTTP ${res.status}`)
+    return (await res.json()) as Record<string, unknown>
+  }
+
   async connect(): Promise<void> {
     if (this.wsReady) return
     await new Promise<void>((resolve, reject) => {

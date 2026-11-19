@@ -13,6 +13,9 @@ import fs from 'node:fs'
 import os from 'node:os'
 import type { ComfySettings, JobInfo, JobParams, JobStatus, ShotOutput, Template } from '@shared/types'
 import { ComfyClient, makeClient } from './comfy'
+import { convertUiToApi, isUiWorkflow } from './workflow-convert'
+import { detectGpu } from './hardware'
+import { adaptTemplateForGpu } from './template-adapt'
 import { appendRefTags, buildWorkflow, extractH3Chain, injectH3Prompt, injectH3RefImages, injectH3RefVideos } from './workflow'
 import { uid, now, ProjectStore } from './store'
 import { collectMediaFiles, collectHistoryFiles, pickFinalMedia, sanitizeOutputName, type MediaFile } from './output-files'
@@ -147,8 +150,24 @@ export class JobManager {
       await this.client.connect()
       this.bindClientEvents(this.client)
 
-      const workflow = buildWorkflow(template, {
+      // 模板可能是 ComfyUI 界面格式（{nodes, links}）——导入内置工作流后就是这种。
+      // 必须先按当前 ComfyUI 的节点信息转成 API 格式，buildWorkflow 才能注入参数；
+      // 否则 UI 对象会被原样当成工作流提交，节点里根本没有 inputs。
+      let useTemplate = template
+      if (isUiWorkflow(template.apiJson)) {
+        try {
+          const api = await convertUiToApi(template.apiJson, settings)
+          // 转完再按本机显存降级（6GB 卡：免模型放大 + 省显存档位）。
+          // 界面格式模板在导入时做不了这一步（那是 UI 数组，不是节点字典）。
+          const gpu = await detectGpu()
+          useTemplate = { ...template, apiJson: adaptTemplateForGpu(api, gpu) }
+        } catch (err) {
+          throw new Error(`界面格式工作流转换失败（需要 ComfyUI 在线）：${String((err as Error).message ?? err)}`)
+        }
+      }
+      const workflow = buildWorkflow(useTemplate, {
         positive: params.positive,
+        globalPrompt: params.globalPrompt,
         negative: params.negative,
         width: params.width,
         height: params.height,
@@ -181,10 +200,15 @@ export class JobManager {
             uploaded.push(up.subfolder ? `${up.subfolder}/${up.name}` : up.name)
           }
           injectH3RefImages(workflow, uploaded, refAliases)
-          // 补 @图片N 引用：没有这一步模型会忽略参考图
-          const tagged = appendRefTags(params.positive ?? '', uploaded)
-          if (tagged !== (params.positive ?? '')) {
-            injectH3Prompt(workflow, tagged)
+          // 补 @图片N 引用：只在**别名模式关闭**时做。
+          // 别名模式开启时，提示词里的角色名会被 H3 按槽位 alias 展开成 @图片N；
+          // 这时再补一遍会把没提到的参考图也塞进去（6GB 卡上极易 OOM），
+          // 与导演台「提示词没提就不送」的口径相反。
+          if (params.h3?.alias === false) {
+            const tagged = appendRefTags(params.positive ?? '', uploaded)
+            if (tagged !== (params.positive ?? '')) {
+              injectH3Prompt(workflow, tagged, params.globalPrompt ?? '')
+            }
           }
         } catch (err) {
           console.warn('[jobs] 上传参考图失败（不阻断生成）:', String((err as Error).message ?? err))
@@ -209,9 +233,10 @@ export class JobManager {
       // H3 链式续接：提交前登记工程名 + 当前段，否则存档节点会拒绝。
       // 失败不阻断生成（登记失败时 CSGlideCastCS 自己会兜底登记，只是存档节点可能跳过）。
       const chain = extractH3Chain(workflow)
+      let registeredCid = ''
       if (chain) {
         try {
-          await this.client.registerClip(chain.name, { shot: chain.shot, frames: params.frames })
+          registeredCid = await this.client.registerClip(chain.name, { shot: chain.shot, frames: params.frames })
         } catch (err) {
           console.warn('[jobs] 登记段落失败（不阻断生成）:', String((err as Error).message ?? err))
         }
@@ -224,6 +249,15 @@ export class JobManager {
       const outputs = await this.waitForOutput(promptId, template.kind, info, settings)
       jobLog(`job完成 promptId=${promptId} kind=${template.kind} 产物数=${outputs.length} 文件=${outputs.map((o) => path.basename(o.file)).join(',')}`)
       info.outputs = outputs.map((o) => ({ file: o.file, kind: o.kind }))
+      // 成片登记：把这次渲染的片子认领到段落档案里，时间轴/监视器才有东西可播。
+      // 失败不阻断 —— 片子已经落盘，只是时间轴这一轮看不到。
+      if (chain && registeredCid && promptId) {
+        try {
+          await this.client.collectRun(chain.name, registeredCid, promptId)
+        } catch (err) {
+          console.warn('[jobs] 成片登记失败（不阻断生成）:', String((err as Error).message ?? err))
+        }
+      }
       this.writeShotOutputs(params.shotId, outputs)
       await this.writeAssetOutputs(params.assetId, outputs) // 先落盘
       info.status = 'done'

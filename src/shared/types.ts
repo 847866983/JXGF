@@ -45,6 +45,11 @@ export interface Episode {
   title: string
   summary: string
   status: ScriptStatus
+  /**
+   * 文案台「片子级」提示词：全片统一的风格 / 基调 / 世界观。
+   * 生成每一段时都拼在本段提示词**前面**（对应 H3 文案台的 compose_text）。
+   */
+  globalPrompt?: string
 }
 
 export interface Scene {
@@ -124,6 +129,13 @@ export interface SegmentSettings {
   pace: number
   /** 续接 */
   contMode: 'latent' | 'video' | 'none'
+  /**
+   * 承接帧数：从上一段**尾部**取几帧，钉在本段开头当引导（H3 导演台的
+   * 「承接帧数」）。只接受 17k+5 网格：5 / 22 / 39 / 56 / 73 …
+   * 0 = 独立成段（不承接）。默认 22。
+   * 这是 latent 续接的总开关 —— 不是 5 也不是 20，20 不在网格上。
+   */
+  contFrames?: number
   pushWhole: boolean
   /** 本段生成方式：ref2va=参考图生成，video=参考视频生成，t2v=纯文生 */
   genMode: 'ref2va' | 'video' | 't2v'
@@ -131,6 +143,17 @@ export interface SegmentSettings {
   upscale: UpscaleSettings
   /** 抽帧 / 插帧 */
   rife: RifeSettings
+  /**
+   * 文案台：本段的提示词预设标签（点一下追加到本段提示词末尾）。
+   * 对应 H3 Studio 文案台里的「镜头缓慢推进…」等可点标签。
+   */
+  presets?: string[]
+  /**
+   * 文案台：别名模式开关。
+   * 开启后提示词里写的资产名/角色名会被 H3 自动展开成 @图片N 引用；
+   * 关闭则只认显式写的 @图片N。
+   */
+  aliasMode?: boolean
 }
 
 export interface Shot {
@@ -282,6 +305,8 @@ export interface JobParams {
   assetId?: string
   templateId: string
   positive?: string
+  /** 片子级提示词（文案台 global）；为空则只用本段提示词 */
+  globalPrompt?: string
   negative?: string
   width?: number
   height?: number

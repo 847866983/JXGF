@@ -1,0 +1,1352 @@
+{
+  "id": "71874d10-1ca0-499b-bd47-1a415640c832",
+  "revision": 0,
+  "last_node_id": 17,
+  "last_link_id": 25,
+  "nodes": [
+    {
+      "id": 1,
+      "type": "CheckpointLoaderSimple",
+      "pos": [
+        -972.1361821652912,
+        2293.0787304354913
+      ],
+      "size": [
+        420,
+        110
+      ],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "Checkpoint名称",
+          "name": "ckpt_name",
+          "type": "COMBO",
+          "widget": {
+            "name": "ckpt_name"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "label": "模型",
+          "name": "MODEL",
+          "type": "MODEL",
+          "links": [
+            18
+          ]
+        },
+        {
+          "label": "CLIP",
+          "name": "CLIP",
+          "type": "CLIP",
+          "links": [
+            8,
+            11
+          ]
+        },
+        {
+          "label": "VAE",
+          "name": "VAE",
+          "type": "VAE",
+          "links": [
+            23
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.39.0",
+        "Node name for S&R": "CheckpointLoaderSimple",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        },
+        "models": [
+          {
+            "name": "yue2_3b_int8_convrot.safetensors",
+            "url": "https://huggingface.co/Comfy-Org/YuE2/resolve/main/checkpoints/yue2_3b_int8_convrot.safetensors",
+            "directory": "checkpoints"
+          }
+        ]
+      },
+      "widgets_values": [
+        "音频\\yue2_3b_int8_convrot.safetensors"
+      ],
+      "widgets_values_named": {
+        "ckpt_name": "音频\\yue2_3b_int8_convrot.safetensors"
+      }
+    },
+    {
+      "id": 2,
+      "type": "AudioEncoderLoader",
+      "pos": [
+        -976.6404347294662,
+        2456.946957419976
+      ],
+      "size": [
+        420,
+        80
+      ],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "AUDIO_ENCODER",
+          "type": "AUDIO_ENCODER",
+          "links": [
+            9
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.39.0",
+        "Node name for S&R": "AudioEncoderLoader",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        },
+        "models": [
+          {
+            "name": "sheetsage2_bf16.safetensors",
+            "url": "https://huggingface.co/Comfy-Org/YuE2/resolve/main/audio_encoders/sheetsage2_bf16.safetensors",
+            "directory": "audio_encoders"
+          }
+        ]
+      },
+      "widgets_values": [
+        "sheetsage2_bf16.safetensors"
+      ],
+      "widgets_values_named": {
+        "audio_encoder_name": "sheetsage2_bf16.safetensors"
+      }
+    },
+    {
+      "id": 3,
+      "type": "BanZhang_Qwen3VL_ModelConfig",
+      "pos": [
+        -2335.5349631805934,
+        2663.874958493579
+      ],
+      "size": [
+        391.90339062499993,
+        193.53639999999996
+      ],
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "🔧 本地Qwen配置",
+          "type": "QWEN3VL_MODEL_CONFIG",
+          "links": [
+            25
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "BanZhang_Qwen3VL_ModelConfig",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.8"
+        }
+      },
+      "widgets_values": [
+        "GGUF (llama.cpp)",
+        "None",
+        "Qwen3.5-9B/Qwen3.5-9B-Q8_0",
+        "None (FP16)",
+        false,
+        "32768 · 日常推荐｜短视频"
+      ],
+      "widgets_values_named": {
+        "🔧 模型类型": "GGUF (llama.cpp)",
+        "🤖 模型选择 (HF)": "None",
+        "🤖 模型文件 (GGUF)": "Qwen3.5-9B/Qwen3.5-9B-Q8_0",
+        "⚙️ 量化级别 (HF)": "None (FP16)",
+        "🔄 保持模型加载": false,
+        "📝 上下文长度 (GGUF)": "32768 · 日常推荐｜短视频"
+      }
+    },
+    {
+      "id": 5,
+      "type": "BanzhangAITranslator",
+      "pos": [
+        -1924.139611025083,
+        2663.1847762760276
+      ],
+      "size": [
+        406.80999999999995,
+        707.8900000000003
+      ],
+      "flags": {},
+      "order": 3,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "🔧 本地Qwen配置",
+          "shape": 7,
+          "type": "QWEN3VL_MODEL_CONFIG",
+          "link": 25
+        },
+        {
+          "name": "📂 JSON路径",
+          "shape": 7,
+          "type": "STRING",
+          "link": null
+        },
+        {
+          "name": "🗂️ 参考素材",
+          "shape": 7,
+          "type": "*",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "📄 运行报告",
+          "type": "STRING",
+          "links": []
+        },
+        {
+          "name": "📝 生成内容",
+          "type": "STRING",
+          "links": [
+            3
+          ]
+        },
+        {
+          "name": "🧠 思考过程",
+          "type": "STRING",
+          "links": []
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "BanzhangAITranslator",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.8"
+        }
+      },
+      "widgets_values": [
+        99618645550461,
+        "randomize",
+        "",
+        "Doubao (豆包/火山)",
+        "",
+        "doubao-seed-2-1-lite-260915",
+        "无 (使用自定义)",
+        "---\nname: YuE2提示词工坊\ndescription: 把一句话、一段描述、一张图片或一个视频，转换成 ComfyUI YuE2 音乐生成节点需要的三个输入：style 风格描述、lyrics 歌词、abc 乐谱。默认 abc 留空让节点自动规划，也可按需输出 AI 写的 ABC 乐谱。支持有人声歌曲与无人声纯音乐。适用于写歌、配乐、看图写歌、看视频写歌、风格设定、歌词创作。\n---\n\n# 角色：YuE2 音乐架构师\n\n你是连接人类模糊意图与 YuE2 生成模型之间的精密桥梁。\n\n你不是指令转换器。你的工作是：接收模糊的多模态输入，运用冰山模型挖掘表象之下的深层声学特征，构建出精确适配 YuE2 的三个核心输入（style、lyrics、abc），让模型充分发挥创造力。\n\n**你的使命**：最大化生成质量、歌词对齐度与音乐表现力，同时保证输入格式严格合规、不引入噪声、不给模型设限。\n\n---\n\n## 输出契约\n\n最终只交付三块纯文本，**每块必须用专属包裹符包裹**，让下游节点能单独提取。\n\n| 块 | 节点字段 | 开始符 | 结束符 |\n|---|---|---|---|\n| 一 | style | `<<<STYLE_VALUE>>>` | `<<<STYLE_VALUE_END>>>` |\n| 二 | lyrics | `<<<LYRICS_VALUE>>>` | `<<<LYRICS_VALUE_END>>>` |\n| 三 | abc | `<<<ABC_VALUE>>>` | `<<<ABC_VALUE_END>>>` |\n\n**严禁**在三块之外添加标题、参数表、创作解析、计算过程或长篇说明。\n\n若确有必要告知用户假设或冲突处理方式，放在三块之后，最多三行极简备注。\n\n包裹符规则：\n\n- 开始符与结束符必须成对出现，且**独占一行**，不能与内容混在同一行\n- 包裹符名称必须完全一致，不得改写、不得增删空格\n- 内容写在开始符与结束符之间\n- 三块顺序固定：style → lyrics → abc\n\n---\n\n## 认知模型\n\n### 冰山模型\n\n用户说的「悲伤的歌」只是冰山一角。你必须补全水面下的声学细节：\n\n- **显性**：用户给出的风格、主题、情绪\n- **隐性推演**：该风格对应的混音质感、空间感、乐器演奏技法、动态范围、时代制作特征\n\n不要停在用户给的词，要推演出完整的声学画像，再写进 style。\n\n### 冲突处理协议\n\n当输入存在逻辑冲突（例如「安静的重金属」「极快的慢板情歌」）时，选一种策略解决：\n\n- **时间演变**：把冲突拆到时间轴上，让一段安静、另一段爆发\n- **核心强化**：识别用户更偏的情绪侧作为主轴，冲突元素降级为点缀质感\n- **风格融合**：寻找两个风格的交集子流派，而不是简单拼接\n\n解决后再写 style，不要在同一段里塞入互相打架的描述。\n\n### 节奏与时长闭环\n\n你必须在内部完成时长估算，但**绝对不把计算过程、结果或音节数标记泄露到输出里**。\n\n估算逻辑：\n\n```\n总时长 ≈ Σ（段落行数 × 每行演唱时长） + 段落间隙 + 前后奏\n每行演唱时长 ≈ 每小节拍数 ÷ (BPM ÷ 60)\n```\n\n约束：\n\n- 模型输出下限约 8 秒，低于此会被自动补长\n- 模型输出上限约 360 秒（6 分钟），超出会被截断\n- 歌词量必须与你能推演的 BPM 匹配；歌词过多就精简，不要寄望于模型压缩\n\n### 内部推理流\n\n输出前隐式完成以下步骤：\n\n1. 意图锁定：是叙事歌曲，还是背景配乐？是否纯音乐？\n2. 声学画像：用冰山模型补全十大维度\n3. 参数预设：内定 BPM、调式倾向、段落结构\n4. 冲突检查：有冲突就执行冲突处理协议\n5. 时长校验：估算总时长，确认落在 8 到 360 秒之间\n6. 歌词撰写：按音节与呼吸规则写，同时执行去 AI 味法则\n7. abc 决策：默认留空；仅在指定旋律需求时才写\n8. 格式封装：三块输出，逐条对照禁令自查\n\n---\n\n## style 构建规范\n\n**目标**：为模型提供高信噪比的声学提示，覆盖完整维度。\n\n### 语言与形式\n\n- 必须使用**英文**，即使对话是中文。中文风格词会明显降低可控性\n- 支持两种形式，按需要选一种，不要混成四不像：\n  - **短语串联式**：按维度顺序用逗号串联，紧凑高效\n  - **分类列举式**：先一句风格定调，再按乐器分类写明各自用途与音色。适合配器复杂、年代风格、影视游戏配乐\n\n### 十大维度\n\n无论用哪种形式，都要尽量覆盖：\n\n1. **Genre 流派**：具体到子流派，不要只写「流行」\n2. **Mood 情绪氛围**：用精准形容词，而不是好坏评价\n3. **Instrumentation 乐器**：核心乐器与配角，写具体名称\n4. **Texture 音色质感**：声音的物理属性\n5. **Era 时代参考**：年代与地域特征\n6. **Production 制作风格**：录音与混音质感\n7. **Vocal 人声特征**：性别、唱法、质感、语言咬字（纯音乐时跳过）\n8. **Tempo / Rhythm 速度节奏**：写具体 BPM 数字，比写快慢可控\n9. **Key / Tonality 调式**：大调明亮、小调紧张\n10. **Structure 结构提示**：起承转合的走向\n\n### 规则\n\n- **只写音乐信息**。故事、画面、情绪散文属于 lyrics，不要写进 style\n- 速度写具体数字\n- 要排除某种乐器，直接写排除\n- 要无人声：写无人声标识，并**彻底不出现任何与演唱相关的词**，包括人声、合唱、哼唱、人声垫\n\n### 禁忌\n\n- 禁止模糊评价词\n- 禁止把故事、场景描述、品牌名写进 style\n- 禁止自相矛盾的描述（先执行冲突处理协议）\n\n---\n\n## lyrics 构建规范\n\n### 段落标签\n\n只用这些，独占一行，段落之间空一行：\n\n```\n[Intro]  [Verse]  [Pre-Chorus]  [Chorus]  [Bridge]  [Hook]  [Outro]\n```\n\n可加一个风格修饰词，写成 `[Chorus - 修饰词]`。**禁止**堆叠多个修饰词。\n\n### 绝对纯净度铁律\n\n- 歌词区**只放要被演唱的文本**\n- 严禁任何数字、音节计数、注释、括号说明、翻译、行号标记\n- 严禁写「重复两遍」，重复段落必须完整写出来\n- 括号只能用于实际演唱的背景和声，不得用于注释\n\n### 音节与呼吸\n\n- 每行控制在 6 到 10 个音节（中文按字数折算）\n- BPM 偏高时倾向短句，偏低时倾向长句\n- 同一段落内对应行的长度误差控制在很小范围\n- 必须留出换气逻辑空隙，不要连续长难句\n\n### 去 AI 味法则\n\n- **严禁形容词堆砌**：不要罗列空洞的美好词汇\n- **严禁伪押韵**：不要为押韵牺牲逻辑\n- **隐喻纪律**：一首歌只用一个核心隐喻，所有意象围绕它展开，严禁混用不相关的隐喻体系\n- **拒绝说明文**：歌词写故事、动作、意象，不写画面说明书\n- 从具体到抽象，用可感知的细节承载情绪\n\n### 禁忌\n\n- 禁止角色标记（模型不支持多歌手独立音色控制）\n- 禁止把创作说明写进歌词（会被唱出来）\n- 禁止在歌词里写速度、乐器、情绪等音乐指令\n\n---\n\n## abc 构建规范\n\n### 何时留空\n\n**默认留空。** abc 留空时节点自动规划旋律与和声，通常效果最好、最不容易出错。\n\n只在以下情况才写：\n\n- 用户给了参考旋律或哼唱的音高走向\n- 用户明确要求指定旋律、要求写谱\n- 用户要改某首已有歌的旋律\n\n留空时，`<<<ABC_VALUE>>>` 与 `<<<ABC_VALUE_END>>>` 之间保持完全空白。需要向用户说明时，写在三块之后的备注里。\n\n### 语法（写谱时遵守）\n\n头部字段：\n\n| 字段 | 含义 |\n|---|---|\n| `X:1` | 文件序号，固定 |\n| `T:` | 标题，留空 |\n| `M:` | 拍号 |\n| `L:` | 最小音符单位 |\n| `Q:` | 速度，需与 style 的 BPM 一致 |\n| `V:` | 声部声明，需声明两个声部 |\n| `K:` | 调号 |\n\n音符规则：\n\n- 音名表示音高；大小写表示八度；逗号表示低八度\n- 音符后数字表示时值倍数，需与 `L:` 定义的最小单位换算\n- 升降号用特定符号标记\n- `z` 表示休止，`Z` 表示整小节休止，后接数字表示小节数\n- `|` 为小节线，每行建议写四个小节\n\n声部规则：\n\n- 必须同时存在人声声部与器乐声部\n- 人声声部写主旋律，器乐声部写伴奏旋律或休止\n- **纯音乐时反过来**：人声声部休止，旋律写进器乐声部\n\n和弦（可选）：\n\n- 和弦符号用引号包裹，放在小节开头\n- 需要节点按完整带和弦的规划时使用\n\n段落对应：\n\n- 用注释标记段落，与歌词段落一一对应\n- 段落名与歌词标签保持一致\n\n### 写谱质量要求\n\n- 人声音域落在舒适区，避免长时间过高或过低\n- 每段歌词对应固定小节数，音符总数与歌词音节数大致匹配\n- 旋律要有走向与起伏，避免单音重复\n- 副歌可比主歌抬高音区，制造推进\n- 完成后自查：头部字段完整、每小节时值凑满、两个声部都在\n\n### 禁忌\n\n- 禁止在不必要时写 abc\n- 禁止写出时值不闭合的小节\n- 禁止只写一个声部\n\n---\n\n## 多模态处理链\n\n### 文本输入\n\n提取关键词 → 用冰山模型补全十大维度 → 检查冲突 → 输出。\n\n### 画面输入\n\n先读取画面的光线、色调、场景、运动、情绪、时代，再映射为声学选择：\n\n- 暖色、明亮、开阔 → 偏大调、原声或明亮音色\n- 冷色、昏暗、夜景 → 偏小调、合成器铺底、大空间\n- 高对比度 → 大动态、打击感强\n- 低对比、雾气 → 混响大、铺底为主\n- 自然、开阔 → 留白多、 Folk 或原声乐器\n- 复古、颗粒感 → 老式音色、年代制作特征\n\n**不要描述画面**，要把画面翻译成声音。\n\n### 视频输入\n\n按时间线切段再映射：\n\n| 视频段落 | 曲式 | 歌词处理 |\n|---|---|---|\n| 开场画面 | 前奏或主歌 | 铺垫、交代场景 |\n| 情绪推进 | 预副歌 | 句子变短、密度上升 |\n| 高潮画面 | 副歌 | 重复句、记忆点 |\n| 转折或留白 | 桥段 | 换视角、换和声 |\n| 收尾画面 | 尾奏 | 渐弱、留一句 |\n\n剪辑越快，段落越短；镜头越长，乐句越长。\n\n---\n\n## 纯音乐\n\n用户提到无人声、纯音乐、伴奏、背景音乐时：\n\n1. style 写无人声标识，且不出现任何演唱相关词\n2. lyrics 只保留段落标签，下面是空行\n3. abc 默认留空\n\n**必须告知用户**：纯音乐仍可能残留少量人声碎片，这是模型已知限制，提示词只能降低概率，需试听确认，必要时换种子重试。**绝不声称保证无人声。**\n\n---\n\n## 输出模板\n\n严格按此结构输出，不得更改包裹符名称、顺序与数量：\n\n```text\n<<<STYLE_VALUE>>>\n此处写风格描述\n<<<STYLE_VALUE_END>>>\n\n<<<LYRICS_VALUE>>>\n此处写歌词\n<<<LYRICS_VALUE_END>>>\n\n<<<ABC_VALUE>>>\n此处写 ABC 乐谱；不写谱时保持完全空白\n<<<ABC_VALUE_END>>>\n```\n\n**abc 不写谱时，两个包裹符之间必须完全空白，一个字都不能有。** 空内容即代表让节点自动作曲。若在其中写「留空」「留空，节点自动作曲」之类的说明文字，这些文字会被当作乐谱传给节点，直接导致报错。\n\n告知用户 abc 留空这件事，只能放在三块之后的极简备注里，不能写进包裹符内。\n\n---\n\n## 负面约束\n\n1. **严禁示例化输出**：不要套用任何记忆中的模板文本、固定句式或示例歌词。每次都必须根据本次输入重新创作，保持创意开放\n2. **严禁元数据污染**：歌词行末不得出现数字、音节计数、注释、行号\n3. **严禁简略 style**：必须充分展开声学维度，不能只有一两个词\n4. **严禁标记堆叠**：段落标签只能保留一个修饰词\n5. **严禁非歌词文本**：歌词区除标签与演唱文本外不得有任何解释\n6. **严禁输出三块以外的内容**：不做创作解析、不列参数表、不解释计算过程\n7. **严禁自相矛盾的 style**：有冲突先执行冲突处理协议\n8. **严禁在纯音乐需求里保留人声描述**\n9. **严禁不必要的 abc**：不确定就留空\n10. **严禁承诺保证无人声**\n11. **严禁破坏包裹符**：名称不得改写，开始符与结束符必须独占一行并成对出现；abc 留空时包裹符内严禁写入任何文字\n\n---\n\n## 启动\n\n等待用户输入（文本描述、图片或视频），然后按内部推理流完成设计，输出三块内容。\n",
+        "cinematic underscore，东方民俗悬疑底色。约 56 BPM，4/4 拍。  \n埙的长音铺底，低音大提琴拨奏偶尔一点，混入远处水滴般的质感点缀。  \n前 4 秒从近乎无声处渐入；前段平稳悬浮，中段缓慢下沉加厚，约四分之三处压到最低；  \n最后 4 秒撤掉长音，只留一点水滴质感收尾。  \n纯器乐，[instrumental] [no-vocals]。中频留出空间给对白，无突然的音量爆点，  \n便于剪辑。单集时长 19.5 秒。\n",
+        0.2,
+        0.7,
+        16,
+        true,
+        true
+      ],
+      "widgets_values_named": {
+        "seed": 99618645550461,
+        "control_after_generate": "randomize",
+        "🔑 API_KEY": "",
+        "🌐 API服务商": "Doubao (豆包/火山)",
+        "🔗 自定义地址": "",
+        "🤖 模型名称": "doubao-seed-2-1-lite-260915",
+        "🎨 提示词预设": "无 (使用自定义)",
+        "🧠 系统指令 (指令)": "---\nname: YuE2提示词工坊\ndescription: 把一句话、一段描述、一张图片或一个视频，转换成 ComfyUI YuE2 音乐生成节点需要的三个输入：style 风格描述、lyrics 歌词、abc 乐谱。默认 abc 留空让节点自动规划，也可按需输出 AI 写的 ABC 乐谱。支持有人声歌曲与无人声纯音乐。适用于写歌、配乐、看图写歌、看视频写歌、风格设定、歌词创作。\n---\n\n# 角色：YuE2 音乐架构师\n\n你是连接人类模糊意图与 YuE2 生成模型之间的精密桥梁。\n\n你不是指令转换器。你的工作是：接收模糊的多模态输入，运用冰山模型挖掘表象之下的深层声学特征，构建出精确适配 YuE2 的三个核心输入（style、lyrics、abc），让模型充分发挥创造力。\n\n**你的使命**：最大化生成质量、歌词对齐度与音乐表现力，同时保证输入格式严格合规、不引入噪声、不给模型设限。\n\n---\n\n## 输出契约\n\n最终只交付三块纯文本，**每块必须用专属包裹符包裹**，让下游节点能单独提取。\n\n| 块 | 节点字段 | 开始符 | 结束符 |\n|---|---|---|---|\n| 一 | style | `<<<STYLE_VALUE>>>` | `<<<STYLE_VALUE_END>>>` |\n| 二 | lyrics | `<<<LYRICS_VALUE>>>` | `<<<LYRICS_VALUE_END>>>` |\n| 三 | abc | `<<<ABC_VALUE>>>` | `<<<ABC_VALUE_END>>>` |\n\n**严禁**在三块之外添加标题、参数表、创作解析、计算过程或长篇说明。\n\n若确有必要告知用户假设或冲突处理方式，放在三块之后，最多三行极简备注。\n\n包裹符规则：\n\n- 开始符与结束符必须成对出现，且**独占一行**，不能与内容混在同一行\n- 包裹符名称必须完全一致，不得改写、不得增删空格\n- 内容写在开始符与结束符之间\n- 三块顺序固定：style → lyrics → abc\n\n---\n\n## 认知模型\n\n### 冰山模型\n\n用户说的「悲伤的歌」只是冰山一角。你必须补全水面下的声学细节：\n\n- **显性**：用户给出的风格、主题、情绪\n- **隐性推演**：该风格对应的混音质感、空间感、乐器演奏技法、动态范围、时代制作特征\n\n不要停在用户给的词，要推演出完整的声学画像，再写进 style。\n\n### 冲突处理协议\n\n当输入存在逻辑冲突（例如「安静的重金属」「极快的慢板情歌」）时，选一种策略解决：\n\n- **时间演变**：把冲突拆到时间轴上，让一段安静、另一段爆发\n- **核心强化**：识别用户更偏的情绪侧作为主轴，冲突元素降级为点缀质感\n- **风格融合**：寻找两个风格的交集子流派，而不是简单拼接\n\n解决后再写 style，不要在同一段里塞入互相打架的描述。\n\n### 节奏与时长闭环\n\n你必须在内部完成时长估算，但**绝对不把计算过程、结果或音节数标记泄露到输出里**。\n\n估算逻辑：\n\n```\n总时长 ≈ Σ（段落行数 × 每行演唱时长） + 段落间隙 + 前后奏\n每行演唱时长 ≈ 每小节拍数 ÷ (BPM ÷ 60)\n```\n\n约束：\n\n- 模型输出下限约 8 秒，低于此会被自动补长\n- 模型输出上限约 360 秒（6 分钟），超出会被截断\n- 歌词量必须与你能推演的 BPM 匹配；歌词过多就精简，不要寄望于模型压缩\n\n### 内部推理流\n\n输出前隐式完成以下步骤：\n\n1. 意图锁定：是叙事歌曲，还是背景配乐？是否纯音乐？\n2. 声学画像：用冰山模型补全十大维度\n3. 参数预设：内定 BPM、调式倾向、段落结构\n4. 冲突检查：有冲突就执行冲突处理协议\n5. 时长校验：估算总时长，确认落在 8 到 360 秒之间\n6. 歌词撰写：按音节与呼吸规则写，同时执行去 AI 味法则\n7. abc 决策：默认留空；仅在指定旋律需求时才写\n8. 格式封装：三块输出，逐条对照禁令自查\n\n---\n\n## style 构建规范\n\n**目标**：为模型提供高信噪比的声学提示，覆盖完整维度。\n\n### 语言与形式\n\n- 必须使用**英文**，即使对话是中文。中文风格词会明显降低可控性\n- 支持两种形式，按需要选一种，不要混成四不像：\n  - **短语串联式**：按维度顺序用逗号串联，紧凑高效\n  - **分类列举式**：先一句风格定调，再按乐器分类写明各自用途与音色。适合配器复杂、年代风格、影视游戏配乐\n\n### 十大维度\n\n无论用哪种形式，都要尽量覆盖：\n\n1. **Genre 流派**：具体到子流派，不要只写「流行」\n2. **Mood 情绪氛围**：用精准形容词，而不是好坏评价\n3. **Instrumentation 乐器**：核心乐器与配角，写具体名称\n4. **Texture 音色质感**：声音的物理属性\n5. **Era 时代参考**：年代与地域特征\n6. **Production 制作风格**：录音与混音质感\n7. **Vocal 人声特征**：性别、唱法、质感、语言咬字（纯音乐时跳过）\n8. **Tempo / Rhythm 速度节奏**：写具体 BPM 数字，比写快慢可控\n9. **Key / Tonality 调式**：大调明亮、小调紧张\n10. **Structure 结构提示**：起承转合的走向\n\n### 规则\n\n- **只写音乐信息**。故事、画面、情绪散文属于 lyrics，不要写进 style\n- 速度写具体数字\n- 要排除某种乐器，直接写排除\n- 要无人声：写无人声标识，并**彻底不出现任何与演唱相关的词**，包括人声、合唱、哼唱、人声垫\n\n### 禁忌\n\n- 禁止模糊评价词\n- 禁止把故事、场景描述、品牌名写进 style\n- 禁止自相矛盾的描述（先执行冲突处理协议）\n\n---\n\n## lyrics 构建规范\n\n### 段落标签\n\n只用这些，独占一行，段落之间空一行：\n\n```\n[Intro]  [Verse]  [Pre-Chorus]  [Chorus]  [Bridge]  [Hook]  [Outro]\n```\n\n可加一个风格修饰词，写成 `[Chorus - 修饰词]`。**禁止**堆叠多个修饰词。\n\n### 绝对纯净度铁律\n\n- 歌词区**只放要被演唱的文本**\n- 严禁任何数字、音节计数、注释、括号说明、翻译、行号标记\n- 严禁写「重复两遍」，重复段落必须完整写出来\n- 括号只能用于实际演唱的背景和声，不得用于注释\n\n### 音节与呼吸\n\n- 每行控制在 6 到 10 个音节（中文按字数折算）\n- BPM 偏高时倾向短句，偏低时倾向长句\n- 同一段落内对应行的长度误差控制在很小范围\n- 必须留出换气逻辑空隙，不要连续长难句\n\n### 去 AI 味法则\n\n- **严禁形容词堆砌**：不要罗列空洞的美好词汇\n- **严禁伪押韵**：不要为押韵牺牲逻辑\n- **隐喻纪律**：一首歌只用一个核心隐喻，所有意象围绕它展开，严禁混用不相关的隐喻体系\n- **拒绝说明文**：歌词写故事、动作、意象，不写画面说明书\n- 从具体到抽象，用可感知的细节承载情绪\n\n### 禁忌\n\n- 禁止角色标记（模型不支持多歌手独立音色控制）\n- 禁止把创作说明写进歌词（会被唱出来）\n- 禁止在歌词里写速度、乐器、情绪等音乐指令\n\n---\n\n## abc 构建规范\n\n### 何时留空\n\n**默认留空。** abc 留空时节点自动规划旋律与和声，通常效果最好、最不容易出错。\n\n只在以下情况才写：\n\n- 用户给了参考旋律或哼唱的音高走向\n- 用户明确要求指定旋律、要求写谱\n- 用户要改某首已有歌的旋律\n\n留空时，`<<<ABC_VALUE>>>` 与 `<<<ABC_VALUE_END>>>` 之间保持完全空白。需要向用户说明时，写在三块之后的备注里。\n\n### 语法（写谱时遵守）\n\n头部字段：\n\n| 字段 | 含义 |\n|---|---|\n| `X:1` | 文件序号，固定 |\n| `T:` | 标题，留空 |\n| `M:` | 拍号 |\n| `L:` | 最小音符单位 |\n| `Q:` | 速度，需与 style 的 BPM 一致 |\n| `V:` | 声部声明，需声明两个声部 |\n| `K:` | 调号 |\n\n音符规则：\n\n- 音名表示音高；大小写表示八度；逗号表示低八度\n- 音符后数字表示时值倍数，需与 `L:` 定义的最小单位换算\n- 升降号用特定符号标记\n- `z` 表示休止，`Z` 表示整小节休止，后接数字表示小节数\n- `|` 为小节线，每行建议写四个小节\n\n声部规则：\n\n- 必须同时存在人声声部与器乐声部\n- 人声声部写主旋律，器乐声部写伴奏旋律或休止\n- **纯音乐时反过来**：人声声部休止，旋律写进器乐声部\n\n和弦（可选）：\n\n- 和弦符号用引号包裹，放在小节开头\n- 需要节点按完整带和弦的规划时使用\n\n段落对应：\n\n- 用注释标记段落，与歌词段落一一对应\n- 段落名与歌词标签保持一致\n\n### 写谱质量要求\n\n- 人声音域落在舒适区，避免长时间过高或过低\n- 每段歌词对应固定小节数，音符总数与歌词音节数大致匹配\n- 旋律要有走向与起伏，避免单音重复\n- 副歌可比主歌抬高音区，制造推进\n- 完成后自查：头部字段完整、每小节时值凑满、两个声部都在\n\n### 禁忌\n\n- 禁止在不必要时写 abc\n- 禁止写出时值不闭合的小节\n- 禁止只写一个声部\n\n---\n\n## 多模态处理链\n\n### 文本输入\n\n提取关键词 → 用冰山模型补全十大维度 → 检查冲突 → 输出。\n\n### 画面输入\n\n先读取画面的光线、色调、场景、运动、情绪、时代，再映射为声学选择：\n\n- 暖色、明亮、开阔 → 偏大调、原声或明亮音色\n- 冷色、昏暗、夜景 → 偏小调、合成器铺底、大空间\n- 高对比度 → 大动态、打击感强\n- 低对比、雾气 → 混响大、铺底为主\n- 自然、开阔 → 留白多、 Folk 或原声乐器\n- 复古、颗粒感 → 老式音色、年代制作特征\n\n**不要描述画面**，要把画面翻译成声音。\n\n### 视频输入\n\n按时间线切段再映射：\n\n| 视频段落 | 曲式 | 歌词处理 |\n|---|---|---|\n| 开场画面 | 前奏或主歌 | 铺垫、交代场景 |\n| 情绪推进 | 预副歌 | 句子变短、密度上升 |\n| 高潮画面 | 副歌 | 重复句、记忆点 |\n| 转折或留白 | 桥段 | 换视角、换和声 |\n| 收尾画面 | 尾奏 | 渐弱、留一句 |\n\n剪辑越快，段落越短；镜头越长，乐句越长。\n\n---\n\n## 纯音乐\n\n用户提到无人声、纯音乐、伴奏、背景音乐时：\n\n1. style 写无人声标识，且不出现任何演唱相关词\n2. lyrics 只保留段落标签，下面是空行\n3. abc 默认留空\n\n**必须告知用户**：纯音乐仍可能残留少量人声碎片，这是模型已知限制，提示词只能降低概率，需试听确认，必要时换种子重试。**绝不声称保证无人声。**\n\n---\n\n## 输出模板\n\n严格按此结构输出，不得更改包裹符名称、顺序与数量：\n\n```text\n<<<STYLE_VALUE>>>\n此处写风格描述\n<<<STYLE_VALUE_END>>>\n\n<<<LYRICS_VALUE>>>\n此处写歌词\n<<<LYRICS_VALUE_END>>>\n\n<<<ABC_VALUE>>>\n此处写 ABC 乐谱；不写谱时保持完全空白\n<<<ABC_VALUE_END>>>\n```\n\n**abc 不写谱时，两个包裹符之间必须完全空白，一个字都不能有。** 空内容即代表让节点自动作曲。若在其中写「留空」「留空，节点自动作曲」之类的说明文字，这些文字会被当作乐谱传给节点，直接导致报错。\n\n告知用户 abc 留空这件事，只能放在三块之后的极简备注里，不能写进包裹符内。\n\n---\n\n## 负面约束\n\n1. **严禁示例化输出**：不要套用任何记忆中的模板文本、固定句式或示例歌词。每次都必须根据本次输入重新创作，保持创意开放\n2. **严禁元数据污染**：歌词行末不得出现数字、音节计数、注释、行号\n3. **严禁简略 style**：必须充分展开声学维度，不能只有一两个词\n4. **严禁标记堆叠**：段落标签只能保留一个修饰词\n5. **严禁非歌词文本**：歌词区除标签与演唱文本外不得有任何解释\n6. **严禁输出三块以外的内容**：不做创作解析、不列参数表、不解释计算过程\n7. **严禁自相矛盾的 style**：有冲突先执行冲突处理协议\n8. **严禁在纯音乐需求里保留人声描述**\n9. **严禁不必要的 abc**：不确定就留空\n10. **严禁承诺保证无人声**\n11. **严禁破坏包裹符**：名称不得改写，开始符与结束符必须独占一行并成对出现；abc 留空时包裹符内严禁写入任何文字\n\n---\n\n## 启动\n\n等待用户输入（文本描述、图片或视频），然后按内部推理流完成设计，输出三块内容。\n",
+        "🗣️ 用户提示 (正文)": "cinematic underscore，东方民俗悬疑底色。约 56 BPM，4/4 拍。  \n埙的长音铺底，低音大提琴拨奏偶尔一点，混入远处水滴般的质感点缀。  \n前 4 秒从近乎无声处渐入；前段平稳悬浮，中段缓慢下沉加厚，约四分之三处压到最低；  \n最后 4 秒撤掉长音，只留一点水滴质感收尾。  \n纯器乐，[instrumental] [no-vocals]。中频留出空间给对白，无突然的音量爆点，  \n便于剪辑。单集时长 19.5 秒。\n",
+        "🔢 最大Token (万)": 0.2,
+        "🌡️ 采样温度": 0.7,
+        "🎬 视频帧率": 16,
+        "📉 媒体限制(边长)": true,
+        "💾 覆盖原文件": true
+      }
+    },
+    {
+      "id": 6,
+      "type": "BanZhang_WrapperParser",
+      "pos": [
+        -1127.8214979662068,
+        2663.2508618076895
+      ],
+      "size": [
+        355.6249354338843,
+        575.2892561983472
+      ],
+      "flags": {},
+      "order": 5,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "输入文本",
+          "type": "STRING",
+          "widget": {
+            "name": "输入文本"
+          },
+          "link": 2
+        }
+      ],
+      "outputs": [
+        {
+          "label": "STYLE",
+          "name": "STYLE",
+          "type": "STRING",
+          "links": [
+            4
+          ]
+        },
+        {
+          "label": "LYRICS",
+          "name": "LYRICS",
+          "type": "STRING",
+          "links": [
+            10
+          ]
+        },
+        {
+          "label": "ABC",
+          "name": "ABC",
+          "type": "STRING",
+          "links": [
+            15
+          ]
+        },
+        {
+          "name": "📦 全部字段(JSON)",
+          "type": "STRING",
+          "links": []
+        },
+        {
+          "name": "🔢 记录数",
+          "type": "INT",
+          "links": []
+        },
+        {
+          "name": "📄 解析预览",
+          "type": "STRING",
+          "links": []
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "BanZhang_WrapperParser",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.8"
+        }
+      },
+      "widgets_values": [
+        "",
+        "🤖 自动识别 (推荐)",
+        "",
+        "<<<STYLE_VALUE>>>*<<<STYLE_VALUE_END>>>\n<<<LYRICS_VALUE>>>*<<<LYRICS_VALUE_END>>>\n<<<ABC_VALUE>>>*<<<ABC_VALUE_END>>>",
+        true,
+        true,
+        0,
+        999,
+        null
+      ],
+      "widgets_values_named": {
+        "输入文本": "",
+        "包裹符格式": "🤖 自动识别 (推荐)",
+        "自定义正则(2捕获组:名称,内容)": "",
+        "输出字段清单(每行一个,留空=自动)": "<<<STYLE_VALUE>>>*<<<STYLE_VALUE_END>>>\n<<<LYRICS_VALUE>>>*<<<LYRICS_VALUE_END>>>\n<<<ABC_VALUE>>>*<<<ABC_VALUE_END>>>",
+        "去除首尾空格": true,
+        "占位符自动置空": true,
+        "起始记录": 0,
+        "记录数量": 999,
+        "🔄 刷新端口": null
+      }
+    },
+    {
+      "id": 7,
+      "type": "BanZhang_LyricsInput",
+      "pos": [
+        -1488.8631074747504,
+        2682.199039616488
+      ],
+      "size": [
+        312.10991735537186,
+        675.3487603305784
+      ],
+      "flags": {},
+      "order": 4,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "📥 传入文本",
+          "name": "text_in",
+          "shape": 7,
+          "type": "STRING",
+          "link": 3
+        }
+      ],
+      "outputs": [
+        {
+          "name": "lyrics",
+          "type": "STRING",
+          "links": [
+            2
+          ]
+        }
+      ],
+      "title": "风格",
+      "properties": {
+        "Node name for S&R": "BanZhang_LyricsInput",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.8"
+        }
+      },
+      "widgets_values": [
+        "<<<STYLE_VALUE>>>\nCinematic Eastern Folklore Suspense, Ambient Underscore, 56 BPM, 4/4 time signature, Xun pad long tones as foundation, deep cello pizzicato accents, subtle water droplet sound design textures, low fidelity atmospheric production, wide stereo imaging, dialogue-friendly mix with cleared mid-range frequencies, no sudden volume spikes, minimalist score structure, short duration intro.\n<<<STYLE_VALUE_END>>>\n\n<<<LYRICS_VALUE>>>\n[Instrumental] [Atmospheric Intro]\n<<<LYRICS_VALUE_END>>>\n\n<<<ABC_VALUE>>>\n<<<ABC_VALUE_END>>>",
+        false,
+        null
+      ],
+      "widgets_values_named": {
+        "📝 歌词文本": "<<<STYLE_VALUE>>>\nCinematic Eastern Folklore Suspense, Ambient Underscore, 56 BPM, 4/4 time signature, Xun pad long tones as foundation, deep cello pizzicato accents, subtle water droplet sound design textures, low fidelity atmospheric production, wide stereo imaging, dialogue-friendly mix with cleared mid-range frequencies, no sudden volume spikes, minimalist score structure, short duration intro.\n<<<STYLE_VALUE_END>>>\n\n<<<LYRICS_VALUE>>>\n[Instrumental] [Atmospheric Intro]\n<<<LYRICS_VALUE_END>>>\n\n<<<ABC_VALUE>>>\n<<<ABC_VALUE_END>>>",
+        "pinned": false,
+        "📌 固定": null
+      }
+    },
+    {
+      "id": 8,
+      "type": "BanZhang_LyricsInput",
+      "pos": [
+        -745.8631074747483,
+        2660.699039616488
+      ],
+      "size": [
+        211.83233882434752,
+        139.08024166257837
+      ],
+      "flags": {},
+      "order": 6,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "📥 传入文本",
+          "name": "text_in",
+          "shape": 7,
+          "type": "STRING",
+          "link": 4
+        }
+      ],
+      "outputs": [
+        {
+          "name": "lyrics",
+          "type": "STRING",
+          "links": [
+            5
+          ]
+        }
+      ],
+      "title": "风格",
+      "properties": {
+        "Node name for S&R": "BanZhang_LyricsInput",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.8"
+        }
+      },
+      "widgets_values": [
+        "600s时长,fully instrumental, no vocal content whatsoever, 4/4 time signature, 155 BPM, guofeng electronic epic cinematic soundtrack, bright heroic minor tonality,, no gradual intro build-up, opening directly hits maximum peak intensity, sustained high explosive energy throughout, no dynamic drop, no dragging segments, no slow ramp-up. Opening lead features high piercing heroic main melody, Chinese tanggu drums and timpani delivering heavy resonant accent hits, pipa fast dense tremolo driving rhythmic momentum, heavy electronic drum kit and distorted bass cementing low-end impact, epic string section layering to amplify grand scale, pipa strums and electric guitar riffs locking in tight rhythmic groove. Mid-section features high-speed virtuosic solo, guzheng sweeping glissandi, electronic drum syncopated variation, seamless transition back to full ensemble high-energy peak, no tempo reduction, no energy decay. Final section pushes full ensemble to maximum energy peak, closes with sustained long suona note followed by three sharp resonant heavy drum hits, crisp abrupt ending, no gradual fade-out, no trailing tail. Cinematic theater-grade epic mixing, wide immersive stereo field, deep weighty low-end, high instrument separation, suona and drum hits positioned prominently, transparent penetrating high-end, powerful dynamic range, maximum percussive impact, overwhelming grand heroic atmosphere.",
+        true,
+        null
+      ],
+      "widgets_values_named": {
+        "📝 歌词文本": "600s时长,fully instrumental, no vocal content whatsoever, 4/4 time signature, 155 BPM, guofeng electronic epic cinematic soundtrack, bright heroic minor tonality,, no gradual intro build-up, opening directly hits maximum peak intensity, sustained high explosive energy throughout, no dynamic drop, no dragging segments, no slow ramp-up. Opening lead features high piercing heroic main melody, Chinese tanggu drums and timpani delivering heavy resonant accent hits, pipa fast dense tremolo driving rhythmic momentum, heavy electronic drum kit and distorted bass cementing low-end impact, epic string section layering to amplify grand scale, pipa strums and electric guitar riffs locking in tight rhythmic groove. Mid-section features high-speed virtuosic solo, guzheng sweeping glissandi, electronic drum syncopated variation, seamless transition back to full ensemble high-energy peak, no tempo reduction, no energy decay. Final section pushes full ensemble to maximum energy peak, closes with sustained long suona note followed by three sharp resonant heavy drum hits, crisp abrupt ending, no gradual fade-out, no trailing tail. Cinematic theater-grade epic mixing, wide immersive stereo field, deep weighty low-end, high instrument separation, suona and drum hits positioned prominently, transparent penetrating high-end, powerful dynamic range, maximum percussive impact, overwhelming grand heroic atmosphere.",
+        "pinned": true,
+        "🔓 取消固定": null
+      }
+    },
+    {
+      "id": 9,
+      "type": "BanzhangYuE2SmartPlan",
+      "pos": [
+        -474.5410554059546,
+        2309.6742817148192
+      ],
+      "size": [
+        360,
+        754
+      ],
+      "flags": {},
+      "order": 9,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "风格",
+          "name": "style",
+          "shape": 7,
+          "type": "STRING",
+          "link": 5
+        },
+        {
+          "label": "歌词",
+          "name": "lyrics",
+          "shape": 7,
+          "type": "STRING",
+          "link": 6
+        },
+        {
+          "label": "外部乐谱",
+          "name": "abc",
+          "shape": 7,
+          "type": "STRING",
+          "link": 7
+        },
+        {
+          "label": "CLIP",
+          "name": "clip",
+          "shape": 7,
+          "type": "CLIP",
+          "link": 8
+        },
+        {
+          "label": "音频编码器",
+          "name": "audio_encoder",
+          "shape": 7,
+          "type": "AUDIO_ENCODER",
+          "link": 9
+        },
+        {
+          "label": "参考音频",
+          "name": "reference_audio",
+          "shape": 7,
+          "type": "AUDIO",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "label": "风格",
+          "name": "style",
+          "type": "STRING",
+          "links": [
+            12
+          ]
+        },
+        {
+          "label": "歌词",
+          "name": "lyrics",
+          "type": "STRING",
+          "links": [
+            13
+          ]
+        },
+        {
+          "label": "ABC乐谱",
+          "name": "abc",
+          "type": "STRING",
+          "links": [
+            14
+          ]
+        },
+        {
+          "label": "实际来源",
+          "name": "active_source",
+          "type": "STRING",
+          "links": []
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "BanzhangYuE2SmartPlan",
+        "banzhang_yue2_smart": "{\"plan_mode\":\"off\",\"seed\":0,\"max_abc_tokens\":8192,\"abc_temperature\":0.7,\"abc_top_p\":0.9,\"abc_top_k\":30,\"repetition_penalty\":1.005,\"penalty_window\":100,\"cover_transcribe_mode\":\"melody\",\"style\":\"\",\"lyrics\":\"\",\"manual_abc\":\"\",\"adv_open\":false}",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.8"
+        }
+      },
+      "widgets_values": [
+        "{\"plan_mode\":\"off\",\"seed\":0,\"max_abc_tokens\":8192,\"abc_temperature\":0.7,\"abc_top_p\":0.9,\"abc_top_k\":30,\"repetition_penalty\":1.005,\"penalty_window\":100,\"cover_transcribe_mode\":\"melody\",\"style\":\"\",\"lyrics\":\"\",\"manual_abc\":\"\",\"adv_open\":false}"
+      ],
+      "widgets_values_named": {
+        "config": "{\"plan_mode\":\"off\",\"seed\":0,\"max_abc_tokens\":8192,\"abc_temperature\":0.7,\"abc_top_p\":0.9,\"abc_top_k\":30,\"repetition_penalty\":1.005,\"penalty_window\":100,\"cover_transcribe_mode\":\"melody\",\"style\":\"\",\"lyrics\":\"\",\"manual_abc\":\"\",\"adv_open\":false}"
+      }
+    },
+    {
+      "id": 10,
+      "type": "BanZhang_LyricsInput",
+      "pos": [
+        -745.8631074747483,
+        2861.5762379635953
+      ],
+      "size": [
+        211.83233882434752,
+        139.08024166257837
+      ],
+      "flags": {},
+      "order": 7,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "📥 传入文本",
+          "name": "text_in",
+          "shape": 7,
+          "type": "STRING",
+          "link": 10
+        }
+      ],
+      "outputs": [
+        {
+          "name": "lyrics",
+          "type": "STRING",
+          "links": [
+            6
+          ]
+        }
+      ],
+      "title": "📝 歌词",
+      "properties": {
+        "Node name for S&R": "BanZhang_LyricsInput",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.8"
+        }
+      },
+      "widgets_values": [
+        "",
+        false,
+        null
+      ],
+      "widgets_values_named": {
+        "📝 歌词文本": "",
+        "pinned": false,
+        "📌 固定": null
+      }
+    },
+    {
+      "id": 11,
+      "type": "YuE2GenerateMusic",
+      "pos": [
+        -93.41403235150766,
+        2316.7909478788097
+      ],
+      "size": [
+        269.0999999999999,
+        460.5999999999999
+      ],
+      "flags": {},
+      "order": 10,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "clip",
+          "type": "CLIP",
+          "link": 11
+        },
+        {
+          "name": "style",
+          "type": "STRING",
+          "widget": {
+            "name": "style"
+          },
+          "link": 12
+        },
+        {
+          "name": "lyrics",
+          "type": "STRING",
+          "widget": {
+            "name": "lyrics"
+          },
+          "link": 13
+        },
+        {
+          "name": "abc",
+          "type": "STRING",
+          "widget": {
+            "name": "abc"
+          },
+          "link": 14
+        }
+      ],
+      "outputs": [
+        {
+          "name": "CONDITIONING",
+          "type": "CONDITIONING",
+          "links": [
+            16,
+            19
+          ]
+        },
+        {
+          "name": "seconds",
+          "type": "FLOAT",
+          "links": [
+            17
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.39.0",
+        "Node name for S&R": "YuE2GenerateMusic",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        "",
+        "",
+        "",
+        748384261524508,
+        "randomize",
+        "full",
+        30,
+        1,
+        0.95,
+        100,
+        1.2,
+        1
+      ],
+      "widgets_values_named": {
+        "style": "",
+        "lyrics": "",
+        "abc": "",
+        "seed": 748384261524508,
+        "control_after_generate": "randomize",
+        "mode": "full",
+        "max_duration": 30,
+        "temperature": 1,
+        "top_p": 0.95,
+        "top_k": 100,
+        "repetition_penalty": 1.2,
+        "cfg_scale": 1
+      }
+    },
+    {
+      "id": 12,
+      "type": "BanZhang_LyricsInput",
+      "pos": [
+        -745.8631074747483,
+        3046.7415272197936
+      ],
+      "size": [
+        211.83233882434752,
+        139.08024166257837
+      ],
+      "flags": {},
+      "order": 8,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "📥 传入文本",
+          "name": "text_in",
+          "shape": 7,
+          "type": "STRING",
+          "link": 15
+        }
+      ],
+      "outputs": [
+        {
+          "name": "lyrics",
+          "type": "STRING",
+          "links": [
+            7
+          ]
+        }
+      ],
+      "title": "ABC",
+      "properties": {
+        "Node name for S&R": "BanZhang_LyricsInput",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.8"
+        }
+      },
+      "widgets_values": [
+        "",
+        false,
+        null
+      ],
+      "widgets_values_named": {
+        "📝 歌词文本": "",
+        "pinned": false,
+        "📌 固定": null
+      }
+    },
+    {
+      "id": 13,
+      "type": "ConditioningZeroOut",
+      "pos": [
+        202.86597023009026,
+        2320.054263418423
+      ],
+      "size": [
+        140,
+        46.71940433400522
+      ],
+      "flags": {},
+      "order": 11,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "条件",
+          "name": "conditioning",
+          "type": "CONDITIONING",
+          "link": 16
+        }
+      ],
+      "outputs": [
+        {
+          "label": "条件",
+          "name": "CONDITIONING",
+          "type": "CONDITIONING",
+          "links": [
+            20
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.39.0",
+        "Node name for S&R": "ConditioningZeroOut",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      }
+    },
+    {
+      "id": 14,
+      "type": "EmptyYuE2LatentAudio",
+      "pos": [
+        201.5471057790932,
+        2423.849984593583
+      ],
+      "size": [
+        210,
+        82
+      ],
+      "flags": {},
+      "order": 12,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "seconds",
+          "type": "FLOAT",
+          "widget": {
+            "name": "seconds"
+          },
+          "link": 17
+        }
+      ],
+      "outputs": [
+        {
+          "name": "LATENT",
+          "type": "LATENT",
+          "links": [
+            21
+          ]
+        }
+      ],
+      "title": "YuE2 潜空间",
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.39.0",
+        "Node name for S&R": "EmptyYuE2LatentAudio",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        120,
+        1
+      ],
+      "widgets_values_named": {
+        "seconds": 120,
+        "batch_size": 1
+      },
+      "color": "#323",
+      "bgcolor": "#535"
+    },
+    {
+      "id": 15,
+      "type": "KSampler",
+      "pos": [
+        437.0166469152168,
+        2326.25748664554
+      ],
+      "size": [
+        258.6100000000001,
+        303.77999999999975
+      ],
+      "flags": {},
+      "order": 13,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "模型",
+          "name": "model",
+          "type": "MODEL",
+          "link": 18
+        },
+        {
+          "label": "正面条件",
+          "name": "positive",
+          "type": "CONDITIONING",
+          "link": 19
+        },
+        {
+          "label": "负面条件",
+          "name": "negative",
+          "type": "CONDITIONING",
+          "link": 20
+        },
+        {
+          "label": "Latent",
+          "name": "latent_image",
+          "type": "LATENT",
+          "link": 21
+        },
+        {
+          "name": "sigmas",
+          "shape": 7,
+          "type": "SIGMAS",
+          "link": null
+        },
+        {
+          "label": "随机种",
+          "name": "seed",
+          "type": "INT",
+          "widget": {
+            "name": "seed"
+          },
+          "link": null
+        },
+        {
+          "label": "步数",
+          "name": "steps",
+          "type": "INT",
+          "widget": {
+            "name": "steps"
+          },
+          "link": null
+        },
+        {
+          "label": "CFG",
+          "name": "cfg",
+          "type": "FLOAT",
+          "widget": {
+            "name": "cfg"
+          },
+          "link": null
+        },
+        {
+          "label": "采样器",
+          "name": "sampler_name",
+          "type": "COMBO",
+          "widget": {
+            "name": "sampler_name"
+          },
+          "link": null
+        },
+        {
+          "label": "调度器",
+          "name": "scheduler",
+          "type": "COMBO",
+          "widget": {
+            "name": "scheduler"
+          },
+          "link": null
+        },
+        {
+          "label": "降噪",
+          "name": "denoise",
+          "type": "FLOAT",
+          "widget": {
+            "name": "denoise"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "label": "Latent",
+          "name": "LATENT",
+          "type": "LATENT",
+          "links": [
+            22
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.39.0",
+        "Node name for S&R": "KSampler",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        363384138965099,
+        "randomize",
+        32,
+        1,
+        "dpm_2",
+        "sgm_uniform",
+        1
+      ],
+      "widgets_values_named": {
+        "seed": 363384138965099,
+        "control_after_generate": "randomize",
+        "steps": 32,
+        "cfg": 1,
+        "sampler_name": "dpm_2",
+        "scheduler": "sgm_uniform",
+        "denoise": 1
+      }
+    },
+    {
+      "id": 16,
+      "type": "VAEDecodeAudio",
+      "pos": [
+        722.6456358430493,
+        2332.980528820122
+      ],
+      "size": [
+        150.6763671875,
+        48.429752066115725
+      ],
+      "flags": {},
+      "order": 14,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "Latent",
+          "name": "samples",
+          "type": "LATENT",
+          "link": 22
+        },
+        {
+          "label": "VAE",
+          "name": "vae",
+          "type": "VAE",
+          "link": 23
+        }
+      ],
+      "outputs": [
+        {
+          "label": "音频",
+          "name": "AUDIO",
+          "type": "AUDIO",
+          "links": [
+            24
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.39.0",
+        "Node name for S&R": "VAEDecodeAudio",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      }
+    },
+    {
+      "id": 17,
+      "type": "BanZhang_MusicPlayerWithLyrics",
+      "pos": [
+        901.3790503791681,
+        2334.499980888373
+      ],
+      "size": [
+        476.5564099999997,
+        572
+      ],
+      "flags": {},
+      "order": 15,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "🎵 音频",
+          "shape": 7,
+          "type": "AUDIO",
+          "link": 24
+        },
+        {
+          "name": "📝 歌词",
+          "shape": 7,
+          "type": "STRING",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "🎵 音频(透传)",
+          "type": "AUDIO",
+          "links": []
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "BanZhang_MusicPlayerWithLyrics",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.8"
+        }
+      },
+      "widgets_values": [
+        "no audio file",
+        "像素点阵",
+        true,
+        "banzhang_audio",
+        "mp3",
+        "",
+        true,
+        ""
+      ],
+      "widgets_values_named": {
+        "📂 音乐文件": "no audio file",
+        "🌈 频谱样式": "像素点阵",
+        "▶️ 自动播放": true,
+        "📄 保存文件名": "banzhang_audio",
+        "🏷️ 保存格式": "mp3",
+        "📂 保存目录": "",
+        "💾 保存到输出目录": true,
+        "player_gui": ""
+      }
+    }
+  ],
+  "links": [
+    [
+      2,
+      7,
+      0,
+      6,
+      0,
+      "STRING"
+    ],
+    [
+      3,
+      5,
+      1,
+      7,
+      0,
+      "STRING"
+    ],
+    [
+      4,
+      6,
+      0,
+      8,
+      0,
+      "STRING"
+    ],
+    [
+      5,
+      8,
+      0,
+      9,
+      0,
+      "STRING"
+    ],
+    [
+      6,
+      10,
+      0,
+      9,
+      1,
+      "STRING"
+    ],
+    [
+      7,
+      12,
+      0,
+      9,
+      2,
+      "STRING"
+    ],
+    [
+      8,
+      1,
+      1,
+      9,
+      3,
+      "CLIP"
+    ],
+    [
+      9,
+      2,
+      0,
+      9,
+      4,
+      "AUDIO_ENCODER"
+    ],
+    [
+      10,
+      6,
+      1,
+      10,
+      0,
+      "STRING"
+    ],
+    [
+      11,
+      1,
+      1,
+      11,
+      0,
+      "CLIP"
+    ],
+    [
+      12,
+      9,
+      0,
+      11,
+      1,
+      "STRING"
+    ],
+    [
+      13,
+      9,
+      1,
+      11,
+      2,
+      "STRING"
+    ],
+    [
+      14,
+      9,
+      2,
+      11,
+      3,
+      "STRING"
+    ],
+    [
+      15,
+      6,
+      2,
+      12,
+      0,
+      "STRING"
+    ],
+    [
+      16,
+      11,
+      0,
+      13,
+      0,
+      "CONDITIONING"
+    ],
+    [
+      17,
+      11,
+      1,
+      14,
+      0,
+      "FLOAT"
+    ],
+    [
+      18,
+      1,
+      0,
+      15,
+      0,
+      "MODEL"
+    ],
+    [
+      19,
+      11,
+      0,
+      15,
+      1,
+      "CONDITIONING"
+    ],
+    [
+      20,
+      13,
+      0,
+      15,
+      2,
+      "CONDITIONING"
+    ],
+    [
+      21,
+      14,
+      0,
+      15,
+      3,
+      "LATENT"
+    ],
+    [
+      22,
+      15,
+      0,
+      16,
+      0,
+      "LATENT"
+    ],
+    [
+      23,
+      1,
+      2,
+      16,
+      1,
+      "VAE"
+    ],
+    [
+      24,
+      16,
+      0,
+      17,
+      0,
+      "AUDIO"
+    ],
+    [
+      25,
+      3,
+      0,
+      5,
+      0,
+      "QWEN3VL_MODEL_CONFIG"
+    ]
+  ],
+  "groups": [],
+  "config": {},
+  "extra": {
+    "ds": {
+      "scale": 0.9090909090909091,
+      "offset": [
+        1513.073363337496,
+        -2032.9526317684642
+      ]
+    },
+    "frontendVersion": "1.55.18",
+    "VHS_latentpreview": true,
+    "VHS_latentpreviewrate": 0,
+    "VHS_MetadataImage": true,
+    "VHS_KeepIntermediate": true
+  },
+  "version": 0.4,
+  "seed_widgets": {
+    "5": 0,
+    "11": 3,
+    "15": 0
+  }
+}
