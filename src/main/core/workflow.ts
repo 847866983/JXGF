@@ -56,6 +56,8 @@ interface H3Data {
   height?: number
   length?: number
   prompt?: string
+  /** 参考素材槽：{ first, last, images[], videos[], audios[] }，真正喂给模型的字段 */
+  slots?: Record<string, unknown>
   [k: string]: unknown
 }
 
@@ -229,7 +231,64 @@ function clearH3Refs(clone: Workflow, mode?: string): void {
 }
 
 /**
- * 把参考图文件名注入 H3 媒体架（CSGlideH3MediaRackCS 的 rack_data.slots.images）。
+ * 把素材写入 H3 媒体架 rack_data。
+ *
+ * rack_data 有两层 slots：
+ *   顶层 slots（媒体架面板显示用）
+ *   segs[cur].slots（当前段实际读取的槽位）
+ * H3 运行时按 segs[cur] 取素材，只写顶层不生效，所以两处都要写。
+ */
+function writeRackSlots(
+  rack: Record<string, unknown>,
+  kind: 'images' | 'videos' | 'audios',
+  files: string[]
+): void {
+  const entries = files.map((f) => ({ file: f, alias: [f] }))
+  // 顶层 slots
+  const top = (rack.slots as Record<string, unknown> | undefined) ?? {}
+  top[kind] = entries
+  rack.slots = top
+  // 当前段的 slots（H3 实际读取这里）
+  const segs = rack.segs as Record<string, Record<string, unknown>> | undefined
+  const cur = typeof rack.cur === 'string' ? rack.cur : undefined
+  if (segs && typeof segs === 'object') {
+    const keys = cur && segs[cur] ? [cur] : Object.keys(segs)
+    for (const key of keys) {
+      const seg = segs[key]
+      if (!seg || typeof seg !== 'object') continue
+      const s = (seg.slots as Record<string, unknown> | undefined) ?? {}
+      s[kind] = entries.map((e) => ({ file: e.file, alias: [...e.alias] }))
+      seg.slots = s
+    }
+  }
+}
+
+/**
+ * 把素材写入 CSGlideCastCS 的 h3_data.slots —— 这是真正喂给模型的槽位。
+ * h3_data.slots 结构：{ first:{}, last:{}, images:[{},{},...], videos:[...], audios:[...] }
+ * 模板里 images/videos/audios 是预置的占位数组（长度固定），必须按索引填 file。
+ */
+function writeCastSlots(h3: H3Data, kind: 'images' | 'videos' | 'audios', files: string[]): void {
+  const slots = (h3.slots as Record<string, unknown> | undefined) ?? {}
+  const exist = slots[kind]
+  if (Array.isArray(exist)) {
+    // 按模板占位数组长度填，多余的清空，未用的保留空对象
+    const next = exist.map((old, i) => {
+      const f = files[i]
+      if (!f) return {}
+      const base = old && typeof old === 'object' ? { ...(old as Record<string, unknown>) } : {}
+      return { ...base, file: f, alias: [f] }
+    })
+    // 超出占位长度的丢弃（H3 只读模板固定槽位数）
+    slots[kind] = next
+  } else {
+    slots[kind] = files.map((f) => ({ file: f, alias: [f] }))
+  }
+  h3.slots = slots
+}
+
+/**
+ * 把参考图文件名注入 H3 媒体架（CSGlideH3MediaRackCS 的 rack_data）。
  * refImages 是已上传到 ComfyUI input 的文件名（如 cglide/xxx.png）。
  * 参考图会作为 ref2va 的素材，首张同时作为首帧。
  */
@@ -248,80 +307,51 @@ export function injectH3RefImages(clone: unknown, refImages: string[]): void {
   }
   for (const node of Object.values(clone)) {
     const ct = String(node.class_type)
-    if (ct !== 'CSGlideH3MediaRackCS') continue
-    const raw = node.inputs.rack_data
-    if (typeof raw !== 'string') continue
-    const rack = tryParse<Record<string, unknown>>(raw)
-    if (!rack) continue
-    const slots = (rack.slots as { images?: { file?: string; alias?: string[] }[] } | undefined) ?? {}
-    const images = Array.isArray(slots.images) ? slots.images : []
-    // 清掉旧参考，填入新参考
-    slots.images = refImages.map((f) => ({ file: f, alias: [f] }))
-    rack.slots = slots
-    node.inputs.rack_data = JSON.stringify(rack)
-  }
-}
-
-/**
- * H3 参数一致性修正（实测必需，否则 SelfLift 报错）：
- * 1. SelfLift「分段步数」合计必须等于 KSampler 的 steps，否则 ValueError。
- * 2. 无效调度器名（如 bong_tangent）会导致 calculate_sigmas 报错，改成 simple。
- */
-function fixH3Params(clone: Workflow): void {
-  let ksamplerSteps: number | null = null
-  for (const node of Object.values(clone)) {
-    if (String(node.class_type) === 'KSampler' && typeof node.inputs.steps === 'number') {
-      ksamplerSteps = node.inputs.steps
-      break
+    // ① 媒体架：顶层 + 当前段两层都写
+    if (ct === 'CSGlideH3MediaRackCS') {
+      const raw = node.inputs.rack_data
+      if (typeof raw !== 'string') continue
+      const rack = tryParse<Record<string, unknown>>(raw)
+      if (!rack) continue
+      writeRackSlots(rack, 'images', refImages)
+      node.inputs.rack_data = JSON.stringify(rack)
     }
-  }
-  for (const node of Object.values(clone)) {
-    const inputs = node.inputs
-    // SelfLift 分段步数对齐 KSampler steps
-    if (typeof inputs['分段步数'] === 'string' && ksamplerSteps !== null) {
-      const total = ksamplerSteps
-      const half = Math.floor(total / 2)
-      inputs['分段步数'] = `${half},${total - half}`
-    }
-    // 无效调度器 -> simple
-    if (inputs['调度器'] === 'bong_tangent') {
-      inputs['调度器'] = 'simple'
+    // ② CSGlideCastCS.h3_data.slots：真正喂给模型的槽位
+    if (ct === 'CSGlideCastCS') {
+      const field = h3DataField(node)
+      if (!field) continue
+      const h3 = tryParse<H3Data>(node.inputs[field])
+      if (!h3) continue
+      writeCastSlots(h3, 'images', refImages)
+      node.inputs[field] = JSON.stringify(h3)
     }
   }
 }
 
 /**
- * 通用采样器细参注入：对 KSampler / KSamplerAdvanced 设置 steps/cfg/sampler_name/scheduler。
- * 放在 H3 参数修正之前，这样 SelfLift 分段步数能按新 steps 对齐。
- */
-function applySamplerParams(clone: Workflow, params: WorkflowParams): void {
-  for (const node of Object.values(clone)) {
-    if (!/^KSampler(Advanced)?$/.test(String(node.class_type))) continue
-    const inp = node.inputs
-    if (params.steps !== undefined && 'steps' in inp) inp.steps = params.steps
-    if (params.cfg !== undefined && 'cfg' in inp) inp.cfg = params.cfg
-    if (params.samplerName && 'sampler_name' in inp) inp.sampler_name = params.samplerName
-    if (params.scheduler && 'scheduler' in inp) inp.scheduler = params.scheduler
-  }
-}
-
-/**
- * 视频参考：把上传后的参考视频写入 H3 媒体架（slots.videos）。
+ * 视频参考：把上传后的参考视频写入 H3 媒体架（slots.videos）与 h3_data.slots。
  */
 export function injectH3RefVideos(clone: unknown, refVideos: string[]): void {
   if (refVideos.length === 0) return
   if (!isWorkflowObject(clone)) return
   for (const node of Object.values(clone)) {
     const ct = String(node.class_type)
-    if (ct !== 'CSGlideH3MediaRackCS') continue
-    const raw = node.inputs.rack_data
-    if (typeof raw !== 'string') continue
-    const rack = tryParse<Record<string, unknown>>(raw)
-    if (!rack) continue
-    const slots = (rack.slots as { videos?: { file?: string; alias?: string[] }[] } | undefined) ?? {}
-    slots.videos = refVideos.map((f) => ({ file: f, alias: [f] }))
-    rack.slots = slots
-    node.inputs.rack_data = JSON.stringify(rack)
+    if (ct === 'CSGlideH3MediaRackCS') {
+      const raw = node.inputs.rack_data
+      if (typeof raw !== 'string') continue
+      const rack = tryParse<Record<string, unknown>>(raw)
+      if (!rack) continue
+      writeRackSlots(rack, 'videos', refVideos)
+      node.inputs.rack_data = JSON.stringify(rack)
+    }
+    if (ct === 'CSGlideCastCS') {
+      const field = h3DataField(node)
+      if (!field) continue
+      const h3 = tryParse<H3Data>(node.inputs[field])
+      if (!h3) continue
+      writeCastSlots(h3, 'videos', refVideos)
+      node.inputs[field] = JSON.stringify(h3)
+    }
   }
 }
 
@@ -397,6 +427,50 @@ function applyRifeParams(clone: Workflow, rife: RifeSettings): void {
     if ('插帧倍数' in i) i['插帧倍数'] = rife.enabled ? rife.multiplier : 1
     if ('序列源帧率' in i) i['序列源帧率'] = rife.fps
     if ('保留原音' in i) i['保留原音'] = rife.keepAudio ? '开' : '关'
+  }
+}
+
+/**
+ * H3 参数一致性修正（实测必需，否则 SelfLift 报错）：
+ * 1. SelfLift「分段步数」合计必须等于 KSampler 的 steps，否则 ValueError。
+ * 2. 无效调度器名（如 bong_tangent）会导致 calculate_sigmas 报错，改成 simple。
+ */
+function fixH3Params(clone: Workflow): void {
+  let ksamplerSteps: number | null = null
+  for (const node of Object.values(clone)) {
+    if (String(node.class_type) === 'KSampler' && typeof node.inputs.steps === 'number') {
+      ksamplerSteps = node.inputs.steps
+      break
+    }
+  }
+  for (const node of Object.values(clone)) {
+    const inputs = node.inputs
+    // SelfLift 分段步数对齐 KSampler steps
+    if (typeof inputs['分段步数'] === 'string' && ksamplerSteps !== null) {
+      const total = ksamplerSteps
+      const half = Math.floor(total / 2)
+      inputs['分段步数'] = `${half},${total - half}`
+    }
+    // 无效调度器 -> simple
+    if (inputs['调度器'] === 'bong_tangent') {
+      inputs['调度器'] = 'simple'
+    }
+  }
+}
+
+/**
+ * 通用采样器细参注入：对 KSampler / KSamplerAdvanced 设置 steps/cfg/sampler_name/scheduler。
+ * 放在 H3 参数修正之前，这样 SelfLift 分段步数能按新 steps 对齐。
+ */
+function applySamplerParams(clone: Workflow, params: WorkflowParams): void {
+  for (const node of Object.values(clone)) {
+    if (!/^KSampler(Advanced)?$/.test(String(node.class_type))) continue
+    const i = node.inputs
+    if (params.steps !== undefined && 'steps' in i) i.steps = params.steps
+    if (params.cfg !== undefined && 'cfg' in i) i.cfg = params.cfg
+    if (params.samplerName && 'sampler_name' in i) i.sampler_name = params.samplerName
+    if (params.scheduler && 'scheduler' in i) i.scheduler = params.scheduler
+    if (params.seed !== undefined && 'seed' in i) i.seed = params.seed
   }
 }
 

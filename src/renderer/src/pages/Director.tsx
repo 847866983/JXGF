@@ -72,6 +72,8 @@ export default function Director(): React.JSX.Element {
   const [paramsShotId, setParamsShotId] = useState<string | null>(null)
   const [batchRunning, setBatchRunning] = useState(false)
   const [submittingShotId, setSubmittingShotId] = useState<string | null>(null)
+  /** 生成前校验错误（如参考图缺失），显示在页面顶部提示 */
+  const [error, setError] = useState<string | null>(null)
 
   // 全局采样参数（KSampler，应用于所有段）
   const [paramsOpen, setParamsOpen] = useState(false)
@@ -194,12 +196,29 @@ export default function Director(): React.JSX.Element {
     const liveShots = computeShots(liveProject, selectedEpisode.id)
     const s = getSegment(shot, preset, index)
     // 参考图：仅「参考图」模式；参考视频：仅「视频参考」模式，取上一段成片
+    // 封面缺失时回退用资产的第一张图，避免"有图但无封面"导致参考图为空
     const refImages =
       s.genMode === 'ref2va'
         ? shot.assetIds
-            .map((id) => liveProject.assets.find((a) => a.id === id)?.coverFile)
+            .map((id) => {
+              const a = liveProject.assets.find((x) => x.id === id)
+              if (!a) return null
+              return a.coverFile ?? a.images?.[a.images.length - 1] ?? null
+            })
             .filter((f): f is string => Boolean(f))
         : []
+    // 参考图模式下没有任何可用参考图 → 明确报错，避免静默生成不带参考的视频
+    if (s.genMode === 'ref2va' && refImages.length === 0 && shot.assetIds.length > 0) {
+      const names = shot.assetIds
+        .map((id) => liveProject.assets.find((x) => x.id === id)?.name ?? id)
+        .join('、')
+      setError(
+        `参考图缺失：分镜引用的资产（${names}）还没有生成过图片。` +
+          `请先到「资产」页给这些资产生成图片（或把已有图片设为绑定图），再回来生成。` +
+          `若想不用参考图直接生成，请把本段生成方式改成「纯文生」。`
+      )
+      return
+    }
     let refVideos: string[] = []
     if (s.genMode === 'video') {
       const prev = liveShots[index - 1]
@@ -347,6 +366,15 @@ export default function Director(): React.JSX.Element {
       <PageHeader title="导演台" desc="分段编排 · 每段画布/参考/放大重绘 · 段间续接成长视频" crumbs={[project.name, '导演台']} />
 
       <div className="px-8 pb-8">
+        {/* 生成前校验错误提示（如参考图缺失） */}
+        {error && (
+          <div className="mb-4 flex items-start justify-between gap-3 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2.5">
+            <div className="flex-1 text-xs leading-relaxed text-amber-200">{error}</div>
+            <button className="shrink-0 text-amber-400 hover:text-amber-200" onClick={() => setError(null)}>
+              关闭
+            </button>
+          </div>
+        )}
         {/* 顶栏 */}
         <div className="mb-4 flex flex-wrap items-center gap-3">
           <select className="field w-80" value={selectedEpisode.id} onChange={(e) => setEpisodeId(e.target.value)}>

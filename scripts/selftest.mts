@@ -1211,5 +1211,81 @@ ok('缺失降级：无modelsRoot时不动', () => {
   assert.equal(out.a.inputs.strength_model, 1)
 })
 
+// ---- H3 参考图注入（参考图不生效的根因回归） ----
+/** 构造一个最小 H3 工作流：媒体架(两层 slots) + CSGlideCastCS(h3_data.slots 占位数组) */
+function makeH3Fixture(): Record<string, { class_type: string; inputs: Record<string, unknown> }> {
+  return {
+    '257': {
+      class_type: 'CSGlideH3MediaRackCS',
+      inputs: {
+        rack_data: JSON.stringify({
+          slots: { images: [], videos: [], audios: [] },
+          fps: 0,
+          audio_out: 0,
+          segs: { clip_0001: { slots: { images: [], videos: [], audios: [] }, fps: 0, audio_out: 0 } },
+          cur: 'clip_0001',
+          shared: false,
+          chain: { name: '', clip: 'clip_0001' }
+        })
+      }
+    },
+    '506': {
+      class_type: 'CSGlideCastCS',
+      inputs: {
+        h3_data: JSON.stringify({
+          mode: 'ref2va',
+          prompt: '',
+          slots: { first: {}, last: {}, images: [{}, {}, {}, {}, {}, {}, {}, {}, {}], videos: [{}, {}, {}], audios: [{}, {}, {}] },
+          chain: { name: 'P', clip: 'clip_0001' }
+        }),
+        prompt_text: '',
+        refs: ['507', 0]
+      }
+    },
+    '507': { class_type: 'CSGlideDeskCS', inputs: { desk_data: JSON.stringify({ chain: { clip: 'clip_0001' }, global: '', segs: {} }), 参考素材: ['257', 0] } }
+  }
+}
+
+ok('H3参考图：媒体架顶层与当前段两层都写入', () => {
+  const wf = makeH3Fixture()
+  injectH3RefImages(wf, ['cglide/a.png', 'cglide/b.png'])
+  const rack = JSON.parse(String(wf['257'].inputs.rack_data))
+  assert.equal(rack.slots.images.length, 2, '顶层 slots.images 应写入')
+  assert.equal(rack.segs[rack.cur].slots.images.length, 2, 'segs[cur].slots.images 必须写入（H3 实际读这里）')
+  assert.equal(rack.segs[rack.cur].slots.images[0].file, 'cglide/a.png')
+})
+
+ok('H3参考图：CSGlideCastCS.h3_data.slots 按占位数组填充', () => {
+  const wf = makeH3Fixture()
+  injectH3RefImages(wf, ['cglide/a.png', 'cglide/b.png'])
+  const h3 = JSON.parse(String(wf['506'].inputs.h3_data))
+  assert.equal(h3.slots.images.length, 9, '应保留模板占位长度 9')
+  assert.equal(h3.slots.images[0].file, 'cglide/a.png')
+  assert.equal(h3.slots.images[1].file, 'cglide/b.png')
+  assert.deepEqual(h3.slots.images[2], {}, '未使用的槽位应清空')
+})
+
+ok('H3参考视频：媒体架两层 + h3_data.slots.videos 都写入', () => {
+  const wf = makeH3Fixture()
+  injectH3RefVideos(wf, ['cglide/prev.mp4'])
+  const rack = JSON.parse(String(wf['257'].inputs.rack_data))
+  assert.equal(rack.slots.videos.length, 1)
+  assert.equal(rack.segs[rack.cur].slots.videos.length, 1, 'segs[cur].slots.videos 必须写入')
+  const h3 = JSON.parse(String(wf['506'].inputs.h3_data))
+  assert.equal(h3.slots.videos[0].file, 'cglide/prev.mp4')
+  assert.equal(h3.slots.videos.length, 3, '应保留模板占位长度 3')
+})
+
+ok('H3参考图：t2v 清空两层 slots', () => {
+  const wf = makeH3Fixture()
+  injectH3RefImages(wf, ['cglide/a.png'])
+  // 走 buildWorkflow 的 clearH3Refs 路径：构造模板后以 t2v 生成
+  const tpl = { id: 't', name: 't', kind: 'video', apiJson: wf, mapping: {} }
+  const out = buildWorkflow(tpl as never, { positive: 'p', h3: { mode: 't2v' } }) as typeof wf
+  const rack = JSON.parse(String(out['257'].inputs.rack_data))
+  assert.equal(rack.slots.images.length, 0, 't2v 应清空顶层')
+  assert.equal(rack.segs[rack.cur].slots.images.length, 0, 't2v 应清空当前段')
+})
+
 console.log(`\nselftest: ${pass} passed, ${fail} failed`)
 if (fail > 0) process.exit(1)
