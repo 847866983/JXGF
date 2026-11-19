@@ -1482,5 +1482,65 @@ ok('三采：放大节点去噪强度各自保留(二采0.5/三采0.45)', () => 
   assert.equal(out.three.inputs['调度器'], 'beta')
 })
 
+// ---- 超分组：插帧 → RTX超分 → 合并 ----
+ok('超分：RTX超分节点参数保留(档位/倍数/精度不被改写)', () => {
+  const api = {
+    sup: {
+      class_type: 'BanZhang_RTX_SuperResolution',
+      inputs: {
+        缩放方式: '按倍数放大',
+        放大倍数: 2.0,
+        输出宽度: 1920,
+        输出高度: 1080,
+        处理档位: '常规放大·极致',
+        强度: 1.0,
+        像素精度: '10位(更精细)',
+        序列源帧率: 24,
+        封装视频: '开',
+        保留原音: '开',
+        视频: ['307', 0]
+      }
+    }
+  }
+  const out = adaptTemplateForGpu(api, { vendor: 'nvidia', name: 'RTX 2060', vramMB: 6144, vramKnown: true }) as typeof api
+  assert.equal(out.sup.inputs['处理档位'], '常规放大·极致', '档位不能被降级逻辑改写')
+  assert.equal(out.sup.inputs['放大倍数'], 2, '倍数保持 2')
+  assert.equal(out.sup.inputs['像素精度'], '10位(更精细)')
+  assert.equal(out.sup.inputs['强度'], 1)
+})
+
+ok('超分：超分链路 三采合并→RIFE→超分→超分合并', () => {
+  // RIFE 只有 1 个输出("VIDEO",) → 索引 0
+  // RTX超分 输出("IMAGE","VIDEO") → 视频索引 1
+  const rife = { class_type: 'BanZhang_RIFE_Interpolation', inputs: { 视频: ['471', 1], 插帧倍数: 2 } }
+  const sup = { class_type: 'BanZhang_RTX_SuperResolution', inputs: { 视频: ['307', 0] } }
+  const comb = { class_type: 'banzhangVideoCombine', inputs: { '🖼️ 图像': ['515', 1] } }
+  assert.deepEqual(rife.inputs['视频'], ['471', 1], 'RIFE 接三采合并的视频输出(索引1)')
+  assert.deepEqual(sup.inputs['视频'], ['307', 0], 'RIFE 单输出，索引必须是 0')
+  assert.deepEqual(comb.inputs['🖼️ 图像'], ['515', 1], '超分输出的视频是索引 1')
+})
+
+ok('超分：buildWorkflow 后超分节点完整保留', () => {
+  const wf: Record<string, { class_type: string; inputs: Record<string, unknown> }> = {
+    '506': {
+      class_type: 'CSGlideCastCS',
+      inputs: {
+        h3_data: JSON.stringify({ mode: 'ref2va', prompt: '', slots: { images: [{}, {}], videos: [{}], audios: [{}] }, chain: { clip: 'clip_0001' } }),
+        prompt_text: ''
+      }
+    },
+    '515': {
+      class_type: 'BanZhang_RTX_SuperResolution',
+      inputs: { 处理档位: '常规放大·极致', 放大倍数: 2, 像素精度: '10位(更精细)', 强度: 1, 视频: ['307', 0] }
+    }
+  }
+  const tpl = { id: 't', name: 't', kind: 'video', apiJson: wf, mapping: {} }
+  const out = buildWorkflow(tpl as never, { positive: 'p', mode: 'ref2va' }) as typeof wf
+  assert.ok(out['515'], '超分节点不能丢')
+  assert.equal(out['515'].inputs['处理档位'], '常规放大·极致')
+  assert.equal(out['515'].inputs['放大倍数'], 2)
+  assert.deepEqual(out['515'].inputs['视频'], ['307', 0])
+})
+
 console.log(`\nselftest: ${pass} passed, ${fail} failed`)
 if (fail > 0) process.exit(1)
