@@ -1447,5 +1447,40 @@ ok('模板保护：显存充足时不降级放大节点', () => {
   assert.equal(out.a.inputs['显存预设'], '12 GB')
 })
 
+// ---- 三采：与二采参数不同，各自独立保留 ----
+ok('三采：参数与二采独立(三采倍数1/6GB/预显影0, 二采1.5/12GB/预显影1)', () => {
+  const api = {
+    // 二采参数
+    two: {
+      class_type: 'BanZhang_MMH3_UpscaleParams',
+      inputs: { 放大模型: '⚡ 最近邻精确（免模型）', 放大倍数: 1.5, 显存预设: '12 GB', 预显影步数: 1, 预显影强度: 0.3 }
+    },
+    // 三采参数
+    three: {
+      class_type: 'BanZhang_MMH3_UpscaleParams',
+      inputs: { 放大模型: '⚡ 最近邻精确（免模型）', 放大倍数: 1, 显存预设: '6 GB', 预显影步数: 0, 预显影强度: 0.05 }
+    }
+  }
+  // 6GB 机器：二采倍数必须保持 1.5，三采保持 1
+  const out = adaptTemplateForGpu(api, { vendor: 'nvidia', name: 'RTX 2060', vramMB: 6144, vramKnown: true }) as typeof api
+  assert.equal(out.two.inputs['放大倍数'], 1.5, '二采应保持 1.5')
+  assert.equal(out.three.inputs['放大倍数'], 1, '三采应保持 1')
+  assert.equal(out.two.inputs['预显影步数'], 1)
+  assert.equal(out.three.inputs['预显影步数'], 0)
+  assert.equal(out.three.inputs['预显影强度'], 0.05)
+})
+
+ok('三采：放大节点去噪强度各自保留(二采0.5/三采0.45)', () => {
+  const api = {
+    two: { class_type: 'BanZhang_MMH3_Upscale', inputs: { 去噪强度: 0.5, 步数: 2, 采样器: 'euler', 调度器: 'bong_tangent' } },
+    three: { class_type: 'BanZhang_MMH3_Upscale', inputs: { 去噪强度: 0.45, 步数: 2, 采样器: 'euler', 调度器: 'bong_tangent' } }
+  }
+  const out = adaptTemplateForGpu(api, { vendor: 'nvidia', name: 'RTX 2060', vramMB: 6144, vramKnown: true }) as typeof api
+  assert.equal(out.two.inputs['去噪强度'], 0.5, '二采去噪 0.5')
+  assert.equal(out.three.inputs['去噪强度'], 0.45, '三采去噪 0.45')
+  assert.equal(out.two.inputs['调度器'], 'beta')
+  assert.equal(out.three.inputs['调度器'], 'beta')
+})
+
 console.log(`\nselftest: ${pass} passed, ${fail} failed`)
 if (fail > 0) process.exit(1)
