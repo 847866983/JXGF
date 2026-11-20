@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Image, Layers, Plus } from 'lucide-react'
+import { BookText, Image, Layers, Plus } from 'lucide-react'
 import type { Asset, AssetKind } from '@shared/types'
 import { useApp } from '../store/app'
 import { EmptyState, PageHeader } from '../components/ui'
@@ -8,6 +8,7 @@ import { AssetForm, type AssetFormData } from '../components/AssetForm'
 import { AssetGenerateDialog } from '../components/AssetGenerateDialog'
 import { CharacterAssetWizard } from '../components/CharacterAssetWizard'
 import { AssetBatchGenerateDialog } from '../components/AssetBatchGenerateDialog'
+import { ScriptImportDialog, type ExtractedChar } from '../components/ScriptImportDialog'
 import { MediaImage } from '../components/MediaImage'
 import { NoProject } from '../components/NoProject'
 import { Modal } from '../components/Modal'
@@ -47,6 +48,7 @@ export default function Assets(): React.JSX.Element {
   const [generating, setGenerating] = useState<Asset | null>(null)
   const [wizardAsset, setWizardAsset] = useState<Asset | null>(null)
   const [batchOpen, setBatchOpen] = useState(false)
+  const [scriptOpen, setScriptOpen] = useState(false)
   const [query, setQuery] = useState('')
 
   if (!project) {
@@ -132,6 +134,44 @@ export default function Assets(): React.JSX.Element {
     closeForm()
   }
 
+  /** 剧本提取出的角色批量创建为角色资产（已存在同名则跳过，避免重复） */
+  const handleImportCharacters = async (chars: ExtractedChar[]): Promise<void> => {
+    const now = new Date().toISOString()
+    let created = 0
+    let skipped = 0
+    await persistProject((draft) => {
+      const existing = new Set(draft.assets.map((a) => a.name.trim().toLowerCase()))
+      for (const c of chars) {
+        const name = c.name.trim()
+        if (!name || existing.has(name.toLowerCase())) {
+          skipped += 1
+          continue
+        }
+        existing.add(name.toLowerCase())
+        draft.assets.push({
+          id: crypto.randomUUID(),
+          name,
+          kind: 'character',
+          alias: c.alias,
+          tags: c.tags,
+          description: c.description || c.alias,
+          prompt: c.prompt,
+          negative: '',
+          coverFile: null,
+          images: [],
+          versions: [],
+          createdAt: now,
+          updatedAt: now
+        })
+        created += 1
+      }
+    })
+    setDelMsg(
+      `已导入 ${created} 个角色资产${skipped > 0 ? `，跳过 ${skipped} 个同名资产` : ''}。` +
+        `点角色卡片进入工作台生成形象图，生成后在分镜提示词里写角色名即可绑定。`
+    )
+  }
+
   const handleDelete = async (asset: Asset): Promise<void> => {
     const files = asset.images
     await persistProject((draft) => {
@@ -179,6 +219,10 @@ export default function Assets(): React.JSX.Element {
         crumbs={[project.name, '资产管理']}
         actions={
           <>
+            <button className="btn-ghost" onClick={() => setScriptOpen(true)} title="导入剧本文本，AI 自动提取角色资产">
+              <BookText size={15} />
+              导入剧本
+            </button>
             <button className="btn-ghost" onClick={() => setBatchOpen(true)}>
               <Layers size={15} />
               一键生成
@@ -192,6 +236,12 @@ export default function Assets(): React.JSX.Element {
       />
 
       <div className="px-8 pb-8">
+        {delMsg && (
+          <div className="mb-3 flex items-start justify-between gap-3 rounded-lg bg-emerald-500/10 px-3 py-2 text-[11px] leading-relaxed text-emerald-300">
+            <span>{delMsg}</span>
+            <button className="shrink-0 text-emerald-400/70 hover:text-emerald-200" onClick={() => setDelMsg(null)}>✕</button>
+          </div>
+        )}
         <div className="mb-4 flex items-center justify-between gap-3">
           <div className="flex w-fit items-center gap-1 rounded-lg border border-white/5 bg-ink-900 p-1">
             {tabs.map((t) => (
@@ -348,6 +398,13 @@ export default function Assets(): React.JSX.Element {
       )}
 
       {batchOpen && <AssetBatchGenerateDialog onClose={() => setBatchOpen(false)} />}
+
+      {scriptOpen && (
+        <ScriptImportDialog
+          onClose={() => setScriptOpen(false)}
+          onImport={(chars) => handleImportCharacters(chars)}
+        />
+      )}
     </div>
   )
 }

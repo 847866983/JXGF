@@ -54,7 +54,9 @@ nsis:
     - zh_CN
   language: '2052'
   runAfterFinish: true
-  artifactName: ${productName}-Setup-${version}.${ext}
+  # 用英文名，确保与 latest.yml 里的 url 完全一致（中文 productName 会让 electron-builder
+  # 生成的实际文件名与 latest.yml 的 url 不一致，导致在线更新下载 404）
+  artifactName: frameforge-setup-${version}.${ext}
 publish:
   provider: github
   owner: '847866983'

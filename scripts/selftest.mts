@@ -14,6 +14,9 @@ import { promisify } from 'node:util'
 import { PRESETS, presetFor } from '../src/main/core/presets.ts'
 import { appendRefTags, buildWorkflow, extractH3Chain, injectH3Prompt, injectH3RefImages, injectH3RefVideos } from '../src/main/core/workflow.ts'
 import { composeDeskText, normalizeRefs, dropUnbackedRefs, filterSlotsByPrompt, presentationOrder, emptySlots, alignFrames, nearestFrames } from '../src/main/core/h3-prompt.ts'
+import { buildSegmentContracts, refSlotsFromFiles, aliasEnabled } from '../src/main/core/h3-contract.ts'
+import { applyNodeParams, readNodeParams } from '../src/main/core/node-inject.ts'
+import { withNodeParamsDefaults, defaultSla, defaultSigma, defaultVideoCombine, freshNodeParams } from '../src/shared/node-params.ts'
 import { exportProjectToFile, importProjectFromFile, collectProjectFiles } from '../src/main/core/project-archive.ts'
 import { ComfyClient } from '../src/main/core/comfy.ts'
 import { collectMediaFiles, collectHistoryFiles, pickFinalMedia, sanitizeOutputName } from '../src/main/core/output-files.ts'
@@ -1413,6 +1416,142 @@ ok('文案台：未传 alias 时默认开启', () => {
   const out = buildWorkflow(tpl as never, { positive: 'p', mode: 'ref2va', h3: { mode: 'ref2va' } }) as ReturnType<typeof makeAliasFixture>
   const h3 = JSON.parse(String(out['506'].inputs.h3_data))
   assert.equal(h3.alias, true, '默认开启别名，保证写角色名就能绑定参考图')
+})
+
+/* ===== H3 三份契约构造器（rack/desk/h3）===== */
+
+ok('契约：三份 JSON 都能反序列化且段身份统一 clip_XXXX', () => {
+  const c = buildSegmentContracts({
+    chain: { name: '测试片', clip: 'clip_0003', shot: 'shot-x' },
+    globalPrompt: '冷调赛博都市',
+    segmentPrompt: '@图片1 推门而入',
+    width: 928, height: 544, ratio: '16:9', frames: 243, mode: 'ref2va'
+  })
+  const rack = JSON.parse(c.rackJson)
+  const desk = JSON.parse(c.deskJson)
+  const h3 = JSON.parse(c.h3Json)
+  assert.equal(rack.cur, 'clip_0003')
+  assert.equal(desk.chain.clip, 'clip_0003')
+  assert.equal(h3.chain.clip, 'clip_0003')
+  assert.ok(rack.segs['clip_0003'], '媒体架当前段必须有 segs 条目')
+})
+
+ok('契约：width/height/length 显式写全，不依赖后端默认值', () => {
+  const c = buildSegmentContracts({
+    chain: { name: 'p', clip: 'clip_0001' },
+    globalPrompt: '', segmentPrompt: 'p',
+    width: 720, height: 1280, ratio: '9:16', frames: 391, mode: 'ref2va'
+  })
+  assert.equal(c.h3.width, 720)
+  assert.equal(c.h3.height, 1280)
+  assert.equal(c.h3.length, 391, 'length 必须显式写帧数，否则后端会用默认 124')
+  assert.equal(JSON.parse(c.h3Json).length, 391)
+})
+
+ok('契约：alias 三态——显式 false 才关，undefined 默认开', () => {
+  const base = {
+    chain: { name: 'p', clip: 'clip_0001' }, globalPrompt: '', segmentPrompt: 'p',
+    width: 576, height: 320, ratio: '16:9', frames: 243, mode: 'ref2va' as const
+  }
+  const off = buildSegmentContracts({ ...base, alias: false })
+  const on = buildSegmentContracts({ ...base })
+  assert.equal(JSON.parse(off.h3Json).alias, false)
+  assert.equal(JSON.parse(off.deskJson).alias, false)
+  assert.equal(JSON.parse(on.h3Json).alias, true)
+  assert.equal(aliasEnabled(undefined), true)
+  assert.equal(aliasEnabled(false), false)
+})
+
+ok('契约：参考图写进 rack+cast 槽位，称呼进 alias，first/last 取自首尾', () => {
+  const slots = refSlotsFromFiles(['a.png', 'b.png'], ['小明', '小红'])
+  assert.deepEqual(slots[0].alias, ['小明'])
+  assert.deepEqual(slots[1].alias, ['小红'])
+  const c = buildSegmentContracts({
+    chain: { name: 'p', clip: 'clip_0001' }, globalPrompt: '', segmentPrompt: '@图片1 与 @图片2',
+    width: 576, height: 320, ratio: '16:9', frames: 243, mode: 'ref2va', images: slots
+  })
+  assert.equal(c.h3.slots.images[0].file, 'a.png')
+  assert.equal(c.h3.slots.images[1].file, 'b.png')
+  assert.equal(c.h3.slots.first?.file, 'a.png')
+  assert.equal(rackImages(c.rackJson)[1].alias[0], '小红')
+  assert.equal(c.h3.slots.images.length, 9, '槽位补满到模板固定的 9 个')
+})
+
+function rackImages(json: string): { file?: string; alias?: string[] }[] {
+  return (JSON.parse(json).slots.images) as { file?: string; alias?: string[] }[]
+}
+
+/* ===== 节点级参数注入（班长全家桶 B 类节点）===== */
+
+ok('节点参数：改动的值写进对应节点，字段名逐字对齐', () => {
+  const wf = {
+    sla: { class_type: 'BanZhang_SLABlockSparseAttention', inputs: { '省多少计算': 95, '计算块大小': '64' } },
+    sigma: { class_type: 'MiniMaxH3SigmaShift', inputs: { shift_video: 12, shift_audio: 3 } },
+    vc: { class_type: 'banzhangVideoCombine', inputs: { '⏱️ 帧率': 24, '🏷️ 文件前缀': '三采' } }
+  }
+  const np = freshNodeParams()
+  np.sla!.saveCompute = 70
+  np.sla!.blockSize = '128'
+  np.sigma!.shiftVideo = 20
+  np.videoCombine!.format = 'WEBM (网页/透明)'
+  const hits = applyNodeParams(wf, np)
+  assert.equal(hits, 3)
+  assert.equal((wf.sla.inputs as Record<string, unknown>)['省多少计算'], 70)
+  assert.equal((wf.sla.inputs as Record<string, unknown>)['计算块大小'], '128')
+  assert.equal((wf.sigma.inputs as Record<string, unknown>).shift_video, 20)
+  assert.equal((wf.vc.inputs as Record<string, unknown>)['📼 视频格式'], 'WEBM (网页/透明)')
+  // 文件前缀是产物挑选依据，绝不覆盖
+  assert.equal((wf.vc.inputs as Record<string, unknown>)['🏷️ 文件前缀'], '三采')
+})
+
+ok('节点参数：保持默认值时不写，保留显存自动适配结果', () => {
+  const wf = {
+    sla: { class_type: 'BanZhang_SLABlockSparseAttention', inputs: { '计算块大小': '32' } }, // 低显存自动适配成 32
+    mem: { class_type: 'BanZhang_H3MemoryOptimizer', inputs: { '省显存档位': '③ 强力（省得多，画面基本不变）' } }
+  }
+  // 全默认参数（用户没碰过）→ 一行都不写，自动适配的 32 / 强力档保留
+  applyNodeParams(wf, freshNodeParams())
+  assert.equal((wf.sla.inputs as Record<string, unknown>)['计算块大小'], '32')
+  assert.equal((wf.mem.inputs as Record<string, unknown>)['省显存档位'], '③ 强力（省得多，画面基本不变）')
+})
+
+ok('节点参数：SLA 关闭时省多少计算写 0；LoRA 多挂载写 LoRA配置 JSON', () => {
+  const wf = {
+    sla: { class_type: 'BanZhang_SLABlockSparseAttention', inputs: { '省多少计算': 95 } },
+    lora: { class_type: 'BanZhang_LoRA_VramSafe', inputs: {} }
+  }
+  const np = freshNodeParams()
+  np.sla = { ...defaultSla, enabled: false }
+  np.loraSlots = [
+    { on: true, file: 'a\\b\\one.safetensors', strength: 0.8 },
+    { on: false, file: 'two.safetensors', strength: 1 }
+  ]
+  applyNodeParams(wf, np)
+  assert.equal((wf.sla.inputs as Record<string, unknown>)['省多少计算'], 0)
+  const cfg = JSON.parse((wf.lora.inputs as Record<string, unknown>)['LoRA配置'] as string)
+  assert.equal(cfg.length, 2)
+  assert.equal(cfg[0].file, 'a/b/one.safetensors', 'Windows 反斜杠归一为正斜杠')
+  assert.equal(cfg[1].on, false)
+  assert.equal((wf.lora.inputs as Record<string, unknown>)['LoRA文件'], 'a/b/one.safetensors')
+})
+
+ok('节点参数：读出回填与注入往返一致', () => {
+  const wf = {
+    sigma: { class_type: 'MiniMaxH3SigmaShift', inputs: { shift_video: 18, shift_audio: 5 } },
+    vc: { class_type: 'banzhangVideoCombine', inputs: { '⏱️ 帧率': 30, '📼 视频格式': 'GIF (动图)', '💾 保存元数据': false } }
+  }
+  const read = readNodeParams(wf)
+  assert.equal(read.sigma?.shiftVideo, 18)
+  assert.equal(read.videoCombine?.fps, 30)
+  assert.equal(read.videoCombine?.format, 'GIF (动图)')
+  assert.equal(read.videoCombine?.saveMetadata, false)
+})
+
+ok('节点参数：withNodeParamsDefaults 补齐老工程的半截配置', () => {
+  const merged = withNodeParamsDefaults({ sigma: { shiftVideo: 22, shiftAudio: 3 } } as never)
+  assert.equal(merged.sigma?.shiftVideo, 22)
+  assert.equal(merged.sla?.saveCompute, defaultSla.saveCompute)
+  assert.equal(merged.videoCombine?.format, defaultVideoCombine.format)
 })
 
 /* ===== 文案台 / 导演台规则（照搬 ComfyUI-Banzhang-All-1101）===== */

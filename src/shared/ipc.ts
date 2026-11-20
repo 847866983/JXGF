@@ -34,6 +34,7 @@ export const CH = {
   aiGetConfig: 'ai:get-config',
   aiSetConfig: 'ai:set-config',
   aiChat: 'ai:chat',
+  aiExtractCharacters: 'ai:extract-characters',
   aiTest: 'ai:test',
   aiListModels: 'ai:list-models',
   aiCancel: 'ai:cancel',

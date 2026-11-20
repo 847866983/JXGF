@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { ChevronDown, ChevronRight, Film, ImageIcon, Link2, PenLine, Play, Save, SlidersHorizontal, Sparkles, Wand2 } from 'lucide-react'
 import type { Shot, Template, SegmentSettings } from '@shared/types'
+import { DESK_PRESETS } from '@shared/node-params'
 import { useApp } from '../store/app'
 import { EmptyState, PageHeader } from '../components/ui'
 import { NoProject } from '../components/NoProject'
@@ -14,6 +15,7 @@ import FilmMonitor from '../components/FilmMonitor'
 import DirectorStage from '../components/DirectorStage'
 import { GenerationInfoPanel } from '../components/GenerationInfoPanel'
 import { readStageDefaults } from '../lib/stageDefaults'
+import NodeParamsPanel from '../components/NodeParamsPanel'
 import { defaultSegment, framesFor, getSegment, ratioOf } from '../lib/segment'
 import Storyboard from './Storyboard'
 
@@ -76,9 +78,15 @@ export default function Director(): React.JSX.Element {
     if (!useApp.getState().hardware) void loadHardware()
   }, [loadHardware])
   const navigate = useNavigate()
+  // 剧本分镜已整合进导演台，外部入口（仪表盘快捷按钮 / 旧 /storyboard 链接）
+  // 通过 ?tab=storyboard 直接打开对应页签
+  const [searchParams] = useSearchParams()
+  const initialTab = searchParams.get('tab')
+  const validTab = initialTab === 'storyboard' || initialTab === 'generation' ? initialTab : 'segment'
 
   const [episodeId, setEpisodeId] = useState('')
-  const [tab, setTab] = useState<'segment' | 'storyboard' | 'generation'>('segment')
+  const [tab, setTab] = useState<'segment' | 'storyboard' | 'generation'>(validTab)
+  const [nodeParamsOpen, setNodeParamsOpen] = useState(false)
   const [templateId, setTemplateId] = useState('')
   const [selectedShotId, setSelectedShotId] = useState('')
   const [paramsShotId, setParamsShotId] = useState<string | null>(null)
@@ -155,6 +163,23 @@ export default function Director(): React.JSX.Element {
       <button className={tab === 'generation' ? 'btn-primary' : 'btn-ghost'} onClick={() => setTab('generation')}>
         生成信息
       </button>
+      <button className="btn-ghost" onClick={() => setNodeParamsOpen(true)} title="SLA / 显存 / Sigma / 视频合成 / RTX / LoRA 等底层节点参数">
+        节点参数
+      </button>
+      <div className="ml-auto flex items-center gap-1.5">
+        <span className="text-[10px] text-slate-600">工作流</span>
+        <select
+          className="field py-1 text-[11px]"
+          value={templateId || pickDirectorTemplate(project?.templates ?? [], '')?.id || ''}
+          onChange={(e) => setTemplateId(e.target.value)}
+          title="切换生成用的工作流模板（导入的其他功能域模板也在这里）"
+        >
+          {(project?.templates ?? []).filter((t) => t.kind === 'video' || /H3|MiniMax|视频|video/i.test(t.name)).map((t) => (
+            <option key={t.id} value={t.id}>{t.name}</option>
+          ))}
+          {(project?.templates.length ?? 0) === 0 && <option value="">（无模板）</option>}
+        </select>
+      </div>
     </div>
   )
 
@@ -391,7 +416,10 @@ export default function Director(): React.JSX.Element {
       rife: s.rife,
       refImages: refImages.length > 0 ? refImages : undefined,
       refAliases: refAliases.length > 0 ? refAliases : undefined,
-      refVideos: refVideos.length > 0 ? refVideos : undefined
+      refVideos: refVideos.length > 0 ? refVideos : undefined,
+      // 节点级参数（SLA/显存/Sigma/预览/视频合成/RTX/LoRA）—— 全片一份，取自当前剧集
+      nodeParams: selectedEpisode.nodeParams,
+      presets: selectedEpisode.presets
     })
   }
 
@@ -525,6 +553,14 @@ export default function Director(): React.JSX.Element {
     setGlobalDirty(false)
   }
 
+  /** 保存文案台快捷短语到当前剧集（全片共用一份） */
+  const savePresets = (list: string[]): void => {
+    void persistProject((draft) => {
+      const ep = draft.episodes.find((x) => x.id === selectedEpisode.id)
+      if (ep) ep.presets = list
+    })
+  }
+
   /** 快捷改单段参数（续接方式 / 生成方式按钮用），立即保存 */
   const patchSegment = async (shot: Shot, patch: Partial<SegmentSettings>): Promise<void> => {
     await saveSegment(shot.id, { ...segOf(shot), ...patch })
@@ -603,11 +639,38 @@ export default function Director(): React.JSX.Element {
         curShot.outputs[curShot.outputs.length - 1])
       : null
 
+  /** 节点级参数弹窗（生成信息页 / 分段导演页共用） */
+  const nodeParamsModal = nodeParamsOpen ? (
+    <NodeParamsPanel
+      initial={selectedEpisode.nodeParams}
+      loraFiles={[]}
+      onSave={(np) => {
+        void persistProject((draft) => {
+          const ep = draft.episodes.find((x) => x.id === selectedEpisode.id)
+          if (ep) ep.nodeParams = np
+        })
+        setNotice('节点参数已保存，下次生成生效')
+        setNodeParamsOpen(false)
+      }}
+      onClose={() => setNodeParamsOpen(false)}
+    />
+  ) : null
+
   if (tab === 'generation') {
     return (
       <div>
         {tabBar}
-        <PageHeader title="生成信息" desc="全片统一的生成阶段与采样参数" crumbs={[project.name, '导演台']} />
+        {nodeParamsModal}
+        <PageHeader
+          title="生成信息"
+          desc="全片统一的生成阶段与采样参数"
+          crumbs={[project.name, '导演台']}
+          actions={
+            <button className="btn-ghost" onClick={() => setNodeParamsOpen(true)}>
+              <SlidersHorizontal size={13} className="mr-1 inline" />节点级参数
+            </button>
+          }
+        />
         <div className="px-8 pb-8">
           <GenerationInfoPanel
             stages={globalStages}
@@ -624,8 +687,8 @@ export default function Director(): React.JSX.Element {
   return (
     <div className="relative">
       {tabBar}
-      <PageHeader title="导演台" desc="分段编排 · 点分段改提示词 · 段间续接成长视频" crumbs={[project.name, '导演台']} />
-      <div className="px-8 pb-8">
+      {nodeParamsModal}
+      <div className="px-8 pb-8 pt-5">
         {notice && (
           <div className="mb-4 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-200">
             {notice}
@@ -673,11 +736,87 @@ export default function Director(): React.JSX.Element {
             setGlobalDirty(true)
           }}
           onSaveGlobal={() => void saveGlobalPrompt()}
+          presets={selectedEpisode.presets ?? [...DESK_PRESETS]}
+          onPresets={savePresets}
           onOpenParams={() => setParamsShotId(curShot?.id ?? null)}
           submitting={submittingShotId === curShot?.id}
           characterNames={(curShot?.assetIds ?? [])
             .map((id) => project.assets.find((a) => a.id === id)?.name ?? '')
             .filter(Boolean)}
+          refPicks={(curShot?.assetIds ?? []).map((id, i) => {
+            const a = project.assets.find((x) => x.id === id)
+            const tag = `@图片${i + 1}`
+            const image = a?.coverFile ?? a?.images?.[a.images.length - 1] ?? null
+            const name = a?.name ?? id
+            // 绑定令牌 = 名字；同时兼容旧的 @图片N 写法
+            const used =
+              (name.trim().length > 0 && curPrompt.includes(name.trim())) ||
+              new RegExp(`${tag}(?!\\d)`).test(curPrompt)
+            return {
+              index: i + 1,
+              assetId: id,
+              name,
+              image,
+              hasImage: Boolean(image),
+              used,
+            }
+          })}
+          availableRefAssets={project.assets
+            .filter((a) => !(curShot?.assetIds ?? []).includes(a.id))
+            .map((a) => ({
+              id: a.id,
+              name: a.name,
+              image: a.coverFile ?? a.images?.[a.images.length - 1] ?? null
+            }))}
+          onAddRef={(assetId) => {
+            if (!curShot) return
+            const next = [...(curShot.assetIds ?? []), assetId]
+            void persistProject((draft) => {
+              const sh = draft.shots.find((x) => x.id === curShot.id)
+              if (sh) {
+                sh.assetIds = next
+                sh.updatedAt = new Date().toISOString()
+              }
+            })
+          }}
+          onRemoveRef={(assetId) => {
+            if (!curShot) return
+            const next = (curShot.assetIds ?? []).filter((id) => id !== assetId)
+            void persistProject((draft) => {
+              const sh = draft.shots.find((x) => x.id === curShot.id)
+              if (sh) {
+                sh.assetIds = next
+                sh.updatedAt = new Date().toISOString()
+              }
+            })
+          }}
+          aliasMode={(seg?.aliasMode ?? true) === true}
+          onToggleAlias={(v) => {
+            if (curShot) void patchSegment(curShot, { aliasMode: v })
+          }}
+          onBindRef={(name) => {
+            if (!curShot) return
+            // 名字令牌依赖别名模式展开 —— 绑定时自动打开，否则写了也不生效
+            if (seg?.aliasMode === false) void patchSegment(curShot, { aliasMode: true })
+            const token = name.trim()
+            if (!token || curPrompt.includes(token)) return
+            const next = `${curPrompt.trimEnd()}${curPrompt.trim() ? '\n' : ''}${token} `
+            setPromptDraft((d) => ({ ...d, [curShot.id]: next }))
+            setPromptDirty(true)
+          }}
+          onUnbindRef={(name, tag) => {
+            if (!curShot) return
+            const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+            let next = curPrompt
+              .split(new RegExp(esc(name.trim()), 'g'))
+              .join('')
+              .split(new RegExp(`${esc(tag)}(?!\\d)`, 'g'))
+              .join('')
+              .replace(/[ \t]{2,}/g, ' ')
+              .replace(/\n{3,}/g, '\n\n')
+            setPromptDraft((d) => ({ ...d, [curShot.id]: next }))
+            setPromptDirty(true)
+          }}
         />
       </div>
       {paramsShotId && (() => {

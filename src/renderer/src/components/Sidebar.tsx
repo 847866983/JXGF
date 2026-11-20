@@ -7,7 +7,6 @@ import {
   Film,
   FolderKanban,
   LayoutDashboard,
-  ListOrdered,
   Server,
   Settings,
   Sparkles
@@ -18,7 +17,6 @@ import { useApp } from '../store/app'
 const items = [
   { to: '/dashboard', label: '仪表盘', icon: LayoutDashboard },
   { to: '/assets', label: '资产管理', icon: FolderKanban },
-  { to: '/storyboard', label: '剧本分镜', icon: ListOrdered },
   { to: '/memory', label: '记忆库', icon: BookOpen },
   { to: '/ai', label: 'AI 助手', icon: Bot },
   { to: '/director', label: '导演台', icon: Clapperboard },

@@ -485,6 +485,13 @@ function registerIpc(): void {
     }
   })
 
+  // 从剧本文本提取角色资产（只返回清单，不写工程；由界面让用户确认后再创建）
+  ipcMain.handle(CH.aiExtractCharacters, async (_e, payload: { text: string }) => {
+    const cfg = loadAiConfig()
+    const provider = cfg.providers.find((p) => p.id === cfg.activeProviderId) ?? cfg.providers[0]
+    return aiAssistant.extractCharacters(provider, String(payload?.text ?? ''))
+  })
+
   // 本地图片/视频读取成 data URL（供渲染进程预览，避开 file:// 安全限制）。
   // 视频走 base64 会放大 1.33 倍，限制 200MB 防止内存爆炸（更大文件请走 appmedia:// 流式）。
   ipcMain.handle(CH.mediaDataUrl, async (_e, p: string) => {
@@ -733,13 +740,19 @@ app.on('second-instance', () => {
   }
 })
 
-app.on('window-all-closed', () => {
-  void store?.flush()
-  app.quit()
+// 退出前必须等待未落盘的改动写完，否则关闭瞬间的保存会丢失。
+// flush 内部串行排队，等待它即可保证最后一次快照写盘完成。
+let quitting = false
+app.on('before-quit', (event) => {
+  if (!store || quitting) return
+  event.preventDefault()
+  quitting = true
+  void store.flush().finally(() => app.quit())
 })
 
-app.on('before-quit', () => {
-  void store?.flush()
+app.on('window-all-closed', () => {
+  // 走 app.quit() 触发 before-quit，等落盘完成后再真正退出（保持原有「关窗即退出」行为）
+  app.quit()
 })
 
 export type { UpdateInfo }

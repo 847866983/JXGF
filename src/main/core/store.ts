@@ -38,14 +38,15 @@ export function emptyProject(name = '未命名项目'): Project {
     scenes: [],
     shots: [],
     assets: [],
-    templates: []
+    templates: [],
+    aiChat: []
   }
 }
 
 function migrate(data: Project): Project {
   const base = emptyProject(data?.name || '未命名项目')
   const merged: Project = { ...base, ...data, schema: SCHEMA }
-  for (const key of ['scripts', 'episodes', 'scenes', 'shots', 'assets', 'templates'] as const) {
+  for (const key of ['scripts', 'episodes', 'scenes', 'shots', 'assets', 'templates', 'aiChat'] as const) {
     if (!Array.isArray(merged[key])) merged[key] = []
   }
   merged.settings = { ...base.settings, ...(data?.settings || {}) }

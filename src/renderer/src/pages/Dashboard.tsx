@@ -256,7 +256,7 @@ export default function Dashboard(): React.JSX.Element {
                   </button>
                   <button
                     className="btn-ghost flex-1 !px-2 !py-1.5 text-xs"
-                    onClick={() => void openProject(p.id).then(() => navigate('/storyboard'))}
+                    onClick={() => void openProject(p.id).then(() => navigate('/director?tab=storyboard'))}
                   >
                     <ListOrdered size={13} />
                     剧本分镜

@@ -4,6 +4,7 @@ import type { ComfySettings } from '@shared/types'
 import { useApp } from '../store/app'
 import { PageHeader } from '../components/ui'
 import { AiSettings } from '../components/AiSettings'
+import { NodeCatalogPanel } from '../components/NodeCatalogPanel'
 
 const DEFAULT_COMFY: ComfySettings = { host: '127.0.0.1', port: 8188, protocol: 'http' }
 
@@ -461,9 +462,15 @@ export default function Settings(): React.JSX.Element {
           {WorkflowPanel}
         </section>
 
-        {/* 三、AI 与接入 */}
+        {/* 三、节点能力总览 */}
         <section>
-          <div className="mb-2 text-xs font-medium text-slate-500">三 · AI 与接入</div>
+          <div className="mb-2 text-xs font-medium text-slate-500">三 · 节点能力总览</div>
+          <NodeCatalogPanel />
+        </section>
+
+        {/* 四、AI 与接入 */}
+        <section>
+          <div className="mb-2 text-xs font-medium text-slate-500">四 · AI 与接入</div>
           <div className="space-y-4">
             {McpPanel}
             <div className="panel p-5">
@@ -480,9 +487,9 @@ export default function Settings(): React.JSX.Element {
           </div>
         </section>
 
-        {/* 四、关于与更新 */}
+        {/* 五、关于与更新 */}
         <section>
-          <div className="mb-2 text-xs font-medium text-slate-500">四 · 关于与更新</div>
+          <div className="mb-2 text-xs font-medium text-slate-500">五 · 关于与更新</div>
           {AboutPanel}
         </section>
       </div>

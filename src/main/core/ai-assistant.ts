@@ -22,6 +22,15 @@ interface ChatMsg {
   name?: string
 }
 
+/** 从剧本文本里提取出的一个角色（待用户在界面确认后创建为资产） */
+export interface ExtractedCharacter {
+  name: string
+  alias: string
+  description: string
+  prompt: string
+  tags: string[]
+}
+
 type Emit = (e: { type: string; [k: string]: unknown }) => void
 
 type ToolDef = {
@@ -364,6 +373,86 @@ export class AiAssistant {
     messages.push({ role: 'user', content: '请基于以上信息给出最终结果。' })
     const finalMsg = await this.callLLM(provider, messages)
     return { content: String(finalMsg.content ?? ''), changed: this.changed }
+  }
+
+  /**
+   * 从剧本文本里提取角色资产（不写工程，只返回结构化清单让用户在界面确认）。
+   * 用一次不带 tools 的纯文本请求，要求模型只回 JSON 数组，避免 function-calling
+   * 在部分网关上不稳定。失败时由调用方提示用户。
+   */
+  async extractCharacters(provider: AiProvider, scriptText: string): Promise<ExtractedCharacter[]> {
+    if (!provider.baseUrl) throw new Error('请先填写 AI 接口地址')
+    if (!provider.model) throw new Error('请先填写模型名')
+    const text = String(scriptText ?? '').trim()
+    if (!text) return []
+
+    const system = [
+      '你是短剧剧本分析助手。从给定的剧本文本中提取出所有「角色」（人物、拟人角色；不要提取场景、道具、机构）。',
+      '只输出一个 JSON 数组，不要任何解释、不要 markdown 代码块。数组每个元素是一个对象，字段：',
+      '  name: 角色名（必填，简短）',
+      '  alias: 别名/称呼，用逗号分隔（可为空字符串）',
+      '  description: 一句话身份/性格描述（可为空字符串）',
+      '  prompt: 用于生成角色形象图的英文提示词，包含外貌、年龄、发型发色、服装、气质（必填，英文）',
+      '  tags: 标签数组，1-3 个中文短词（可为空数组）',
+      '规则：',
+      '- 同一角色的不同称呼合并成一条，别名写进 alias。',
+      '- prompt 必须是可直接用于文生图的英文，具体可视觉化，避免抽象词。',
+      '- 若文本里没有明确角色，返回空数组 []。',
+      '- 严格 JSON：键名用双引号，字符串转义正确，能被 JSON.parse 解析。'
+    ].join('\n')
+
+    const url = buildChatUrl(provider.baseUrl)
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+    if (provider.apiKey) headers.Authorization = `Bearer ${provider.apiKey}`
+    let res: Response
+    try {
+      res = await fetch(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          model: provider.model,
+          messages: [
+            { role: 'system', content: system },
+            { role: 'user', content: `剧本文本：\n\n${text.slice(0, 20000)}` }
+          ],
+          temperature: 0.2,
+          max_tokens: 4096
+        }),
+        signal: AbortSignal.timeout(180_000)
+      })
+    } catch (err) {
+      throw new Error(`无法连接 AI 接口（${url}）：${String((err as Error).message ?? err)}`)
+    }
+    if (!res.ok) {
+      const t = await res.text().catch(() => '')
+      throw new Error(`AI 接口 ${res.status}：${t.slice(0, 300)}`)
+    }
+    const data = (await res.json()) as { choices?: { message?: ChatMsg }[] }
+    const msg = data.choices?.[0]?.message
+    let content = String(msg?.content ?? msg?.reasoning_content ?? '').trim()
+    // 去掉可能的 markdown 代码块围栏
+    content = content.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '').trim()
+    // 截取第一个 [ 到最后一个 ]，容忍前后啰嗦
+    const start = content.indexOf('[')
+    const end = content.lastIndexOf(']')
+    if (start < 0 || end <= start) throw new Error('AI 未返回角色列表 JSON')
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(content.slice(start, end + 1))
+    } catch (err) {
+      throw new Error(`角色解析失败（AI 返回的不是合法 JSON）：${String((err as Error).message ?? err)}`)
+    }
+    if (!Array.isArray(parsed)) throw new Error('角色清单格式不对（应为数组）')
+    return parsed
+      .filter((x): x is Record<string, unknown> => Boolean(x) && typeof x === 'object')
+      .map((x) => ({
+        name: String(x.name ?? '').trim(),
+        alias: String(x.alias ?? '').trim(),
+        description: String(x.description ?? '').trim(),
+        prompt: String(x.prompt ?? '').trim(),
+        tags: Array.isArray(x.tags) ? x.tags.map((t) => String(t).trim()).filter(Boolean) : []
+      }))
+      .filter((c) => c.name.length > 0)
   }
 
   private describeTool(name: string, args: Record<string, unknown>): string {

@@ -31,14 +31,15 @@
 | 模块 | 说明 |
 |---|---|
 | 本地 ComfyUI 视频生成 | 通过 ComfyUI 的 HTTP API + WebSocket 提交工作流、实时接收进度、自动下载产物并归档 |
-| 资产管理 | 角色 / 场景 / 道具三类资产，含提示词、标签、参考图与版本记录，全项目共享 |
-| 剧本分镜 | `剧本 → 剧集 → 场次 → 分镜` 四级结构，分镜含描述、台词、运镜、时长、角色与资产引用 |
-| 导演台 | 按集把分镜排成时间线，逐镜设置提示词、引用角色、挂参考图 |
+| 资产管理 | 角色 / 场景 / 道具三类资产，含提示词、标签、参考图与版本记录，全项目共享；支持「导入剧本 → AI 提取角色资产 → 生成角色图 → 提示词写资产名绑定参考图」 |
+| 记忆库 | 世界观 / 角色 / 风格 / 连续性 / 决策日志，供 AI 助手读写 |
+| AI 助手 | 内置 H3AI 导演助理，读项目记忆、按 H3 规则写分镜、可做机检；对话历史随项目保存 |
+| 导演台 | 三段式视频编辑器布局（监视器 / 参数面板 / 时间轴）；含分段时间线、片子级与本段提示词、按资产名绑定参考图、节点级参数、生成信息与工作流切换；剧本与分镜已整合为其内页签 |
 | 生成队列 | 单任务排队、进度推送、失败自动重试、取消任务，产物回写分镜 |
 | 硬件探测与显存档位 | 启动时探测 GPU（`nvidia-smi` / WMI），按显存自动给出分辨率/帧数预设 |
 | 在线更新 | 基于 electron-updater，打包版本启动后静默检查、下载、退出安装 |
 
-界面包含七个页面：工作台（Dashboard）、环境检测（Environment）、资产库（Assets）、剧本分镜（Storyboard）、导演台（Director）、生成队列（Queue）、设置（Settings）。
+界面包含七个页面：仪表盘（Dashboard）、资产管理（Assets）、记忆库（Memory）、AI 助手（AI）、导演台（Director）、生成队列（Queue）、设置（Settings）。原独立「剧本分镜」页已整合进导演台的「剧本与分镜」页签，旧地址 `/storyboard` 自动跳转。
 
 ---
 
@@ -67,6 +68,10 @@ frameforge/
 │   │       ├── presets.ts       # 显存档位表 PRESETS 与档位判定
 │   │       ├── comfy.ts         # ComfyUI HTTP/WS 客户端
 │   │       ├── workflow.ts      # 工作流构建：模板 + 参数注入
+│   │       ├── node-inject.ts   # 节点级参数探测式注入（按 class_type）
+│   │       ├── h3-contract.ts   # H3/Rack/Desk 三大数据契约构造
+│   │       ├── h3-prompt.ts     # 别名展开 / @图片N 槽位 / 名字绑定规则
+│   │       ├── ai-assistant.ts  # H3AI 助理：工具调用 + 剧本文本提取角色
 │   │       ├── jobs.ts          # 生成队列（排队/进度/重试/归档/回写分镜）
 │   │       ├── store.ts         # 项目存储（project.json + media/）
 │   │       └── updater.ts       # electron-updater 封装（开发态自动禁用）
@@ -74,17 +79,19 @@ frameforge/
 │   │   └── index.ts             # contextBridge 安全桥（window.api）
 │   ├── shared/                  # 主/渲染进程共享代码
 │   │   ├── types.ts             # 领域模型（Project/Shot/Asset/Job…）
-│   │   └── ipc.ts               # IPC 通道常量 CH
+│   │   ├── ipc.ts               # IPC 通道常量 CH
+│   │   ├── node-params.ts       # 节点参数默认值与类型
+│   │   └── node-catalog.ts      # 9 大功能域节点能力目录
 │   └── renderer/                # React 界面
 │       ├── index.html
 │       └── src/
 │           ├── main.tsx
 │           ├── App.tsx
-│           ├── components/      # Sidebar、通用 UI 组件
-│           ├── pages/           # Dashboard / Assets / Storyboard / Director / Queue / Settings
+│           ├── components/      # Sidebar、DirectorStage、DeskPanel、RefBindingPanel 等
+│           ├── pages/           # Dashboard / Assets / Memory / AI / Director / Queue / Settings
 │           └── store/           # zustand 应用状态
 ├── electron.vite.config.ts
-├── electron-builder.yml         # 打包与 publish（GitHub 占位符）
+├── electron-builder.yml         # 打包与 publish（GitHub: 847866983/JXGF）
 ├── dev-app-update.yml           # 开发态更新配置（electron-updater）
 ├── pnpm-workspace.yaml          # pnpm 10+ 构建脚本放行（electron / esbuild）
 ├── package.json
@@ -167,7 +174,7 @@ node scripts\make-ico.mjs                                                  # 由
 
 `electron-builder.yml` 已引用 `build/icon.ico`。正式发布如需多尺寸 ICO，可自行替换；256px PNG 条目在 Windows Vista+ 有效。
 
-> 当前 `electron-builder.yml` 里 `signAndEditExecutable: false` 是为了在「无符号链接权限的开发机」上能打包（见 [docs/发布与在线更新.md](docs/发布与在线更新.md) 第 8 节）。正式发布请在开启 Windows 开发者模式的机器上删掉这一行，exe 才会嵌入图标与版本信息。
+> `electron-builder.yml` 已开启 `signAndEditExecutable: true`（嵌入图标与版本信息）。本机无符号链接权限，打包依赖预置的 winCodeSign 缓存；若在新机器上打包失败，见 [docs/发布与校验流程.md](docs/发布与校验流程.md) 第 4 节的手动解压绕过方法。
 
 ### 发布前检查
 
@@ -179,7 +186,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\preflight.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\preflight.ps1 -Package
 ```
 
-脚本会体检图标、`signAndEditExecutable`、`publish` 占位符，再跑 typecheck / selftest / build / package，任一失败返回非零退出码。
+脚本会体检图标、`signAndEditExecutable`、`publish` 配置，再跑 typecheck / selftest / build / package，任一失败返回非零退出码。 publishes 到 GitHub Release 另需 `GH_TOKEN`，详见 [docs/发布与校验流程.md](docs/发布与校验流程.md)。
 
 ---
 
@@ -230,7 +237,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\preflight.ps1 -Packa
 
 - 实现封装在 [src/main/core/updater.ts](src/main/core/updater.ts)：`check()` / `download()` / `quitAndInstall()`。
 - **开发模式（未打包）自动禁用**：`app.isPackaged === false` 时 `check()` 直接返回「开发模式未启用」，避免调试时误连发布渠道。
-- 发布渠道由 [electron-builder.yml](electron-builder.yml) 的 `publish` 段决定（当前为 GitHub 占位符 `frameforge-studio/frameforge`）。
+- 发布渠道由 [electron-builder.yml](electron-builder.yml) 的 `publish` 段决定（当前为真实公开仓库 `847866983/JXGF`）。
 - 完整的发布与更新流程见 [docs/发布与在线更新.md](docs/发布与在线更新.md)。
 
 ---

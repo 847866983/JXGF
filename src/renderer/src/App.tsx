@@ -4,7 +4,6 @@ import { Sidebar } from './components/Sidebar'
 import { useApp } from './store/app'
 import Dashboard from './pages/Dashboard'
 import Assets from './pages/Assets'
-import Storyboard from './pages/Storyboard'
 import Director from './pages/Director'
 import Memory from './pages/Memory'
 import AiAssistant from './pages/AiAssistant'
@@ -60,7 +59,8 @@ export default function App(): React.JSX.Element {
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/environment" element={<Navigate to="/settings" replace />} />
           <Route path="/assets" element={<Assets />} />
-          <Route path="/storyboard" element={<Storyboard />} />
+          {/* 剧本分镜已整合进导演台；旧链接 /storyboard 重定向过去，避免白屏 */}
+          <Route path="/storyboard" element={<Navigate to="/director?tab=storyboard" replace />} />
           <Route path="/director" element={<Director />} />
           <Route path="/memory" element={<Memory />} />
           <Route path="/ai" element={<AiAssistant />} />

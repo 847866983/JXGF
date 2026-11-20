@@ -1,22 +1,21 @@
 import { useEffect, useRef, useState } from 'react'
 import { Bot, Send, Settings2, Sparkles, User, Wrench } from 'lucide-react'
 import type { AiConfig } from '@shared/ai'
+import type { AiChatMessage } from '@shared/types'
 import { useApp } from '../store/app'
 import { EmptyState, PageHeader } from '../components/ui'
 import { NoProject } from '../components/NoProject'
 import { Modal } from '../components/Modal'
 import { AiSettings } from '../components/AiSettings'
-
-interface Msg {
-  role: 'user' | 'assistant'
-  content: string
-}
+import { persistProject } from '../components/mutate'
 
 export default function AiAssistant(): React.JSX.Element {
   const project = useApp((s) => s.project)
   const openProject = useApp((s) => s.openProject)
 
-  const [messages, setMessages] = useState<Msg[]>([])
+  const [messages, setMessages] = useState<AiChatMessage[]>([])
+  /** 已从哪个项目载入过对话：切项目才重置，避免保存回写时反复覆盖本地输入 */
+  const loadedProjectRef = useRef<string>('')
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
   const [statusText, setStatusText] = useState('')
@@ -28,6 +27,21 @@ export default function AiAssistant(): React.JSX.Element {
   useEffect(() => {
     void window.api.aiGetConfig().then(setConfig)
   }, [])
+
+  // 项目切换时载入该项目的对话历史；同一项目内的回写不打断当前界面
+  useEffect(() => {
+    const id = project?.id ?? ''
+    if (loadedProjectRef.current === id) return
+    loadedProjectRef.current = id
+    setMessages(project?.aiChat ?? [])
+  }, [project?.id, project?.aiChat])
+
+  /** 把当前对话写回项目（读主进程最新快照，避免覆盖 AI 工具的写入） */
+  const saveChat = async (list: AiChatMessage[]): Promise<void> => {
+    await persistProject((draft) => {
+      draft.aiChat = list
+    })
+  }
 
   // 订阅 AI 进度事件
   useEffect(() => {
@@ -53,25 +67,37 @@ export default function AiAssistant(): React.JSX.Element {
   const send = async (): Promise<void> => {
     const text = input.trim()
     if (!text || sending || !project) return
-    const next: Msg[] = [...messages, { role: 'user', content: text }]
+    const next: AiChatMessage[] = [...messages, { role: 'user', content: text }]
     setMessages(next)
+    await saveChat(next)
     setInput('')
     setSending(true)
     setStatusText('思考中…')
     setLiveTools([])
     try {
       const res = await window.api.aiChat({ messages: next })
-      setMessages([...next, { role: 'assistant', content: res.content || '（无回复）' }])
+      const done: AiChatMessage[] = [...next, { role: 'assistant', content: res.content || '（无回复）' }]
+      setMessages(done)
+      await saveChat(done)
       if (res.changed) {
         await openProject(project.id)
       }
     } catch (err) {
-      setMessages([...next, { role: 'assistant', content: `⚠️ ${String((err as Error).message ?? err)}` }])
+      const failed: AiChatMessage[] = [...next, { role: 'assistant', content: `⚠️ ${String((err as Error).message ?? err)}` }]
+      setMessages(failed)
+      await saveChat(failed)
     } finally {
       setSending(false)
       setStatusText('')
       setLiveTools([])
     }
+  }
+
+  /** 清空当前项目的对话历史 */
+  const clearChat = (): void => {
+    if (messages.length === 0) return
+    setMessages([])
+    saveChat([])
   }
 
   if (!project) {
@@ -91,10 +117,15 @@ export default function AiAssistant(): React.JSX.Element {
         title="AI 助手"
         desc="H3AI 导演助理 · 会读记忆、按 H3 规则写分镜、可做机检"
         actions={
-          <button className="btn-ghost" onClick={() => setSettingsOpen(true)}>
-            <Settings2 size={15} />
-            AI 接口设置
-          </button>
+          <>
+            <button className="btn-ghost" onClick={clearChat} disabled={sending} title="清空本项目的对话记录">
+              清空记录
+            </button>
+            <button className="btn-ghost" onClick={() => setSettingsOpen(true)}>
+              <Settings2 size={15} />
+              AI 接口设置
+            </button>
+          </>
         }
       />
 

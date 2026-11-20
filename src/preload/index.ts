@@ -62,6 +62,9 @@ const api = {
   aiChat: (payload: {
     messages: { role: 'user' | 'assistant'; content: string }[]
   }): Promise<{ content: string; changed: boolean }> => ipcRenderer.invoke(CH.aiChat, payload),
+  aiExtractCharacters: (payload: { text: string }): Promise<{
+    name: string; alias: string; description: string; prompt: string; tags: string[]
+  }[]> => ipcRenderer.invoke(CH.aiExtractCharacters, payload),
   aiTest: (providerId?: string): Promise<{ ok: boolean; message: string; url?: string; latencyMs?: number; reply?: string }> =>
     ipcRenderer.invoke(CH.aiTest, providerId),
   aiListModels: (providerId?: string): Promise<{ ok: boolean; models: string[]; message?: string }> =>

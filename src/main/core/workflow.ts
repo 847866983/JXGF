@@ -1,6 +1,7 @@
-import type { Template, UpscaleSettings, RifeSettings } from '@shared/types'
+import type { Template, UpscaleSettings, RifeSettings, NodeParams } from '@shared/types'
 import { sanitizeOutputName } from './output-files.ts'
 import { composeDeskText } from './h3-prompt.ts'
+import { applyNodeParams, readNodeParams } from './node-inject.ts'
 
 export interface WorkflowParams {
   /** 片子级提示词（文案台 global）：全片统一风格，拼在本段提示词前面 */
@@ -32,6 +33,10 @@ export interface WorkflowParams {
   refImages?: string[]
   /** 需要挂载的 LoRA（如千问多角度四视图） */
   loras?: { file: string; strength: number }[]
+  /** 班长全家桶节点级参数（SLA/显存/Sigma/预览/视频合成/RTX/LoRA 等） */
+  nodeParams?: NodeParams
+  /** 文案台快捷短语（写进 desk_data.presets 作网页端 state 镜像） */
+  presets?: string[]
 }
 
 type WorkflowNode = { id: string; class_type: string; inputs: Record<string, unknown>; title?: string }
@@ -53,6 +58,7 @@ interface DeskData {
   chain?: { name?: string; clip?: string; shot?: string }
   global?: string
   segs?: Record<string, string>
+  presets?: string[]
 }
 
 interface H3Data {
@@ -198,7 +204,7 @@ function deskDataField(node: WorkflowNode): string | null {
  *   片子级（全片风格/基调） + 本段（这一段发生的事） = 最终提示词
  * 片子级在前 —— 反过来写会让每段开头都重复世界观，段与段的差别被稀释。
  */
-export function injectH3Prompt(clone: unknown, positive: string, globalPrompt = ''): boolean {
+export function injectH3Prompt(clone: unknown, positive: string, globalPrompt = '', presets?: string[]): boolean {
   if (!isWorkflowObject(clone)) return false
   // 文案台的 compose_text：片子级 + 本段
   const finalPrompt = composeDeskText(globalPrompt, positive)
@@ -238,6 +244,8 @@ export function injectH3Prompt(clone: unknown, positive: string, globalPrompt = 
     // 以前把本段词抄进 global，等于把这一段的内容当成整片基调，
     // 且文案台按 global+seg 拼接时会重复一遍。
     desk.global = globalPrompt
+    // 文案台 presets 快捷短语镜像（后端不自动消费，仅作网页端 state 镜像）
+    if (Array.isArray(presets)) desk.presets = presets
     if (desk.chain) desk.chain.shot = clip
     node.inputs[field] = JSON.stringify(desk)
   }
@@ -611,6 +619,11 @@ export function buildWorkflow(template: Template, params: WorkflowParams): unkno
     }
   }
 
+  // 班长全家桶节点级参数（SLA/显存/Sigma/预览/视频合成/RTX/LoRA 多挂载）。
+  // 探测式注入：只写与出厂默认不同的值，避免覆盖 template-adapt 的显存自动适配。
+  // 放在 LoRA 单挂载之后，让「LoRA配置」多挂载面板覆盖单个兜底字段。
+  if (params.nodeParams) applyNodeParams(clone, params.nodeParams)
+
   const hasQwenEdit = Object.values(clone).some((n) => isQwenEditNode(String(n.class_type)))
   const isH3 = Object.values(clone).some((n) => String(n.class_type).includes('CSGlide'))
 
@@ -632,7 +645,7 @@ export function buildWorkflow(template: Template, params: WorkflowParams): unkno
 
   if (isH3) {
     if (params.positive !== undefined) {
-      injectH3Prompt(clone, params.positive, params.globalPrompt ?? '')
+      injectH3Prompt(clone, params.positive, params.globalPrompt ?? '', params.presets)
     }
     injectH3Data(clone, params)
     syncH3DeskChain(clone)
@@ -793,4 +806,9 @@ export function extractH3Chain(workflow: unknown): { name: string; shot: string 
     return { name, shot: h3?.chain?.shot?.trim() ?? '' }
   }
   return null
+}
+
+/** 从工作流里读出各 BanZhang 节点的当前参数（节点级参数面板回填用） */
+export function readWorkflowNodeParams(workflow: unknown): Partial<NodeParams> {
+  return readNodeParams(workflow)
 }

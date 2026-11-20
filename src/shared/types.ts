@@ -38,6 +38,148 @@ export interface Script {
   createdAt: string
 }
 
+// ---------- 班长全家桶：节点级参数（B 类）----------
+// 这些参数直接映射到工作流里 BanZhang_* 节点的 widget 字段。
+// 字段名与 ComfyUI 节点 INPUT_TYPES 逐字对齐（见注入层 applyNodeParams）。
+// 按「全片一份」挂在 Episode 上：SLA / 显存 / Sigma / 预览 / 视频合成 / RTX
+// 都是工作流级设置，不属于某一段。
+
+/** BanZhang_SLABlockSparseAttention 稀疏注意力 */
+export interface SlaParams {
+  /** 关闭=省多少计算写 0（节点仍执行但不减计算） */
+  enabled: boolean
+  /** 省多少计算 0–95（越大越快、细节略降） */
+  saveCompute: number
+  /** 开头几步不省 0–8 */
+  skipFirstSteps: number
+  /** 最后几步精修 0–8 */
+  refineLastSteps: number
+  /** 保住声音 */
+  keepAudio: boolean
+  /** 参考声音保多少 0–65536 */
+  audioRefKeep: number
+  /** 计算块大小 */
+  blockSize: '64' | '128'
+}
+
+/** BanZhang_H3MemoryOptimizer 显存优化 */
+export interface MemOptimizerParams {
+  /** 省显存档位（档位名与节点下拉逐字一致） */
+  preset: string
+  /** 前馈分块 1–64 */
+  feedforwardChunk: number
+  /** 分块触发长度 256–262144 */
+  chunkThreshold: number
+  /** 注意力头分组 1–56 */
+  headGroup: number
+}
+
+/** BanZhang_SelfLiftMultiStage 多级放大 */
+export interface SelfLiftParams {
+  /** 分段步数，如 "3,3" */
+  steps: string
+  /** 级间倍率，如 "1.5" */
+  scale: string
+  /** latent 放大模型文件名 */
+  model: string
+  /** 满分辨率分块 */
+  tiling: string
+  /** 彩色光点清理力度 6–12 */
+  cleanup: number
+  /** 省显存模式 spatial/global_stream/global/global_ram */
+  memMode: string
+  /** token 分块大小 128–16384 */
+  tokenChunk: number
+  /** 权重缓存预算 0–64 */
+  weightCache: number
+}
+
+/** MiniMaxH3SigmaShift Sigma 位移 */
+export interface SigmaParams {
+  /** shift_video 0.01–100 */
+  shiftVideo: number
+  /** shift_audio 0.01–100 */
+  shiftAudio: number
+}
+
+/** MiniMaxH3PreviewOverride 预览覆盖 */
+export interface PreviewParams {
+  maxResolution: number
+  jpegQuality: number
+  suppressDefault: boolean
+  previewFrames: number
+  previewFps: number
+  vaeName: string
+}
+
+/** banzhangVideoCombine 视频合成（超分/一采/二采/三采 四个输出共用一份配置） */
+export interface VideoCombineParams {
+  /** ⏱️ 帧率 */
+  fps: number
+  /** 📼 视频格式 */
+  format: string
+  /** 💾 保存元数据 */
+  saveMetadata: boolean
+  /** 🔔 提示音文件 */
+  notifyFile: string
+  /** 🧹 出片后自动净化 */
+  cleanAfter: boolean
+  /** 📂 自定义保存路径 */
+  customPath: string
+}
+
+/** BanZhang_RTX_SuperResolution RTX 超分 */
+export interface RtxParams {
+  scaleMode: string
+  scale: number
+  width: number
+  height: number
+  preset: string
+  strength: number
+  precision: string
+  fps: number
+  packVideo: boolean
+  keepAudio: boolean
+}
+
+/** BanZhang_VRAM_Guard / VRAM_Cleaner 显存守卫与净化 */
+export interface VramParams {
+  /** 预留容量_GB */
+  guardGB: number
+  /** 卸载模型 */
+  cleanerUnload: boolean
+  /** 清理缓存 */
+  cleanerCache: boolean
+}
+
+/** BanZhang_LoRA_VramSafe 的单个 LoRA 槽 */
+export interface LoraSlot {
+  on: boolean
+  file: string
+  strength: number
+  note?: string
+}
+
+/** 全片级的 BanZhang 节点参数集合 */
+export interface NodeParams {
+  sla?: SlaParams
+  memOpt?: MemOptimizerParams
+  selfLift?: SelfLiftParams
+  sigma?: SigmaParams
+  preview?: PreviewParams
+  videoCombine?: VideoCombineParams
+  rtx?: RtxParams
+  vram?: VramParams
+  /** LoRA 多挂载面板（写进 LoRA配置 JSON） */
+  loraSlots?: LoraSlot[]
+  /** MMH3_UpscaleParams：放大时间分块 */
+  upscaleTimeChunk?: string
+  /** MMH3_UpscaleParams：预显影步数 */
+  preDecodeSteps?: number
+  /** MMH3_UpscaleParams：预显影强度 */
+  preDecodeStrength?: number
+}
+
 export interface Episode {
   id: string
   scriptId: string
@@ -54,6 +196,10 @@ export interface Episode {
   sampler?: { steps?: number; cfg?: number; sampler?: string; scheduler?: string }
   /** 每个阶段各自的采样参数（一采/二采/三采/超分） */
   stageParams?: Partial<Record<'first' | 'second' | 'third' | 'superRes', { steps?: number; cfg?: number; sampler?: string; scheduler?: string; denoise?: number }>>
+  /** 文案台 presets 快捷短语（点一下追加到当前段提示词） */
+  presets?: string[]
+  /** 班长全家桶节点级参数（全片一份） */
+  nodeParams?: NodeParams
 }
 
 export interface Scene {
@@ -228,6 +374,13 @@ export interface ProjectSettings {
   presetId: string
 }
 
+/** AI 助手的单条对话消息（随项目一起持久化） */
+export interface AiChatMessage {
+  role: 'user' | 'assistant'
+  content: string
+  createdAt?: string
+}
+
 export interface Project {
   schema: number
   id: string
@@ -241,6 +394,8 @@ export interface Project {
   shots: Shot[]
   assets: Asset[]
   templates: Template[]
+  /** AI 助手对话历史，旧项目缺省时按空数组处理 */
+  aiChat?: AiChatMessage[]
 }
 
 export interface ProjectSummary {
@@ -353,6 +508,10 @@ export interface JobParams {
   loras?: { file: string; strength: number }[]
   /** 参考视频（本段生成方式=视频参考时，传上一段成片） */
   refVideos?: string[]
+  /** 班长全家桶节点级参数（SLA/显存/Sigma/预览/视频合成/RTX/LoRA 等） */
+  nodeParams?: NodeParams
+  /** 文案台快捷短语 */
+  presets?: string[]
   assetImageIds?: string[]
 }
 
