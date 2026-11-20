@@ -92,7 +92,6 @@ frameforge/
 │           └── store/           # zustand 应用状态
 ├── electron.vite.config.ts
 ├── electron-builder.yml         # 打包与 publish（GitHub: 847866983/JXGF）
-├── dev-app-update.yml           # 开发态更新配置（electron-updater）
 ├── pnpm-workspace.yaml          # pnpm 10+ 构建脚本放行（electron / esbuild）
 ├── package.json
 └── docs/                        # 发布与在线更新说明
