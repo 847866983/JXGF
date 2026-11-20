@@ -9,7 +9,7 @@ dist/
 Thumbs.db
 .vite/
 
-# ��ʱ�����ļ�
+# 临时测试文件
 _*.txt
 _*.mjs
 _*.cjs
@@ -22,3 +22,6 @@ _backup-workflows/
 模型库同步报告.md
 模型库目录整理.md
 模型*.md
+
+# WorkBuddy 本地工作数据，不进仓库
+.workbuddy/
