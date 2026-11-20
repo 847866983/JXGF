@@ -552,6 +552,9 @@ function applySamplerParams(clone: Workflow, params: WorkflowParams): void {
     if (params.samplerName && 'sampler_name' in i) i.sampler_name = params.samplerName
     if (params.scheduler && 'scheduler' in i) i.scheduler = params.scheduler
     if (params.seed !== undefined && 'seed' in i) i.seed = params.seed
+    // KSamplerAdvanced 用的是 noise_seed：漏了它种子永远是模板里的固定值，
+    // 整张图会被 ComfyUI 判成"与上次一致"全命中缓存，拿回旧图。
+    if (params.seed !== undefined && 'noise_seed' in i) i.noise_seed = params.seed
   }
 }
 
@@ -735,6 +738,9 @@ export function buildWorkflow(template: Template, params: WorkflowParams): unkno
     }
     if (params.seed !== undefined && 'seed' in node.inputs) {
       node.inputs.seed = params.seed
+    }
+    if (params.seed !== undefined && 'noise_seed' in node.inputs) {
+      node.inputs.noise_seed = params.seed
     }
     if (params.frames && ('frames' in node.inputs || 'length' in node.inputs)) {
       const key = 'frames' in node.inputs ? 'frames' : 'length'

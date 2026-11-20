@@ -13,6 +13,11 @@ import fs from 'node:fs'
 import os from 'node:os'
 import type { ComfySettings, JobInfo, JobParams, JobStatus, ShotOutput, Template } from '@shared/types'
 import { ComfyClient, makeClient } from './comfy'
+
+/** 0 .. 2^31-1 的随机种子（ComfyUI KSampler 的 seed 是 64 位整数，取安全整数范围即可） */
+function randomSeed(): number {
+  return Math.floor(Math.random() * 2_147_483_647)
+}
 import { convertUiToApi, isUiWorkflow } from './workflow-convert'
 import { detectGpu } from './hardware'
 import { adaptTemplateForGpu } from './template-adapt'
@@ -165,6 +170,12 @@ export class JobManager {
           throw new Error(`界面格式工作流转换失败（需要 ComfyUI 在线）：${String((err as Error).message ?? err)}`)
         }
       }
+      // 【必须每次换种子】种子留空时若沿用模板里的固定种子，ComfyUI 会把整张图判定为
+      // 「与上次完全一致」而全部命中缓存 —— 于是不会真跑，直接从 history 里把上一次的
+      // 旧图取回来当成这次的产物（表现为「点生成拿到的是缓存文件」）。
+      // 所以用户没指定种子时，一律随机一个，确保每次都真正执行出新图。
+      const effectiveSeed = params.seed ?? randomSeed()
+      jobLog(`job种子 promptId=- 种子=${effectiveSeed} ${params.seed === undefined ? '(随机)' : '(用户指定)'}`)
       const workflow = buildWorkflow(useTemplate, {
         positive: params.positive,
         globalPrompt: params.globalPrompt,
@@ -172,7 +183,7 @@ export class JobManager {
         width: params.width,
         height: params.height,
         frames: params.frames,
-        seed: params.seed,
+        seed: effectiveSeed,
         batch: params.batch,
         steps: params.steps,
         cfg: params.cfg,
@@ -319,6 +330,7 @@ export class JobManager {
         settled = true
         client.off('executed', onExecuted)
         client.off('execution_error', onError)
+        client.off('execution_cached', onCached)
         for (const t of timerHandles) clearInterval(t)
         for (const t of timeoutHandles) clearTimeout(t)
       }
@@ -444,6 +456,15 @@ export class JobManager {
         scheduleDeliver()
       }
 
+      // 缓存提示：若采样器被判定命中缓存，说明这一轮没有真正重新采样，
+      // 拿到的会是上一次的旧文件。这里只记录，不打断（用户指定固定种子时可复现）。
+      let cachedNodeCount = 0
+      const onCached = (e: { promptId?: string; nodes?: string[] }): void => {
+        if (e.promptId !== promptId) return
+        cachedNodeCount = (e.nodes ?? []).length
+        jobLog(`job缓存提示 promptId=${promptId} 命中缓存节点=${cachedNodeCount} 个`)
+      }
+
       const onError = (e: { promptId?: string; message?: string }): void => {
         if (e.promptId !== promptId || settled) return
         finish()
@@ -486,6 +507,7 @@ export class JobManager {
 
       client.on('executed', onExecuted)
       client.on('execution_error', onError)
+      client.on('execution_cached', onCached)
 
       // 兜底轮询：executed 没带文件时，从 history 提取（H3 产物常在 history.outputs）
       const poll = setInterval(() => { void pollHistory() }, 3000)

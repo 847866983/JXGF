@@ -272,6 +272,14 @@ export class ComfyClient extends EventEmitter {
       } else if (type === 'executed') {
         const data = (msg.data ?? {}) as WsExecutedPayload
         this.emit('executed', { promptId: data.prompt_id, output: data.output ?? {} })
+      } else if (type === 'execution_cached') {
+        // ComfyUI 判定某些节点与上次完全一致、直接复用结果时发这个事件。
+        // 若连采样器都在缓存里，说明这一轮根本没真跑 —— 产出的只是上一次的旧文件。
+        const data = (msg.data ?? {}) as { nodes?: unknown[]; prompt_id?: string }
+        this.emit('execution_cached', {
+          promptId: data.prompt_id,
+          nodes: Array.isArray(data.nodes) ? data.nodes.map((n) => String(n)) : []
+        })
       } else if (type === 'execution_error') {
         const data = (msg.data ?? {}) as { prompt_id?: string; exception_message?: string }
         this.emit('execution_error', { promptId: data.prompt_id, message: data.exception_message ?? '执行失败' })

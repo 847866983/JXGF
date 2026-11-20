@@ -1510,5 +1510,23 @@ ok('工程包往返：导出再导入，媒体文件完整还原', async () => {
   await fsp.rm(tmp, { recursive: true, force: true })
 })
 
+ok('随机种子必须真正写进采样器（否则 ComfyUI 全命中缓存，拿回旧图）', () => {
+  const api = {
+    '1': { class_type: 'KSampler', inputs: { seed: 0, steps: 4, cfg: 1, sampler_name: 'euler', scheduler: 'simple', model: ['2', 0], positive: ['3', 0], negative: ['4', 0], latent_image: ['5', 0] } },
+    '2': { class_type: 'KSamplerAdvanced', inputs: { noise_seed: 0, steps: 4 } },
+    '5': { class_type: 'EmptyLatentImage', inputs: { width: 512, height: 512, batch_size: 1 } }
+  }
+  const tpl = { id: 't', name: 't', kind: 'image', apiJson: api } as never
+  for (const seed of [111111, 987654321]) {
+    const wf = buildWorkflow(tpl, { positive: 'x', width: 1024, height: 1024, seed }) as Record<string, { inputs: Record<string, unknown> }>
+    assert.equal(wf['1'].inputs.seed, seed, 'KSampler.seed 必须写成传入的种子')
+    assert.equal(wf['2'].inputs.noise_seed, seed, 'KSamplerAdvanced 用的是 noise_seed，也必须写')
+    assert.equal(wf['5'].inputs.width, 1024, '画布参数照常注入')
+  }
+  const a = JSON.stringify(buildWorkflow(tpl, { positive: 'x', seed: 1 }))
+  const b = JSON.stringify(buildWorkflow(tpl, { positive: 'x', seed: 2 }))
+  assert.notEqual(a, b, '不同种子提交内容必须不同，否则 ComfyUI 会判定为同一张图全走缓存')
+})
+
 console.log(`\nselftest: ${pass} passed, ${fail} failed`)
 if (fail > 0) process.exit(1)
