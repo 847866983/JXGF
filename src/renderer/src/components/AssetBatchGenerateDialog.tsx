@@ -7,6 +7,7 @@ import { DEFAULT_STYLE_ID, STYLES, buildAssetJobInput } from '../lib/assetGen'
 
 /**
  * 一键生成所有资产：按资产类型自动挑模板与提示词（角色→四视图，其它→单图），
+ * 默认一律使用千问 Image 2.1 全能编辑模板。
  * 逐条提交到生成队列。默认跳过已有绑定图的资产，避免重复生成。
  */
 export function AssetBatchGenerateDialog({ onClose }: { onClose: () => void }): React.JSX.Element {
@@ -90,7 +91,7 @@ export function AssetBatchGenerateDialog({ onClose }: { onClose: () => void }): 
         <div className="flex items-start gap-2 rounded-lg bg-accent-600/[0.08] px-3 py-2.5 text-xs text-slate-300">
           <Layers size={15} className="mt-0.5 shrink-0 text-accent-400" />
           <span>
-            将按类型自动生成：<b>角色</b>用 Z-Image-Turbo 出<b>四视图</b>，<b>场景/道具</b>出单图，逐条进「生成队列」。
+            将按类型自动生成：<b>角色</b>用千问 Image 2.1 出<b>四视图</b>，<b>场景/道具</b>出单图，逐条进「生成队列」。
             生成完回资产里可挑图设为绑定图。
           </span>
         </div>

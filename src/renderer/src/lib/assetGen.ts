@@ -101,14 +101,16 @@ export function styledPositive(desc: string, styleId?: string): string {
   return d ? `${style.positive}; ${d}` : style.positive
 }
 
-/** 按资产类型挑图片模板：角色优先 Z-Image-Turbo，其余用第一个图片模板 */
-export function pickAssetTemplate(templates: Template[], kind: AssetKind): Template | undefined {
+/**
+ * 按资产类型挑图片模板。
+ *
+ * 默认一律用**千问 Image 2.1 全能编辑**（用户指定：不要 Z-Image-Turbo）。
+ * 找的顺序：千问 2.1 → 千问全能编辑 → 千问图片编辑 → 任意千问 → 第一个图片模板。
+ */
+export function pickAssetTemplate(templates: Template[], _kind?: AssetKind): Template | undefined {
   const imgs = templates.filter((t) => t.kind === 'image')
   if (imgs.length === 0) return undefined
-  if (kind === 'character') {
-    return imgs.find((t) => /Z-?Image-?Turbo/i.test(t.name)) || imgs.find((t) => /Z-?Image/i.test(t.name)) || imgs[0]
-  }
-  return imgs[0]
+  return pickQwenEditTemplate(imgs) ?? imgs[0]
 }
 
 export interface AssetJobInput {
@@ -139,13 +141,17 @@ export function buildAssetJobInput(asset: Asset, templates: Template[], styleId?
   const desc = asset.prompt || asset.description || asset.name || ''
   const isChar = asset.kind === 'character'
   if (isChar) {
+    // 角色统一用千问 Image 2.1：出四视图（<mva> 语法 + 多角度 LoRA）
+    const isQwen = /千问|Qwen/i.test(template.name)
     return {
       templateId: template.id,
-      positive: buildFourViewPositive(desc, styleId),
-      negative: fourViewNegative(styleId),
-      width: FOUR_VIEW_W,
-      height: FOUR_VIEW_H,
-      batch: 1
+      positive: isQwen ? `${QWEN_QUADVIEW_PROMPT}\n\nCharacter: ${desc}` : buildFourViewPositive(desc, styleId),
+      negative: isQwen ? fourViewNegative() : fourViewNegative(styleId),
+      width: isQwen ? 2400 : FOUR_VIEW_W,
+      height: isQwen ? 1200 : FOUR_VIEW_H,
+      batch: 1,
+      steps: isQwen ? 8 : undefined,
+      loras: isQwen ? [{ file: QWEN_QUADVIEW_LORA, strength: 0.9 }] : undefined
     }
   }
   return {
@@ -227,8 +233,11 @@ export function pickQwenT2ITemplate(templates: Template[]): Template | undefined
 export function pickQwenEditTemplate(templates: Template[]): Template | undefined {
   const imgs = templates.filter((t) => t.kind === 'image')
   return (
+    // 明确优先「千问 Image 2.1 全能编辑」——这是用户指定的默认生图模板
+    imgs.find((t) => /千问.*2\.1.*全能编辑|千问.*Image.*2\.1/i.test(t.name)) ||
     imgs.find((t) => /千问图片编辑|全能编辑/i.test(t.name)) ||
-    imgs.find((t) => /Qwen/i.test(t.name) && /编辑|edit/i.test(t.name))
+    imgs.find((t) => /Qwen/i.test(t.name) && /编辑|edit/i.test(t.name)) ||
+    imgs.find((t) => /千问|Qwen/i.test(t.name))
   )
 }
 
