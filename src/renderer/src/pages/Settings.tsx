@@ -376,7 +376,7 @@ export default function Settings(): React.JSX.Element {
 
           <div className="text-[11px] text-slate-600">
             提供的工具：list_projects / create_asset / update_asset / create_script / create_episode /
-            create_scene / create_shot / add_shots（批量）/ list_shots / update_shot 等共 13 个。
+            create_scene / create_shot / add_shots（批量）/ list_shots / get_shot / update_shot（含 prompt 提示词）/ update_segment（分段参数）/ 记忆库 / H3 技能 等共 23 个。
             详见 docs/MCP接入指南.md。
           </div>
         </div>

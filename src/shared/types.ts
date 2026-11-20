@@ -50,6 +50,10 @@ export interface Episode {
    * 生成每一段时都拼在本段提示词**前面**（对应 H3 文案台的 compose_text）。
    */
   globalPrompt?: string
+  stages?: { first: boolean; second: boolean; third: boolean; superRes: boolean }
+  sampler?: { steps?: number; cfg?: number; sampler?: string; scheduler?: string }
+  /** 每个阶段各自的采样参数（一采/二采/三采/超分） */
+  stageParams?: Partial<Record<'first' | 'second' | 'third' | 'superRes', { steps?: number; cfg?: number; sampler?: string; scheduler?: string; denoise?: number }>>
 }
 
 export interface Scene {
@@ -129,6 +133,11 @@ export interface SegmentSettings {
   pace: number
   /** 续接 */
   contMode: 'latent' | 'video' | 'none'
+  /**
+   * 生成阶段开关：一采 / 二采 / 三采 / 超分。
+   * 只开一采时就只取一采的产物，不再等后面几次采样。
+   */
+  stages?: { first: boolean; second: boolean; third: boolean; superRes: boolean }
   /**
    * 承接帧数：从上一段**尾部**取几帧，钉在本段开头当引导（H3 导演台的
    * 「承接帧数」）。只接受 17k+5 网格：5 / 22 / 39 / 56 / 73 …
@@ -319,6 +328,10 @@ export interface JobParams {
   cfg?: number
   samplerName?: string
   scheduler?: string
+  /** 各阶段采样参数 */
+  stageParams?: Partial<Record<'first' | 'second' | 'third' | 'superRes', { steps?: number; cfg?: number; sampler?: string; scheduler?: string; denoise?: number }>>
+  /** 生成阶段开关（一采/二采/三采/超分） */
+  stages?: { first: boolean; second: boolean; third: boolean; superRes: boolean }
   /** 分段导演台：H3 h3_data 覆盖字段（画布/参考/语义桥/续接等） */
   h3?: Record<string, unknown>
   /** 放大重绘 */

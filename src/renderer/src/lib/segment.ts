@@ -90,6 +90,7 @@ export function defaultSegment(
     contMode: index === 0 ? 'none' : 'latent',
     // 承接帧数：取上一段尾部 22 帧钉在本段开头（合法值 5/22/39/56/73…）
     contFrames: 22,
+    stages: { first: true, second: true, third: true, superRes: false },
     pushWhole: false,
     genMode: 'ref2va',
     upscale: { ...defaultUpscale },

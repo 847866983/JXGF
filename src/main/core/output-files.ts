@@ -92,12 +92,40 @@ export function sanitizeOutputPath(relPath: string, d = new Date()): string {
  * H3 三采工作流依次产出 一采/二采/三采，必须选三采；
  * 找不到三采时退回最后一个（通常是最终节点）。
  */
-export function pickFinalMedia(files: MediaFile[], kind: 'image' | 'video'): MediaFile[] {
+export interface StagePick {
+  first: boolean
+  second: boolean
+  third: boolean
+  superRes: boolean
+}
+
+/**
+ * 从多个产物里挑出用户选择的那一阶段。
+ *
+ * H3 三采工作流会依次产出 一采 → 二采 → 三采（三个独立输出节点）。
+ * 用户只勾一采时，就只要一采那一条，不要后面的放大/重绘版本。
+ */
+export function pickFinalMedia(
+  files: MediaFile[],
+  kind: 'image' | 'video',
+  stages?: StagePick
+): MediaFile[] {
   const all = files.filter((f) => f && typeof f.filename === 'string')
   if (all.length === 0) return []
-  if (kind === 'video') {
-    const third = all.filter((f) => /三采|final|_N471|3rd/i.test(f.filename))
-    if (third.length > 0) return third
+  if (kind !== 'video') return all.slice(-1)
+
+  const s = stages ?? { first: true, second: true, third: true, superRes: false }
+  const RE = {
+    first: /一采|_N467|first_?pass/i,
+    second: /二采|second_?pass/i,
+    third: /三采|final|_N471|3rd/i
   }
+  const order: ('third' | 'second' | 'first')[] = ['third', 'second', 'first']
+  for (const key of order) {
+    if (!s[key]) continue
+    const hit = all.filter((f) => RE[key].test(f.filename))
+    if (hit.length > 0) return hit
+  }
+  // 一个都没匹配上（老工作流/改名）：退回最后一个
   return all.slice(-1)
 }

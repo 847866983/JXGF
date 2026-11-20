@@ -16,18 +16,22 @@ export function explainError(raw: string | null | undefined): ErrorHelp | null {
       suggestion: '降低分辨率或生成档位（如 512×288、更少帧数），关闭其它占显存的程序后重试；或换更小的模型版本。'
     }
   }
-  // 找不到模型/文件
-  if (/not found|no such file|cannot find|file.*does not exist|value not in list|missing.*(model|safetensors|ckpt)/.test(m)) {
+  // 节点缺失 —— 必须排在「找不到文件」前面：
+  // `Node 'Label (rgthree)' not found` 也含 "not found"，先匹配模型会把节点错误
+  // 误报成「缺少模型」，把人带到错误的方向。
+  if (
+    /missing_node_type|node.*not found|unknown node|class_type.*not found|missing node|cannot import|failed to import|no module named/.test(m)
+  ) {
     return {
-      reason: '缺少模型或文件（工作流引用的模型不在 ComfyUI 里）',
-      suggestion: '到「设置 → 环境检测」检查并下载缺失模型，或确认 ComfyUI 的 models 目录放对了文件，然后重试。'
+      reason: '缺少节点/插件（工作流用到的自定义节点没装，或是纯界面节点被误提交）',
+      suggestion: '自定义节点缺失：把对应节点包放进 ComfyUI/custom_nodes 后重启 ComfyUI。若提示的是 Label/Reroute/Note 这类界面节点，属于转换问题，更新软件即可。'
     }
   }
-  // 节点缺失
-  if (/node.*not found|unknown node|class_type|missing node|cannot import|failed to import|no module named/.test(m)) {
+  // 找不到模型/文件
+  if (/value not in list|no such file|cannot find|file.*does not exist|missing.*(model|safetensors|ckpt)|model.*not found/.test(m)) {
     return {
-      reason: '缺少节点/插件（工作流用到的自定义节点未安装）',
-      suggestion: '到「设置 → 环境检测」安装对应节点包（如 H3/BanZhang/CSGlide），重启 ComfyUI 后重试。'
+      reason: '缺少模型或文件（工作流引用的模型不在 ComfyUI 里）',
+      suggestion: '确认 ComfyUI 的 models 目录里放对了文件（注意子目录层级要和模型名一致），或在设置里检查模型路径后重试。'
     }
   }
   // 续拍存档 / 链式登记

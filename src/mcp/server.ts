@@ -322,18 +322,90 @@ server.tool(
         dialogue: z.string().optional(),
         camera: z.string().optional(),
         duration: z.number().optional(),
+        /** 视频生成提示词（详细版） */
+        prompt: z.string().optional(),
         characterIds: z.array(z.string()).optional(),
-        assetIds: z.array(z.string()).optional()
+        assetIds: z.array(z.string()).optional(),
+        /** 角色位置/动作说明：资产 id -> 描述 */
+        characterNotes: z.record(z.string(), z.string()).optional(),
+        /** 分段参数（浅合并到 shot.segment） */
+        segment: z.record(z.string(), z.any()).optional()
       })
   },
   async ({ projectId, shotId, patch }) => {
     const shot = await withProject(projectId, (p) => {
       const s = p.shots.find((x) => x.id === shotId)
       if (!s) throw new Error(`找不到分镜 ${shotId}`)
-      Object.assign(s, patch, { updatedAt: new Date().toISOString() })
+      const { segment, ...rest } = patch
+      Object.assign(s, rest, { updatedAt: new Date().toISOString() })
+      if (segment) s.segment = { ...(s.segment ?? {}), ...segment } as unknown as typeof s.segment
       return s
     })
     return ok({ updated: shot })
+  }
+)
+
+server.tool(
+  'get_shot',
+  '读取单个分镜的完整信息（含提示词 prompt、角色说明、分段参数 segment、产物 outputs）',
+  { projectId: z.string(), shotId: z.string() },
+  async ({ projectId, shotId }) => {
+    const p = await openProject(projectsDir, projectId)
+    const s = p.shots.find((x) => x.id === shotId)
+    if (!s) throw new Error(`找不到分镜 ${shotId}`)
+    return ok(s)
+  }
+)
+
+server.tool(
+  'update_segment',
+  '修改分镜的分段参数（画布尺寸/帧数/时长/续接/阶段开关/放大/插帧）。只传要改的字段，其余保持原样。',
+  {
+    projectId: z.string(),
+    shotId: z.string(),
+    patch: z
+      .object({
+        width: z.number().optional(),
+        height: z.number().optional(),
+        ratio: z.string().optional(),
+        durationSec: z.number().optional(),
+        frames: z.number().optional(),
+        fps: z.number().optional(),
+        genMode: z.enum(['t2v', 'ref2va', 'video']).optional(),
+        contMode: z.enum(['none', 'latent', 'video']).optional(),
+        contFrames: z.number().optional(),
+        refImageSize: z.number().optional(),
+        refVideoSize: z.number().optional(),
+        stages: z
+          .object({
+            first: z.boolean().optional(),
+            second: z.boolean().optional(),
+            third: z.boolean().optional(),
+            superRes: z.boolean().optional()
+          })
+          .optional(),
+        upscale: z.record(z.string(), z.any()).optional(),
+        rife: z.record(z.string(), z.any()).optional()
+      })
+      .describe('要修改的分段字段')
+  },
+  async ({ projectId, shotId, patch }) => {
+    const shot = await withProject(projectId, (p) => {
+      const s = p.shots.find((x) => x.id === shotId)
+      if (!s) throw new Error(`找不到分镜 ${shotId}`)
+      const cur = s.segment ?? ({} as Record<string, unknown>)
+      const { upscale, rife, stages, ...rest } = patch as Record<string, unknown>
+      s.segment = {
+        ...cur,
+        ...rest,
+        ...(stages ? { stages: { ...((cur as { stages?: object }).stages ?? {}), ...(stages as object) } } : {}),
+        ...(upscale ? { upscale: { ...((cur as { upscale?: object }).upscale ?? {}), ...(upscale as object) } } : {}),
+        ...(rife ? { rife: { ...((cur as { rife?: object }).rife ?? {}), ...(rife as object) } } : {})
+      } as unknown as typeof s.segment
+      s.updatedAt = new Date().toISOString()
+      return s
+    })
+    return ok({ updated: shot.id, segment: shot.segment })
   }
 )
 

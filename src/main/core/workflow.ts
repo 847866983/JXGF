@@ -523,6 +523,12 @@ function applyUpscaleParams(clone: Workflow, up: UpscaleSettings): void {
       if ('音频重绘强度' in i) i['音频重绘强度'] = audioDenoise
       if ('采样器' in i && up.sampler) i['采样器'] = up.sampler
       if ('调度器' in i && up.scheduler) i['调度器'] = up.scheduler
+    } else if (ct === 'BanZhang_ImageHiResUpscale') {
+      // 图片高清放大（千问/角色四视图模板里焊死了 2×）。
+      // 关闭时把倍数压到下限 1.0（这个节点只能放大不能缩小，1 = 原尺寸直通）；
+      // 不压的话 2400 宽的图会被放大到 4800，6GB 卡直接卡死。
+      if ('放大倍数' in i) i['放大倍数'] = up.enabled ? Math.max(1, up.scale) : 1
+      if ('放大模式' in i && !up.enabled) i['放大模式'] = '按倍数'
     } else if (ct === 'BanZhang_MMH3_UpscaleParams') {
       if ('放大模式' in i) i['放大模式'] = up.enabled ? up.mode : '按倍数'
       if ('放大倍数' in i) i['放大倍数'] = up.enabled ? Math.max(1, up.scale) : 1
@@ -611,6 +617,9 @@ export function buildWorkflow(template: Template, params: WorkflowParams): unkno
   // 千问图片编辑：提示词/负面/画布写进 qwen_data（参考图由 jobs 上传后注入媒体架）
   if (hasQwenEdit) {
     injectQwenEdit(clone, params)
+    // 千问模板里也有「🖼️ 图片高清放大」节点（默认 2×）；
+    // 不处理的话 1536 宽的图会被放大到 3072，白等几分钟。
+    if (params.upscale) applyUpscaleParams(clone, params.upscale)
     if (params.seed !== undefined) {
       for (const node of Object.values(clone)) {
         if (/^KSampler(Advanced)?$/.test(String(node.class_type)) && 'seed' in node.inputs) {

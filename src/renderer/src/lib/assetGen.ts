@@ -167,6 +167,8 @@ export function buildAssetJobInput(asset: Asset, templates: Template[], styleId?
       templateId: template.id,
       positive: isQwen ? qwenPositive : buildFourViewPositive(desc, styleId),
       negative: isQwen ? fourViewNegative() : fourViewNegative(styleId),
+      // 画布与步数保持原样（用户指定：不要动分辨率和步数）。
+      // 变慢的根因是模板里的「图片高清放大」节点，已在主进程关闭。
       width: isQwen ? 2400 : FOUR_VIEW_W,
       height: isQwen ? 1200 : FOUR_VIEW_H,
       batch: 1,
@@ -330,7 +332,8 @@ export function buildCharacterFourViewInput(
     templateId: template.id,
     positive: QWEN_QUADVIEW_PROMPT,
     negative: fourViewNegative(),
-    // 与 Krea2 对齐但更宽：4 个 panel（半身特写 + 三全身）需要更足横向空间
+    // 画布与步数保持原样（用户指定：不要动分辨率和步数）。
+    // 变慢的根因是模板里的「图片高清放大」节点，已在主进程关闭。
     width: 2400,
     height: 1200,
     batch: 1,

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Image, Layers, Plus } from 'lucide-react'
 import type { Asset, AssetKind } from '@shared/types'
 import { useApp } from '../store/app'
@@ -24,6 +24,22 @@ const tabs: { id: Filter; label: string }[] = [
 
 export default function Assets(): React.JSX.Element {
   const project = useApp((s) => s.project)
+  const refreshJobs = useApp((s) => s.refreshJobs)
+  const openProject = useApp((s) => s.openProject)
+
+  // 后台生成轮询：有任务在跑时每 5 秒刷新一次任务列表和工程数据，
+  // 这样在别处提交的生成完成后，资产页能自动出现新图，不用手动重开。
+  useEffect(() => {
+    if (!project?.id) return
+    const timer = window.setInterval(() => {
+      void refreshJobs()
+      const running = (useApp.getState().jobs ?? []).some(
+        (j) => j.status === 'running' || j.status === 'queued'
+      )
+      if (running) void openProject(project.id)
+    }, 5000)
+    return () => window.clearInterval(timer)
+  }, [project?.id, refreshJobs, openProject])
   const [filter, setFilter] = useState<Filter>('all')
   const [formOpen, setFormOpen] = useState(false)
   const [delMsg, setDelMsg] = useState<string | null>(null)

@@ -180,6 +180,38 @@ export class ComfyRuntime extends EventEmitter {
       return st
     }
 
+    // 【官方 Comfy Desktop 托管模式】
+    // 机器上装的是官方 Comfy Desktop 时，绝对不要自己去 spawn python：
+    //   · 端口/子进程由 Desktop 管理，我们从外面再起一个会和它抢；
+    //   · 更糟的是 Desktop 发现自己的进程没了会停在「崩溃」界面，不会自动恢复，
+    //     只能人手动点重启 —— 这就是「关了之后卡在崩溃、要手动点」的根因。
+    // 正确做法：拉起 Comfy Desktop 本身，让它把自己的 ComfyUI 带起来。
+    const desktopExe = path.join(root, 'Comfy Desktop', 'Comfy Desktop.exe')
+    if (exists(desktopExe)) {
+      try {
+        spawn(desktopExe, [], { detached: true, stdio: 'ignore', windowsHide: true }).unref()
+      } catch {
+        // 拉不起来就继续走下面的 python 兜底
+      }
+      const port = Number(cfg.port) || 8188
+      const deadline = Date.now() + 180_000
+      while (Date.now() < deadline) {
+        if (await health(port)) {
+          const st = await this.status()
+          return { ...st, status: 'running', root, port }
+        }
+        await new Promise((r) => setTimeout(r, 3000))
+      }
+      return {
+        status: 'error',
+        root,
+        port: cfg.port,
+        pid: null,
+        logTail: this.logTail(),
+        error: '已尝试启动 Comfy Desktop，但 3 分钟内没就绪 —— 请到 Comfy Desktop 窗口点「启动」'
+      }
+    }
+
     const python = cfg.python ?? this.findPython(root)
     const mainPy = this.mainPyOf(root)
     if (!python) {

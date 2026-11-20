@@ -39,7 +39,8 @@ export function isUiWorkflow(v: unknown): v is UiWorkflow {
  */
 export async function convertUiToApi(
   ui: UiWorkflow,
-  settings: ComfySettings
+  settings: ComfySettings,
+  opts: { keepSuperRes?: boolean; stageParams?: Partial<Record<'first' | 'second' | 'third' | 'superRes', { steps?: number; cfg?: number; sampler?: string; scheduler?: string; denoise?: number }>> } = {}
 ): Promise<Record<string, { class_type: string; inputs: Record<string, unknown> }>> {
   const base = `${settings.protocol}://${settings.host}:${settings.port}`
   const objInfo = (await (await fetch(`${base}/object_info`, { signal: AbortSignal.timeout(15000) })).json()) as Record<
@@ -56,13 +57,74 @@ export async function convertUiToApi(
 
   const api: Record<string, { class_type: string; inputs: Record<string, unknown> }> = {}
 
+  /**
+   * 纯前端节点（只有界面意义，后端不注册）。
+   * 导出成 API 时如果把它们提交上去，ComfyUI 会报
+   * `missing_node_type: Node 'Label (rgthree)' not found`。
+   * 它们没有输出、或输出只用于界面，直接丢掉不影响生成。
+   */
+  const UI_ONLY_NODES = new Set([
+    'Note',
+    'Label (rgthree)',
+    'Bookmark (rgthree)',
+    'Fast Groups Bypasser (rgthree)',
+    'Fast Groups Muter (rgthree)',
+    'Reroute',
+    'PrimitiveNode',
+    'GetNode',
+    'SetNode'
+  ])
+
+  // —— Bypass 透传：被 Bypass(4) 的节点不会进 API，但它的下游还连着它。
+  //    必须顺着它「同类型的第一个输入」往上找真正的源头，否则下游会指向一个
+  //    不存在的节点 id，ComfyUI 校验时报 "Exception when validating inner node: '431'"，
+  //    然后整条输出被丢弃 —— 表现就是"执行成功但零产物"。
+  const nodesById = new Map(ui.nodes.map((x) => [String(x.id), x as unknown as {
+    id: number | string; inputs?: { type?: string; link?: number | null }[]; outputs?: { type?: string }[]
+  }]))
+  const bypassedIds = new Set(
+    ui.nodes
+      .filter((x) => Number((x as unknown as { mode?: number }).mode) === 4)
+      .map((x) => String(x.id))
+  )
+  const resolveBypassedLink = (linkId: number): [string, number] | null => {
+    let cur = linkMap.get(linkId)
+    const seen = new Set<number>()
+    while (cur) {
+      const srcNode = nodesById.get(cur.srcId)
+      if (!srcNode || !bypassedIds.has(cur.srcId)) return [cur.srcId, cur.srcSlot]
+      const outType = String(srcNode.outputs?.[cur.srcSlot]?.type ?? '*')
+      const match = (srcNode.inputs ?? []).find(
+        (i) => i?.link != null && (String(i.type) === outType || outType === '*' || i.type === '*')
+      )
+      if (!match || match.link == null || seen.has(Number(match.link))) return null
+      seen.add(Number(match.link))
+      cur = linkMap.get(Number(match.link))
+    }
+    return null
+  }
+
   for (const n of ui.nodes) {
     const nodeId = String(n.id)
-    if (n.type === 'Note') continue // 便签不参与生成
+    // 便签/标注等纯界面节点不参与生成
+    if (UI_ONLY_NODES.has(n.type)) continue
+    // 跳过被 Bypass（4）/ Mute（2）的节点。
+    // 不跳过的后果：工作流里留着整条废弃分支（例如 Krea2 的 MuseByStable 旧方案），
+    // 它引用的模型/节点可能根本没装，ComfyUI 校验时直接报
+    // 「value_not_in_list / missing_node_type」——看起来像"模型不在目录里"，
+    // 其实那条分支压根不该执行。
+    const nodeMode = Number((n as { mode?: number }).mode ?? 0)
+    if (nodeMode === 4 || nodeMode === 2) continue
     const inputs: Record<string, unknown> = {}
     const wv = Array.isArray(n.widgets_values) ? n.widgets_values : []
 
     const info = objInfo[n.type]
+    // 后端不认识、且这个节点没有任何输出连线 → 一定是装饰性节点，丢掉
+    if (!info) {
+      const outputs = (n as { outputs?: { links?: number[] | null }[] }).outputs
+      const hasOutgoing = Array.isArray(outputs) && outputs.some((o) => (o?.links?.length ?? 0) > 0)
+      if (!hasOutgoing) continue
+    }
     const inputDef = info?.input || {}
     const required = inputDef.required || {}
     const optional = inputDef.optional || {}
@@ -97,19 +159,21 @@ export async function convertUiToApi(
       if (isWidget(spec)) continue
       const linkId = slotLinks.get(name)
       if (linkId != null) {
-        const src = linkMap.get(linkId)
-        if (src) inputs[name] = [src.srcId, src.srcSlot]
+        const src = resolveBypassedLink(linkId)
+        if (src) inputs[name] = [src[0], src[1]]
       }
     }
 
     api[nodeId] = { class_type: n.type, inputs }
   }
 
-  // 级联删除 RTX 超分节点及其依赖
+  // 级联删除 RTX 超分节点及其依赖（用户勾了「超分」就保留）
   const removeIds = new Set<string>()
-  for (const [id, node] of Object.entries(api)) {
-    if (node.class_type === 'BanZhang_RTX_SuperResolution' || node.class_type === 'H3_RTX_SuperResolution') {
-      removeIds.add(id)
+  if (!opts.keepSuperRes) {
+    for (const [id, node] of Object.entries(api)) {
+      if (node.class_type === 'BanZhang_RTX_SuperResolution' || node.class_type === 'H3_RTX_SuperResolution') {
+        removeIds.add(id)
+      }
     }
   }
   let changed = true
@@ -127,6 +191,33 @@ export async function convertUiToApi(
     }
   }
   for (const id of removeIds) delete api[id]
+
+  // 按分组套用各阶段采样参数（一采/二采/三采/超分 各自一套）
+  if (opts.stageParams) {
+    const groups = ((ui as unknown as { groups?: { title?: string; bounding?: number[] }[] }).groups ?? [])
+    const stageOf = (title: string): 'first' | 'second' | 'third' | 'superRes' | null =>
+      /超分/.test(title) ? 'superRes' : /三采/.test(title) ? 'third' : /二采/.test(title) ? 'second' : /一采/.test(title) ? 'first' : null
+    for (const n of ui.nodes) {
+      const pos = (n as unknown as { pos?: number[] }).pos
+      if (!Array.isArray(pos)) continue
+      const g = groups.find((x) => {
+        const b = x.bounding
+        return Array.isArray(b) && pos[0] >= b[0] && pos[0] <= b[0] + b[2] && pos[1] >= b[1] && pos[1] <= b[1] + b[3]
+      })
+      if (!g) continue
+      const st = stageOf(String(g.title ?? ''))
+      if (!st) continue
+      const cfg = opts.stageParams[st]
+      if (!cfg) continue
+      const node = api[String(n.id)]
+      if (!node || !/KSampler/.test(node.class_type)) continue
+      if (cfg.steps) node.inputs.steps = cfg.steps
+      if (cfg.cfg !== undefined) node.inputs.cfg = cfg.cfg
+      if (cfg.sampler) node.inputs.sampler_name = cfg.sampler
+      if (cfg.scheduler) node.inputs.scheduler = cfg.scheduler
+      if (cfg.denoise !== undefined) node.inputs.denoise = cfg.denoise
+    }
+  }
 
   return api
 }

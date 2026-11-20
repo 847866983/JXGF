@@ -20,7 +20,7 @@ import {
   type AssetJobInput
 } from '../lib/assetGen'
 
-const JOB_TIMEOUT_MS = 15 * 60 * 1000
+const JOB_TIMEOUT_MS = 30 * 60 * 1000
 const POLL_INTERVAL_MS = 2000
 
 /** 轮询任务状态；任务不存在时也继续等（可能尚未登记），超时返回 timeout */
@@ -164,27 +164,12 @@ export function CharacterAssetWizard({ asset, onClose }: { asset: Asset; onClose
         loras: input.loras && input.loras.length > 0 ? input.loras : undefined,
         steps: input.steps
       })
-      setStatus(`已提交「${label}」，等待生成…（任务 ${job.id.slice(-6)}）`)
-      const outcome = await waitForJob(job.id, setProgress)
-      if (outcome !== 'done') {
-        setError(
-          outcome === 'timeout'
-            ? `「${label}」超时（超过 15 分钟），请到「生成队列」查看`
-            : `「${label}」失败，请到「生成队列」查看错误`
-        )
-        return null
-      }
-      await useApp.getState().openProject(projectId)
-      const after = useApp.getState().project?.assets.find((a) => a.id === asset.id)?.images ?? []
-      const added = after.filter((f) => !before.has(f))
-      const newest = added[added.length - 1] ?? after[after.length - 1] ?? null
-      if (!newest) {
-        setError('生成完成但没有拿到产物，请重试')
-        return null
-      }
-      setSelected(newest)
-      setStatus(null)
-      return newest
+      // 后台生成：提交完就退出，不在这里死等。
+      // 关掉这个页面不影响 ComfyUI 里的任务；结果由主进程写回资产，
+      // 回到资产页会自动刷新出来（见 Assets 页的轮询）。
+      setStatus(`已提交「${label}」（任务 ${job.id.slice(-6)}），后台生成中…`)
+      window.setTimeout(() => onClose(), 900)
+      return null
     } catch (err) {
       setError(String((err as Error)?.message ?? err))
       return null

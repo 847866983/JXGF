@@ -11,6 +11,9 @@ import { VideoThumb } from '../components/VideoThumb'
 import { Modal } from '../components/Modal'
 import { persistProject } from '../components/mutate'
 import FilmMonitor from '../components/FilmMonitor'
+import DirectorStage from '../components/DirectorStage'
+import { GenerationInfoPanel } from '../components/GenerationInfoPanel'
+import { readStageDefaults } from '../lib/stageDefaults'
 import { defaultSegment, framesFor, getSegment, ratioOf } from '../lib/segment'
 import Storyboard from './Storyboard'
 
@@ -64,10 +67,18 @@ function ksDefaults(apiJson: unknown): { steps?: number; cfg?: number; samplerNa
 export default function Director(): React.JSX.Element {
   const project = useApp((s) => s.project)
   const hardware = useApp((s) => s.hardware)
+  const loadHardware = useApp((s) => s.loadHardware)
+
+  // 导演台可能被直接打开（没经过仪表盘），这里自己补一次硬件检测；
+  // 否则 preset 为 null → canGenerate=false → 「生成本段」按钮是禁用的，
+  // 点下去完全没反应。
+  useEffect(() => {
+    if (!useApp.getState().hardware) void loadHardware()
+  }, [loadHardware])
   const navigate = useNavigate()
 
   const [episodeId, setEpisodeId] = useState('')
-  const [tab, setTab] = useState<'segment' | 'storyboard'>('segment')
+  const [tab, setTab] = useState<'segment' | 'storyboard' | 'generation'>('segment')
   const [templateId, setTemplateId] = useState('')
   const [selectedShotId, setSelectedShotId] = useState('')
   const [paramsShotId, setParamsShotId] = useState<string | null>(null)
@@ -75,6 +86,8 @@ export default function Director(): React.JSX.Element {
   const [submittingShotId, setSubmittingShotId] = useState<string | null>(null)
   /** 生成前校验错误（如参考图缺失），显示在页面顶部提示 */
   const [error, setError] = useState<string | null>(null)
+  /** 提交成功回执（绿色提示，几秒后自动消失） */
+  const [notice, setNotice] = useState<string | null>(null)
   /** 导演台内直接编辑本段提示词的草稿（按分镜 id 存），未保存时 dirty */
   const [promptDraft, setPromptDraft] = useState<Record<string, string>>({})
   const [promptDirty, setPromptDirty] = useState(false)
@@ -82,7 +95,9 @@ export default function Director(): React.JSX.Element {
   const [globalPromptDraft, setGlobalPromptDraft] = useState<string | null>(null)
   const [globalDirty, setGlobalDirty] = useState(false)
   /** 片子级提示词区是否展开 */
-  const [globalOpen, setGlobalOpen] = useState(true)
+  const [globalOpen, setGlobalOpen] = useState(false)
+  /** 右栏分页：文案 / 段参数 / 剧本 */
+  const [rightTab, setRightTab] = useState<'prompt' | 'params' | 'meta'>('prompt')
   /** 成片时间轴刷新计数（生成完成后 +1） */
   const [filmRefresh, setFilmRefresh] = useState(0)
   /** 文案台「AI 改写」进行中 */
@@ -137,6 +152,9 @@ export default function Director(): React.JSX.Element {
       <button className={tab === 'storyboard' ? 'btn-primary' : 'btn-ghost'} onClick={() => setTab('storyboard')}>
         剧本与分镜
       </button>
+      <button className={tab === 'generation' ? 'btn-primary' : 'btn-ghost'} onClick={() => setTab('generation')}>
+        生成信息
+      </button>
     </div>
   )
 
@@ -178,10 +196,39 @@ export default function Director(): React.JSX.Element {
   const shots = computeShots(project, selectedEpisode.id)
 
   /** 片子级提示词：编辑过就用草稿，否则跟随剧集里存的那份 */
+  // —— 生成信息（全片统一，作用于所有分段）——
+  const globalStages = selectedEpisode.stages ?? { first: true, second: true, third: true, superRes: false }
+  const globalSampler = selectedEpisode.sampler ?? {}
+  const stageParams = selectedEpisode.stageParams ?? {}
+  const saveStageParam = async (k: 'first' | 'second' | 'third' | 'superRes', patch: Record<string, unknown>): Promise<void> => {
+    await persistProject((draft) => {
+      const ep = draft.episodes.find((x) => x.id === selectedEpisode.id)
+      if (!ep) return
+      const cur = ep.stageParams?.[k] ?? {}
+      ep.stageParams = { ...(ep.stageParams ?? {}), [k]: { ...cur, ...patch } }
+    })
+  }
+  const saveGlobalStages = async (next: typeof globalStages): Promise<void> => {
+    await persistProject((draft) => {
+      const ep = draft.episodes.find((x) => x.id === selectedEpisode.id)
+      if (ep) ep.stages = next
+    })
+  }
+  const saveGlobalSampler = async (next: typeof globalSampler): Promise<void> => {
+    await persistProject((draft) => {
+      const ep = draft.episodes.find((x) => x.id === selectedEpisode.id)
+      if (ep) ep.sampler = next
+    })
+  }
+
   const globalPrompt = globalPromptDraft ?? selectedEpisode.globalPrompt ?? ''
 
   const template = pickDirectorTemplate(project.templates, templateId)
-  const preset = hardware?.preset.video ?? null
+
+  // 从工作流里读出每个阶段的默认采样参数（预填到输入框）
+  const stageDefaults = readStageDefaults(template?.apiJson)
+  // 兜底档位：硬件还没检测完也不能让生成按钮变灰
+  const preset = hardware?.preset.video ?? { width: 576, height: 320, frames: 124 }
   const canGenerate = Boolean(template && preset)
   const pendingCount = shots.filter((s) => s.outputs.length === 0).length
   const selectedShot = shots.find((s) => s.id === selectedShotId) ?? shots[0] ?? null
@@ -224,7 +271,10 @@ export default function Director(): React.JSX.Element {
   }
 
   const submitJob = async (shot: Shot, index: number): Promise<void> => {
-    if (!template || !preset) return
+    if (!template || !preset) {
+      setError('还没有可用的工作流模板或生成档位 —— 请在设置里导入工作流、或先检测硬件')
+      return
+    }
     // 用 store 里最新项目数据（连续生成时上一段产物刚写回，闭包里的 project 是旧的）
     const liveProject = useApp.getState().project ?? project
     const liveShots = computeShots(liveProject, selectedEpisode.id)
@@ -322,8 +372,8 @@ export default function Director(): React.JSX.Element {
       width: s.width,
       height: s.height,
       frames: s.frames,
-      steps: genSteps ? num(genSteps, 0) || undefined : undefined,
-      cfg: genCfg ? Number(genCfg) || undefined : undefined,
+      steps: globalSampler.steps || (genSteps ? num(genSteps, 0) || undefined : undefined),
+      cfg: globalSampler.cfg || (genCfg ? Number(genCfg) || undefined : undefined),
       samplerName: genSampler.trim() || undefined,
       scheduler: genScheduler.trim() || undefined,
       seed: genSeed.trim() ? Number(genSeed) || undefined : undefined,
@@ -335,6 +385,8 @@ export default function Director(): React.JSX.Element {
         genSampler.trim() === ksDefault.sampler &&
         genScheduler.trim() === ksDefault.scheduler,
       h3: h3Param,
+      stages: globalStages,
+      stageParams: stageParams,
       upscale: s.upscale,
       rife: s.rife,
       refImages: refImages.length > 0 ? refImages : undefined,
@@ -364,9 +416,15 @@ export default function Director(): React.JSX.Element {
   const generateOne = async (shot: Shot): Promise<void> => {
     const index = shots.indexOf(shot)
     setSubmittingShotId(shot.id)
+    setError(null)
     try {
       await submitJob(shot, index)
-      navigate('/queue')
+      // 提交完**不跳转**，留在导演台继续编辑；给一条明确的提交回执
+      const total = shots.length
+      setNotice(`已提交第 ${index + 1}/${total} 段，正在后台生成…（可继续编辑或提交其它段）`)
+      window.setTimeout(() => setNotice(null), 5000)
+    } catch (err) {
+      setError(`提交失败：${String((err as Error).message ?? err)}`)
     } finally {
       setSubmittingShotId(null)
     }
@@ -545,13 +603,34 @@ export default function Director(): React.JSX.Element {
         curShot.outputs[curShot.outputs.length - 1])
       : null
 
-  return (
-    <div>
-      {tabBar}
-      <PageHeader title="导演台" desc="分段编排 · 直接改提示词 · 段间续接成长视频" crumbs={[project.name, '导演台']} />
+  if (tab === 'generation') {
+    return (
+      <div>
+        {tabBar}
+        <PageHeader title="生成信息" desc="全片统一的生成阶段与采样参数" crumbs={[project.name, '导演台']} />
+        <div className="px-8 pb-8">
+          <GenerationInfoPanel
+            stages={globalStages}
+            stageParams={stageParams}
+            defaults={stageDefaults}
+            onToggle={(k) => void saveGlobalStages({ ...globalStages, [k]: !globalStages[k] })}
+            onParam={(k, patch) => void saveStageParam(k, patch)}
+          />
+        </div>
+      </div>
+    )
+  }
 
+  return (
+    <div className="relative">
+      {tabBar}
+      <PageHeader title="导演台" desc="分段编排 · 点分段改提示词 · 段间续接成长视频" crumbs={[project.name, '导演台']} />
       <div className="px-8 pb-8">
-        {/* 生成前校验错误提示（如参考图缺失） */}
+        {notice && (
+          <div className="mb-4 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-200">
+            {notice}
+          </div>
+        )}
         {error && (
           <div className="mb-4 flex items-start justify-between gap-3 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2.5">
             <div className="flex-1 text-xs leading-relaxed text-amber-200">{error}</div>
@@ -560,750 +639,47 @@ export default function Director(): React.JSX.Element {
             </button>
           </div>
         )}
-        {/* 顶栏 */}
-        <div className="mb-4 flex flex-wrap items-center gap-3">
-          <select className="field w-80" value={selectedEpisode.id} onChange={(e) => setEpisodeId(e.target.value)}>
-            {episodes.map((ep) => {
-              const script = project.scripts.find((s) => s.id === ep.scriptId)
-              return (
-                <option key={ep.id} value={ep.id}>
-                  {script ? `${script.name} · ` : ''}
-                  {ep.title}
-                </option>
-              )
-            })}
-          </select>
-          {project.templates.length > 1 && (
-            <select className="field w-56" value={template?.id ?? ''} onChange={(e) => setTemplateId(e.target.value)}>
-              {project.templates.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.kind === 'video' ? '视频 · ' : '图片 · '}
-                  {t.name}
-                </option>
-              ))}
-            </select>
-          )}
-          <span className="text-xs text-slate-500">
-            {shots.length} 段 · 总时长 {totalSec.toFixed(1)}s · {pendingCount} 段待生成
-          </span>
-          <div className="ml-auto flex gap-2">
-            <button className="btn-ghost" onClick={() => setParamsOpen((v) => !v)}>
-              <SlidersHorizontal size={15} />
-              采样参数
-            </button>
-            <button className="btn-primary" disabled={!canGenerate || batchRunning || pendingCount === 0} onClick={() => void generateAll()}>
-              <Play size={15} />
-              {batchRunning ? '全部渲染中…' : `全部渲染（${pendingCount}）`}
-            </button>
-          </div>
-        </div>
-
-        {/* 工程状态条：对齐 H3 Studio 顶栏（工程名 · 段进度 · 时长 · 帧数 · 生成方式） */}
-        {curShot && curSeg && (
-          <div className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-white/5 bg-ink-950/40 px-3 py-2 text-[11px]">
-            <span className="flex items-center gap-1.5 font-medium text-slate-200">
-              <span className="h-1.5 w-1.5 rounded-full bg-accent-400" />
-              {project.name}
-            </span>
-            <span className="text-slate-600">|</span>
-            <span className="text-slate-400">
-              段 <b className="text-slate-200">{curIndex + 1}</b> / {shots.length}
-            </span>
-            <span className="text-slate-600">|</span>
-            <span className="text-slate-400">
-              <b className="text-slate-200">{curSeg.durationSec.toFixed(2)}</b> s
-            </span>
-            <span className="text-slate-600">|</span>
-            <span className="text-slate-400">
-              <b className="text-slate-200">{curSeg.frames}</b> 帧
-            </span>
-            <span className="text-slate-600">|</span>
-            <span className="text-slate-400">
-              权重 <b className="text-accent-300">{curSeg.genMode}</b>
-            </span>
-            <span className="text-slate-600">|</span>
-            <span className="text-slate-400">
-              {curSeg.contMode === 'none' ? '不续接' : `${curSeg.contMode} 续接`}
-            </span>
-            <div className="ml-auto flex items-center gap-1.5">
-              {curShot.outputs.length > 0 && (
-                <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] text-emerald-300">
-                  {curShot.outputs.filter((o) => o.kept !== false).length} 个成片
-                </span>
-              )}
-              <button
-                className="rounded bg-white/5 px-2 py-0.5 text-[10px] text-slate-400 hover:bg-white/10"
-                onClick={() => {
-                  if (!curShot) return
-                  void persistProject((draft) => {
-                    draft.shots.push({
-                      ...structuredClone(curShot),
-                      id: `sh_${Math.random().toString(36).slice(2, 12)}`,
-                      index: draft.shots.length,
-                      title: `${curShot.title} · 接段`,
-                      outputs: [],
-                      status: 'draft',
-                      prompt: '',
-                      createdAt: new Date().toISOString(),
-                      updatedAt: new Date().toISOString()
-                    })
-                  })
-                }}
-              >
-                + 新建工程
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* 全局采样参数 */}
-        {paramsOpen && (
-          <div className="mb-4 grid grid-cols-5 gap-3 rounded-lg border border-white/5 bg-white/[0.02] p-3">
-            <div>
-              <label className="label">步数</label>
-              <input className="field" value={genSteps} onChange={(e) => setGenSteps(e.target.value.replace(/[^0-9]/g, ''))} />
-            </div>
-            <div>
-              <label className="label">CFG</label>
-              <input className="field" value={genCfg} onChange={(e) => setGenCfg(e.target.value.replace(/[^0-9.]/g, ''))} />
-            </div>
-            <div>
-              <label className="label">采样器</label>
-              <input className="field" value={genSampler} onChange={(e) => setGenSampler(e.target.value)} />
-            </div>
-            <div>
-              <label className="label">调度器</label>
-              <input className="field" value={genScheduler} onChange={(e) => setGenScheduler(e.target.value)} />
-            </div>
-            <div>
-              <label className="label">种子（空=随机）</label>
-              <input className="field" value={genSeed} onChange={(e) => setGenSeed(e.target.value.replace(/[^0-9]/g, ''))} placeholder="随机" />
-            </div>
-          </div>
-        )}
-
-        {!canGenerate && <div className="mb-4 rounded-lg bg-amber-500/10 px-3 py-2.5 text-sm text-amber-300">{hint()}</div>}
-
-        {shots.length === 0 ? (
-          <EmptyState title="本集还没有分镜" desc="先去「剧本分镜」给本集添加场次与分镜" />
-        ) : (
-          <>
-            {/* ===== 上区：左成片监视器 + 右本段参数与提示词 ===== */}
-            <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)] gap-4">
-              {/* 左：成片监视器 */}
-              <section className="panel flex flex-col p-4">
-                <div className="mb-2 flex items-center justify-between">
-                  <div className="flex items-center gap-2 text-sm font-medium text-white">
-                    <Film size={15} className="text-accent-400" />
-                    成片监视器
-                    <span className="text-[11px] font-normal text-slate-500">
-                      {selectedEpisode.title} · 第 {curIndex + 1} 段 / 共 {shots.length} 段
-                    </span>
-                  </div>
-                  <button className="text-[11px] text-slate-500 hover:text-slate-300" onClick={() => setParamsShotId(curShot?.id ?? null)}>
-                    规格·参考
-                  </button>
-                </div>
-                <div>
-                  <FilmMonitor
-                    chainName={`${project.name}·${selectedEpisode.title}`}
-                    selectedShotId={curShot?.id}
-                    onSelectShot={(shotId) => {
-                      setSelectedShotId(shotId)
-                      setPromptDirty(false)
-                    }}
-                    refreshKey={filmRefresh}
-                  />
-                </div>
-                <div className="mt-2 flex items-center justify-between text-[11px] text-slate-500">
-                  <span>
-                    {curOutput
-                      ? `本段成片 · ${curOutput.file.split(/[\\/]/).pop()}`
-                      : `第 ${curIndex + 1} 段还没有成片 —— 生成一次就有了`}
-                  </span>
-                  <span className="flex items-center gap-2">
-                    {curShot && curShot.outputs.length > 1 && <span>共 {curShot.outputs.length} 个版本</span>}
-                    <button className="text-slate-500 hover:text-slate-300" onClick={() => setFilmRefresh((v) => v + 1)}>
-                      刷新时间轴
-                    </button>
-                  </span>
-                </div>
-
-                {/* 多版本管理：选保留版本（将作为下一段视频参考）/ 删除多余 */}
-                {curShot && curShot.outputs.length > 0 && (
-                  <div className="mt-2 flex gap-2 overflow-x-auto border-t border-white/5 pt-2">
-                    {curShot.outputs.map((o) => {
-                      const keptCount = curShot.outputs.filter((x) => x.kept !== false).length
-                      const kept = o.kept !== false && keptCount === 1
-                      const isVideo = o.kind === 'video'
-                      return (
-                        <div
-                          key={o.id}
-                          className={`shrink-0 rounded border p-1 ${kept ? 'border-accent-500 bg-accent-600/10' : 'border-white/10 bg-white/[0.02]'}`}
-                        >
-                          <div className="h-12 w-20 overflow-hidden rounded bg-black">
-                            {isVideo ? (
-                              <VideoThumb src={o.file} className="h-full w-full object-cover" />
-                            ) : (
-                              <MediaImage src={o.file} alt="" className="h-full w-full object-cover" fallback={<div className="h-full w-full" />} />
-                            )}
-                          </div>
-                          <div className="mt-1 flex gap-1">
-                            <button
-                              className={`rounded px-1 py-0.5 text-[9px] ${kept ? 'bg-emerald-500/20 text-emerald-300' : 'bg-white/5 text-slate-400 hover:bg-white/10'}`}
-                              onClick={() => void keepOutput(curShot.id, o.id)}
-                            >
-                              {kept ? '✓' : '保留'}
-                            </button>
-                            <button
-                              className="rounded bg-rose-500/10 px-1 py-0.5 text-[9px] text-rose-300 hover:bg-rose-500/20"
-                              onClick={() => void removeOutput(curShot.id, o.id)}
-                            >
-                              删
-                            </button>
-                          </div>
-                        </div>
-                      )
-                    })}
-                  </div>
-                )}
-              </section>
-
-              {/* 右：本段参数 + 视频提示词 */}
-              <section className="panel p-4">
-                <div className="mb-3 flex items-center justify-between">
-                  <div className="text-sm font-medium text-white">第 {curIndex + 1} 段</div>
-                  <div className="flex items-center gap-2">
-                    <ShotStatusBadge status={curShot?.status ?? 'pending'} />
-                    <button className="btn-ghost" onClick={() => setParamsShotId(curShot?.id ?? null)}>
-                      <SlidersHorizontal size={13} />
-                      段参数
-                    </button>
-                  </div>
-                </div>
-
-                {/* 画布 / 时长 / 参考 / 放大 / 抽帧 / 语义桥：只读摘要，改到段参数 */}
-                {curSeg && (
-                  <div className="space-y-1.5 rounded-lg border border-white/5 bg-ink-950/40 p-3 text-[11px]">
-                    <div className="flex justify-between">
-                      <span className="text-slate-500">画布</span>
-                      <span className="text-slate-300">
-                        {curSeg.ratio} · {curSeg.width} × {curSeg.height}
-                        <span className="ml-2 text-slate-500">{((curSeg.width * curSeg.height) / 1e6).toFixed(2)} MP</span>
-                      </span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-slate-500">时长</span>
-                      <span className="text-slate-300">
-                        {curSeg.durationSec} 秒 · {curSeg.frames} 帧 · {curSeg.fps}fps
-                      </span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-slate-500">生成方式</span>
-                      <span className="text-slate-300">
-                        {curSeg.genMode === 'ref2va' ? '参考图' : curSeg.genMode === 'video' ? '视频参考' : '纯文生'}
-                      </span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-slate-500">续接</span>
-                      <span className="text-slate-300">{curSeg.contMode === 'none' ? '不续接' : `${curSeg.contMode} 续接`}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-slate-500">参考图 / 视频</span>
-                      <span className="text-slate-300">
-                        {curSeg.refImageSize} / {curSeg.refVideoSize}px
-                      </span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-slate-500">放大重绘</span>
-                      <span className="text-slate-300">
-                        {curSeg.upscale.enabled
-                          ? curSeg.upscale.mode === '倍数'
-                            ? `${curSeg.upscale.scale}×`
-                            : `${curSeg.upscale.targetWidth}×${curSeg.upscale.targetHeight}`
-                          : '关'}
-                      </span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-slate-500">抽帧</span>
-                      <span className="text-slate-300">
-                        {curSeg.rife.fps}fps{curSeg.rife.enabled ? ` · 插帧 ${curSeg.rife.multiplier}×` : ' · 不抽帧'}
-                      </span>
-                    </div>
-                  </div>
-                )}
-
-                {/* 分镜剧本信息：直接在导演台改，不用回剧本分镜页 */}
-                {curShot && (
-                  <div className="mt-3">
-                    <button
-                      className="mb-1.5 flex w-full items-center gap-1.5 text-[11px] text-slate-400 hover:text-slate-300"
-                      onClick={() => setMetaOpen((v) => !v)}
-                    >
-                      {metaOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-                      分镜剧本信息
-                      <span className="text-slate-600">（标题 / 描述 / 台词 / 镜头 / 时长）</span>
-                    </button>
-                    {metaOpen && (
-                      <div className="space-y-2 rounded-lg border border-white/5 bg-ink-950/40 p-3">
-                        <div>
-                          <label className="label text-[10px]">标题</label>
-                          <input
-                            className="field text-xs"
-                            defaultValue={curShot.title}
-                            onBlur={(e) => {
-                              if (e.target.value !== curShot.title) void saveShotMeta(curShot.id, { title: e.target.value })
-                            }}
-                          />
-                        </div>
-                        <div>
-                          <label className="label text-[10px]">画面描述（剧本原文）</label>
-                          <textarea
-                            className="field h-16 resize-y text-xs"
-                            defaultValue={curShot.description ?? ''}
-                            onBlur={(e) => {
-                              if (e.target.value !== (curShot.description ?? '')) {
-                                void saveShotMeta(curShot.id, { description: e.target.value })
-                              }
-                            }}
-                          />
-                        </div>
-                        <div className="grid grid-cols-2 gap-2">
-                          <div>
-                            <label className="label text-[10px]">台词</label>
-                            <textarea
-                              className="field h-14 resize-y text-xs"
-                              defaultValue={curShot.dialogue ?? ''}
-                              onBlur={(e) => {
-                                if (e.target.value !== (curShot.dialogue ?? '')) {
-                                  void saveShotMeta(curShot.id, { dialogue: e.target.value })
-                                }
-                              }}
-                            />
-                          </div>
-                          <div>
-                            <label className="label text-[10px]">镜头</label>
-                            <textarea
-                              className="field h-14 resize-y text-xs"
-                              defaultValue={curShot.camera ?? ''}
-                              onBlur={(e) => {
-                                if (e.target.value !== (curShot.camera ?? '')) {
-                                  void saveShotMeta(curShot.id, { camera: e.target.value })
-                                }
-                              }}
-                            />
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <label className="label mb-0 text-[10px]">时长（秒）</label>
-                          <input
-                            className="field w-24 text-xs"
-                            type="number"
-                            min={1}
-                            max={15}
-                            defaultValue={curShot.duration ?? 5}
-                            onBlur={(e) => {
-                              const v = Number(e.target.value)
-                              if (v > 0 && v !== curShot.duration) void saveShotMeta(curShot.id, { duration: v })
-                            }}
-                          />
-                          <span className="text-[10px] text-slate-600">改完点空白处自动保存</span>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* ===== 文案台：参考素材 + 预设标签 + 本段提示词 ===== */}
-                <div className="mt-3 rounded-lg border border-white/5 bg-ink-950/30 p-3">
-                  <div className="mb-2 flex items-center justify-between">
-                    <div className="flex items-center gap-2 text-xs font-medium text-white">
-                      <PenLine size={13} className="text-accent-400" />
-                      文案台
-                      <span className="rounded bg-white/[0.06] px-1.5 py-0.5 text-[10px] font-normal text-slate-400">
-                        第 {curIndex + 1} 段
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      {/* 别名模式：开启后提示词写角色名自动绑定参考图 */}
-                      <label className="flex cursor-pointer items-center gap-1 text-[10px] text-slate-400">
-                        <span>别名</span>
-                        <button
-                          type="button"
-                          role="switch"
-                          aria-checked={curSeg?.aliasMode !== false}
-                          onClick={() => curShot && void patchSegment(curShot, { aliasMode: curSeg?.aliasMode === false })}
-                          className={`relative h-3.5 w-7 shrink-0 rounded-full transition-colors ${
-                            curSeg?.aliasMode !== false ? 'bg-accent-600' : 'bg-white/15'
-                          }`}
-                        >
-                          <span
-                            className={`absolute top-0.5 h-2.5 w-2.5 rounded-full bg-white transition-transform ${
-                              curSeg?.aliasMode !== false ? 'translate-x-3.5' : 'translate-x-0.5'
-                            }`}
-                          />
-                        </button>
-                      </label>
-                      <button
-                        className="rounded bg-white/5 px-2 py-0.5 text-[10px] text-slate-400 hover:bg-white/10"
-                        onClick={() => {
-                          if (!curShot) return
-                          void patchSegment(curShot, { presets: [...(curSeg?.presets ?? [])] })
-                        }}
-                      >
-                        存预设
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* 片子级提示词：全片统一风格，生成每段时拼在本段词前面（照搬 H3 文案台的 global） */}
-                  <div className="mb-2 rounded border border-white/5 bg-white/[0.02] p-2">
-                    <div className="flex items-center justify-between">
-                      <button
-                        type="button"
-                        className="flex items-center gap-1 text-[10px] text-slate-400 hover:text-slate-200"
-                        onClick={() => setGlobalOpen((v) => !v)}
-                      >
-                        {globalOpen ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
-                        片子级提示词
-                        <span className="text-slate-600">（全片统一风格）</span>
-                        {globalPrompt.trim().length > 0 && (
-                          <span className="ml-1 rounded bg-accent-600/20 px-1 text-[9px] text-accent-300">
-                            {globalPrompt.trim().length} 字
-                          </span>
-                        )}
-                      </button>
-                      {globalDirty && (
-                        <button
-                          type="button"
-                          className="text-[10px] text-accent-400 hover:text-accent-300"
-                          onClick={() => void saveGlobalPrompt()}
-                        >
-                          保存
-                        </button>
-                      )}
-                    </div>
-                    {globalOpen && (
-                      <>
-                        <textarea
-                          className="field mt-1.5 h-20 w-full resize-y font-mono text-[11px] leading-relaxed"
-                          value={globalPrompt}
-                          placeholder="全片统一的风格 / 影调 / 世界观。例：冷调赛博都市，青蓝霓虹，湿润街道反光，电影感颗粒…"
-                          onChange={(e) => {
-                            setGlobalPromptDraft(e.target.value)
-                            setGlobalDirty(true)
-                          }}
-                        />
-                        <div className="mt-1 text-[9px] text-slate-600">
-                          每一段生成时都会带上这段文字（拼在本段提示词「前面」）
-                        </div>
-                      </>
-                    )}
-                  </div>
-
-                  {/* 参考素材：本段引用的资产图（就是 H3 媒体架的图片槽位） */}
-                  {curShot && curShot.assetIds.length > 0 && (
-                    <div className="mb-2 flex flex-wrap gap-1.5">
-                      {curShot.assetIds.map((id, i) => {
-                        const a = project.assets.find((x) => x.id === id)
-                        if (!a) return null
-                        const img = a.coverFile ?? a.images?.[a.images.length - 1] ?? null
-                        return (
-                          <div
-                            key={id}
-                            className="flex items-center gap-1.5 rounded border border-white/10 bg-white/[0.03] px-1.5 py-1"
-                            title={img ? `参考图：${a.name}（@图片${i + 1}）` : '该资产还没有图片'}
-                          >
-                            <div className="h-7 w-7 overflow-hidden rounded bg-black">
-                              {img ? (
-                                <MediaImage src={img} alt={a.name} className="h-full w-full object-cover" fallback={<div className="h-full w-full" />} />
-                              ) : (
-                                <div className="flex h-full w-full items-center justify-center text-[9px] text-amber-500">⚠</div>
-                              )}
-                            </div>
-                            <div className="min-w-0">
-                              <div className="max-w-[90px] truncate text-[10px] text-slate-300">{a.name}</div>
-                              <div className="text-[9px] text-accent-400">@图片{i + 1}</div>
-                            </div>
-                          </div>
-                        )
-                      })}
-                    </div>
-                  )}
-
-                  {/* 预设标签：点一下追加到本段提示词末尾 */}
-                  <div className="mb-2 flex flex-wrap gap-1">
-                    {(curSeg?.presets && curSeg.presets.length > 0
-                      ? curSeg.presets
-                      : ['镜头缓慢推进，主体保持在画面中央', '手持感轻微晃动，环境光偏冷', '固定机位，人物从画面左侧入画']
-                    ).map((p) => (
-                      <button
-                        key={p}
-                        className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-0.5 text-[10px] text-slate-400 hover:border-accent-500/40 hover:text-accent-300"
-                        onClick={() => {
-                          if (!curShot) return
-                          const cur = promptDraft[curShot.id] ?? curShot.prompt ?? ''
-                          const next = cur ? `${cur}，${p}` : p
-                          setPromptDraft((d) => ({ ...d, [curShot.id]: next }))
-                          setPromptDirty(true)
-                        }}
-                      >
-                        {p}
-                      </button>
-                    ))}
-                  </div>
-
-                  {/* 本段提示词 */}
-                  <div className="mb-1.5 flex items-center justify-between">
-                    <label className="text-[10px] text-slate-500">
-                      本段提示词
-                      <span className="ml-1 text-slate-600">（回车换行；写角色名会自动绑定参考图）</span>
-                    </label>
-                    {promptDirty && <span className="text-[10px] text-amber-400">未保存</span>}
-                  </div>
-                  <textarea
-                    className="field h-40 w-full resize-y font-mono text-xs leading-relaxed"
-                    value={curPrompt}
-                    placeholder="描述这一段的画面、人物动作、镜头运动与声音。&#10;例：单人全身舞蹈动作延续，保持同一人物 @图片1 体型与动作节奏，5 秒连贯动态画面…"
-                    onChange={(e) => {
-                      if (!curShot) return
-                      setPromptDraft((d) => ({ ...d, [curShot.id]: e.target.value }))
-                      setPromptDirty(true)
-                    }}
-                  />
-                  {/* 本段提示词实时校验：提示词里是否有 @图片N 引用，或写了资产名（别名） */}
-                  {(() => {
-                    const n = curShot?.assetIds.length ?? 0
-                    if (n === 0) return null
-                    const hasRef = /@图片\d+|<Picture\s*\d+>/i.test(curPrompt)
-                    const aliasOn = curSeg?.aliasMode !== false
-                    // 别名模式：提示词里出现的资产名会被 H3 展开成 @图片N
-                    const hitNames = aliasOn
-                      ? curShot!.assetIds
-                          .map((id) => project.assets.find((x) => x.id === id)?.name ?? '')
-                          .filter((name) => name && curPrompt.includes(name))
-                      : []
-                    const usesRefs = hasRef || hitNames.length > 0
-                    return (
-                      <div className="mt-1.5 flex items-center gap-1.5 text-[10px]">
-                        {usesRefs ? (
-                          <span className="text-emerald-400">
-                            ✓ 已引用参考图
-                            {hitNames.length > 0 && `（按名字：${hitNames.join('、')}）`}
-                            ，模型会按参考图生成
-                          </span>
-                        ) : aliasOn ? (
-                          <span className="text-slate-500">
-                            提示词里没提到任何参考素材 —— 按导演台规则**一张都不会送**。
-                            写角色名或 @图片1 即可引用。
-                          </span>
-                        ) : (
-                          <span className="text-amber-400">
-                            ⚠ 别名模式已关，且提示词里没有 @图片N —— 参考图不会被发送
-                          </span>
-                        )}
-                      </div>
-                    )
-                  })()}
-                  <div className="mt-2 flex items-center gap-2">
-                    <button
-                      className="btn-primary"
-                      disabled={!promptDirty || !curShot}
-                      onClick={() => curShot && void saveShotPrompt(curShot.id, curPrompt)}
-                    >
-                      <Save size={13} />
-                      保存提示词
-                    </button>
-                    <button
-                      className="btn-ghost"
-                      disabled={!curShot || rewriting}
-                      title="按 H3 官方六段规范重写本段提示词（只改文字，不动画布/采样参数）"
-                      onClick={() => curShot && void rewritePrompt(curShot)}
-                    >
-                      <Sparkles size={13} />
-                      {rewriting ? '改写中…' : 'AI 改写'}
-                    </button>
-                    <button
-                      className="btn-ghost"
-                      disabled={!curShot}
-                      onClick={() => {
-                        if (!curShot) return
-                        setPromptDraft((d) => ({ ...d, [curShot.id]: curShot.description ?? '' }))
-                        setPromptDirty(true)
-                      }}
-                    >
-                      用分镜描述
-                    </button>
-                    <button
-                      className="btn-primary ml-auto"
-                      disabled={!canGenerate || !curShot || submittingShotId === curShot?.id}
-                      onClick={() => curShot && void generateOne(curShot)}
-                    >
-                      <Wand2 size={14} />
-                      {submittingShotId === curShot?.id ? '提交中…' : '生成本段'}
-                    </button>
-                  </div>
-                </div>
-
-                {/* 首尾关键帧：ref2va 多参考模式下不参与（对齐 H3 Studio） */}
-                {curShot && curSeg && (
-                  <div className="mt-3 rounded-lg border border-white/5 bg-ink-950/30 p-3">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2 text-[11px] text-slate-300">
-                        <ImageIcon size={12} className="text-accent-400" />
-                        首尾关键帧
-                      </div>
-                      <span className="text-[10px] text-slate-600">
-                        {curSeg.genMode === 'ref2va' ? '多参考模式下不参与' : '用首帧/末帧锚定画面'}
-                      </span>
-                    </div>
-                    <div className="mt-2 grid grid-cols-2 gap-2">
-                      <div>
-                        <label className="label text-[10px]">保留头帧</label>
-                        <input
-                          className="field text-xs"
-                          type="number"
-                          min={0}
-                          max={curSeg.frames}
-                          value={curSeg.pinHead}
-                          onChange={(e) => curShot && void patchSegment(curShot, { pinHead: Math.max(0, Number(e.target.value) || 0) })}
-                        />
-                      </div>
-                      <div>
-                        <label className="label text-[10px]">保留尾帧</label>
-                        <input
-                          className="field text-xs"
-                          type="number"
-                          min={0}
-                          max={curSeg.frames}
-                          value={curSeg.pinTail}
-                          onChange={(e) => curShot && void patchSegment(curShot, { pinTail: Math.max(0, Number(e.target.value) || 0) })}
-                        />
-                      </div>
-                    </div>
-                    <div className="mt-1.5 text-[10px] text-slate-600">
-                      保留头尾帧用于段间衔接，数值为帧数（0 = 不保留）
-                    </div>
-                  </div>
-                )}
-
-                {/* 引用资产 */}
-                {curShot && curShot.assetIds.length > 0 && (
-                  <div className="mt-3 flex flex-wrap items-center gap-1.5 border-t border-white/5 pt-2.5">
-                    <span className="text-[11px] text-slate-600">引用资产：</span>
-                    {curShot.assetIds.map((id) => {
-                      const a = project.assets.find((x) => x.id === id)
-                      if (!a) return null
-                      const hasImg = Boolean(a.coverFile ?? a.images?.[a.images.length - 1])
-                      return (
-                        <span
-                          key={id}
-                          className={`rounded px-1.5 py-0.5 text-[10px] ${hasImg ? 'bg-accent-600/20 text-accent-300' : 'bg-amber-500/15 text-amber-300'}`}
-                          title={hasImg ? '已绑定参考图' : '该资产还没有图片，参考图不会生效'}
-                        >
-                          {a.name}
-                          {!hasImg && ' ⚠'}
-                        </span>
-                      )
-                    })}
-                  </div>
-                )}
-              </section>
-            </div>
-
-            {/* ===== 下区：分段总览（时间轴在上方成片监视器里） ===== */}
-            <section className="panel mt-4 p-3">
-              <div className="mb-2 flex flex-wrap items-center gap-2">
-                <div className="flex items-center gap-2 text-xs text-slate-400">
-                  <Link2 size={14} className="text-accent-400" />
-                  分段总览 · {shots.length} 段 · {totalSec.toFixed(1)}s
-                </div>
-                <div className="ml-auto flex flex-wrap gap-1.5">
-                  <button className="btn-ghost" onClick={() => void generateAll()} disabled={!canGenerate || batchRunning || pendingCount === 0}>
-                    <Play size={13} />
-                    {batchRunning ? '全部渲染中…' : `全部渲染（${pendingCount}）`}
-                  </button>
-                  <button className="btn-ghost" onClick={() => setParamsOpen((v) => !v)}>
-                    <SlidersHorizontal size={13} />
-                    采样参数
-                  </button>
-                </div>
-              </div>
-
-              {paramsOpen && (
-                <div className="mb-3 grid grid-cols-5 gap-3 rounded-lg border border-white/5 bg-white/[0.02] p-3">
-                  <div>
-                    <label className="label">步数</label>
-                    <input className="field" value={genSteps} onChange={(e) => setGenSteps(e.target.value.replace(/[^0-9]/g, ''))} />
-                  </div>
-                  <div>
-                    <label className="label">CFG</label>
-                    <input className="field" value={genCfg} onChange={(e) => setGenCfg(e.target.value.replace(/[^0-9.]/g, ''))} />
-                  </div>
-                  <div>
-                    <label className="label">采样器</label>
-                    <input className="field" value={genSampler} onChange={(e) => setGenSampler(e.target.value)} />
-                  </div>
-                  <div>
-                    <label className="label">调度器</label>
-                    <input className="field" value={genScheduler} onChange={(e) => setGenScheduler(e.target.value)} />
-                  </div>
-                  <div>
-                    <label className="label">种子（空=随机）</label>
-                    <input className="field" value={genSeed} onChange={(e) => setGenSeed(e.target.value.replace(/[^0-9]/g, ''))} placeholder="随机" />
-                  </div>
-                </div>
-              )}
-
-              {/* 时间轴：每段一个可点选块 */}
-              <div className="flex gap-2 overflow-x-auto pb-1">
-                {shots.map((shot, i) => {
-                  const s = segOf(shot)
-                  const active = curShot?.id === shot.id
-                  const out = shot.outputs.find((o) => o.kept !== false) ?? shot.outputs[shot.outputs.length - 1]
-                  return (
-                    <button
-                      key={shot.id}
-                      onClick={() => { setSelectedShotId(shot.id); setPromptDirty(false) }}
-                      className={`group min-w-[168px] shrink-0 rounded-lg border text-left transition-colors ${
-                        active ? 'border-accent-500 bg-accent-600/10' : 'border-white/10 bg-white/[0.02] hover:border-white/20'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between px-2.5 pt-2 text-[11px]">
-                        <span className={active ? 'text-accent-300' : 'text-slate-400'}>第 {i + 1} 段</span>
-                        <ShotStatusBadge status={shot.status} />
-                      </div>
-                      <div className="mx-2.5 mt-1.5 h-12 overflow-hidden rounded bg-black">
-                        {out ? (
-                          out.kind === 'video' ? (
-                            <VideoThumb src={out.file} className="h-full w-full object-cover" />
-                          ) : (
-                            <MediaImage src={out.file} alt="" className="h-full w-full object-cover" fallback={<div className="h-full w-full" />} />
-                          )
-                        ) : (
-                          <div className="flex h-full w-full items-center justify-center text-[10px] text-slate-600">待生成</div>
-                        )}
-                      </div>
-                      <div className="px-2.5 pb-2 pt-1 text-[10px] text-slate-500">
-                        {s.durationSec}s · {s.frames}帧 · {s.contMode === 'none' ? '不续接' : `${s.contMode}续接`}
-                      </div>
-                    </button>
-                  )
-                })}
-              </div>
-
-              <div className="mt-2 flex items-center justify-between text-[11px] text-slate-500">
-                <span>
-                  第 {curIndex + 1} / {shots.length} 段 · 待生成 {pendingCount} 段
-                </span>
-                <span>{curSeg ? `${curSeg.frames} 帧` : ''}</span>
-              </div>
-            </section>
-          </>
-        )}
+        <DirectorStage
+          projectName={project.name}
+          episodes={episodes.map((e) => ({ id: e.id, title: e.title }))}
+          episodeId={selectedEpisode.id}
+          onEpisode={(id) => setEpisodeId(id)}
+          shots={shots}
+          curShot={curShot}
+          onSelect={(id) => setSelectedShotId(id)}
+          curSeg={seg}
+          onPatch={(patch) => {
+            if (curShot) void patchSegment(curShot, patch)
+          }}
+          prompt={curPrompt}
+          onPrompt={(v) => {
+            if (!curShot) return
+            setPromptDraft((d) => ({ ...d, [curShot.id]: v }))
+            setPromptDirty(true)
+          }}
+          onSavePrompt={() => {
+            if (curShot) void saveShotPrompt(curShot.id, curPrompt)
+          }}
+          onGenerateOne={() => {
+            if (curShot) void generateOne(curShot)
+          }}
+          onGenerateAll={() => void generateAll()}
+          canGenerate={canGenerate}
+          batchRunning={batchRunning}
+          pendingCount={pendingCount}
+          globalPrompt={globalPrompt}
+          onGlobalPrompt={(v) => {
+            setGlobalPromptDraft(v)
+            setGlobalDirty(true)
+          }}
+          onSaveGlobal={() => void saveGlobalPrompt()}
+          onOpenParams={() => setParamsShotId(curShot?.id ?? null)}
+          submitting={submittingShotId === curShot?.id}
+          characterNames={(curShot?.assetIds ?? [])
+            .map((id) => project.assets.find((a) => a.id === id)?.name ?? '')
+            .filter(Boolean)}
+        />
       </div>
-
-
       {paramsShotId && (() => {
         const shot = project.shots.find((s) => s.id === paramsShotId)
         if (!shot) return null
@@ -1313,7 +689,10 @@ export default function Director(): React.JSX.Element {
             shot={shot}
             segment={index >= 0 ? segOf(shot) : defaultSegment(shot, preset, 0)}
             index={index}
-            onSave={(next) => { void saveSegment(shot.id, next); setParamsShotId(null) }}
+            onSave={(next) => {
+              void saveSegment(shot.id, next)
+              setParamsShotId(null)
+            }}
             onClose={() => setParamsShotId(null)}
           />
         )
@@ -1321,6 +700,7 @@ export default function Director(): React.JSX.Element {
     </div>
   )
 }
+
 
 /** 段参数弹窗 */
 function SegmentParamsModal({

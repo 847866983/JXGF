@@ -58,6 +58,8 @@ export class JobManager {
   private queue: QueuedJob[] = []
   private running = false
   private client: ComfyClient | null = null
+  /** 已请求取消的任务 id（runJob 里据此放弃写产物） */
+  private cancelled = new Set<string>()
   private readonly emit: Emit
   private readonly store: ProjectStore
   /** 记录每个 jobId 的原始参数，供失败后一键重试 */
@@ -124,7 +126,10 @@ export class JobManager {
       job.status = 'cancelled'
       this.emit('job:updated', { job })
     } else if (job.status === 'running') {
-      void this.client?.interrupt()
+      // 记下取消意图：runJob 轮询到后会立刻退出，不再把产物写回项目
+      this.cancelled.add(jobId)
+      // 真正通知 ComfyUI：先从队列删掉（未开始的），再中断正在跑的
+      void this.client?.cancelPrompt(job.promptId ?? undefined)
       job.status = 'cancelled'
       this.emit('job:updated', { job })
     }
@@ -161,7 +166,7 @@ export class JobManager {
       let useTemplate = template
       if (isUiWorkflow(template.apiJson)) {
         try {
-          const api = await convertUiToApi(template.apiJson, settings)
+          const api = await convertUiToApi(template.apiJson, settings, { keepSuperRes: params.stages?.superRes === true, stageParams: params.stageParams })
           // 转完再按本机显存降级（6GB 卡：免模型放大 + 省显存档位）。
           // 界面格式模板在导入时做不了这一步（那是 UI 数组，不是节点字典）。
           const gpu = await detectGpu()
@@ -191,7 +196,27 @@ export class JobManager {
         scheduler: params.scheduler,
         keepTemplateSampler: params.keepTemplateSampler,
         h3: params.h3,
-        upscale: params.upscale,
+        // 图片任务默认**不放大**：很多生图模板里焊死了「高清放大 2×」，
+        // 2000 宽的图会被放大到 4000+（像素翻 4 倍），6GB 卡直接卡死。
+        // 资产图不需要 4K，交给模板作者的原配置反而更慢。
+        upscale:
+          params.upscale ??
+          (template.kind === 'image'
+            ? {
+                enabled: false,
+                mode: '倍数' as const,
+                scale: 1,
+                targetWidth: 1280,
+                targetHeight: 704,
+                steps: 2,
+                denoise: 0.45,
+                audioDenoise: 0.3,
+                sampler: 'euler',
+                scheduler: 'simple',
+                tileFrames: 107,
+                overlapFrames: 22
+              }
+            : undefined),
         rife: params.rife,
         refImages: params.refImages,
         loras: params.loras
@@ -255,11 +280,22 @@ export class JobManager {
 
       // 记录本次真正提交的提示词，方便核对「注入有没有生效」
       jobLog(`job提示词 promptId=- 模板=${template.name} 前100字=${String(params.positive ?? '').slice(0, 100)}`)
+      // 提交前校正模型文件名：工作流里写的是 Krea2\xxx.safetensors，
+      // 而磁盘上可能是平铺的 xxx.safetensors —— ComfyUI 只按相对路径精确匹配，
+      // 对不上就报 value_not_in_list（看起来像"模型不在目录里"，其实在）。
+      await this.fixModelRefs(workflow)
+
       const promptId = await this.client.submit(workflow)
       info.promptId = promptId
       this.emit('job:updated', { job: info })
 
-      const outputs = await this.waitForOutput(promptId, template.kind, info, settings)
+      if (this.cancelled.has(info.id)) {
+        info.status = 'cancelled'
+        info.finishedAt = now()
+        this.emit('job:updated', { job: info })
+        return
+      }
+      const outputs = await this.waitForOutput(promptId, template.kind, info, settings, params.stages)
       jobLog(`job完成 promptId=${promptId} kind=${template.kind} 产物数=${outputs.length} 文件=${outputs.map((o) => path.basename(o.file)).join(',')}`)
       info.outputs = outputs.map((o) => ({ file: o.file, kind: o.kind }))
       // 成片登记：把这次渲染的片子认领到段落档案里，时间轴/监视器才有东西可播。
@@ -279,6 +315,14 @@ export class JobManager {
       // done 事件带上最新项目快照，前端直接用它刷新，避免重读磁盘的竞态
       this.emit('job:updated', { job: info, project: this.store.getCurrent() })
     } catch (err) {
+      // 取消导致的退出：保持 cancelled 状态，不要被改写成 failed
+      if (this.cancelled.has(info.id)) {
+        info.status = 'cancelled'
+        info.error = undefined
+        info.finishedAt = now()
+        this.emit('job:updated', { job: info })
+        return
+      }
       const project2 = this.store.getCurrent()
       const autoRetry = project2?.settings.autoRetry ?? 1
       // 超时不自动重试：视频往往只是慢/产物在 history 里，重试会重复生成浪费几小时
@@ -296,6 +340,7 @@ export class JobManager {
       }
       this.emit('job:updated', { job: info })
     } finally {
+      this.cancelled.delete(info.id)
       this.client?.close()
       this.client = null
     }
@@ -312,16 +357,63 @@ export class JobManager {
     })
   }
 
+  /** 缓存 object_info（同一进程内 5 分钟足够） */
+  private objInfoCache: { at: number; data: Record<string, { input?: Record<string, Record<string, unknown[]>> }> } | null = null
+
+  /**
+   * 模型名自动纠偏。
+   *
+   * ComfyUI 的加载器只认「相对 models 目录的精确路径」。工作流从别处拷来时，
+   * 经常出现目录层级差异（例如 `Krea2\\foo.safetensors` 对应磁盘上的 `foo.safetensors`）。
+   * 这里对每个加载器的模型字段做：找不到原名 → 按**文件名**（忽略子目录、忽略大小写）
+   * 唯一匹配则替换；匹配不唯一就不动，交给 ComfyUI 报错。
+   */
+  private async fixModelRefs(workflow: unknown): Promise<void> {
+    const client = this.client
+    if (!client || !workflow || typeof workflow !== 'object') return
+    const now = Date.now()
+    if (!this.objInfoCache || now - this.objInfoCache.at > 5 * 60 * 1000) {
+      try {
+        this.objInfoCache = { at: now, data: await client.objectInfo() }
+      } catch {
+        return
+      }
+    }
+    const info = this.objInfoCache.data
+    const FIELDS = ['unet_name', 'vae_name', 'clip_name', 'clip_name1', 'clip_name2', 'clip_name3', 'lora_name', 'ckpt_name', 'model_name']
+    for (const node of Object.values(workflow as Record<string, { class_type?: string; inputs?: Record<string, unknown> }>)) {
+      if (!node?.inputs) continue
+      const def = info[String(node.class_type)]?.input
+      if (!def) continue
+      for (const field of FIELDS) {
+        const v = node.inputs[field]
+        if (typeof v !== 'string' || !v) continue
+        const spec = (def.required?.[field] ?? def.optional?.[field]) as unknown[] | undefined
+        const allowed = Array.isArray(spec?.[0]) ? (spec[0] as string[]) : undefined
+        if (!allowed || allowed.length === 0) continue
+        if (allowed.includes(v)) continue
+        const base = v.split(/[\\/]/).pop()?.toLowerCase() ?? ''
+        const cands = allowed.filter((a) => String(a).split(/[\\/]/).pop()?.toLowerCase() === base)
+        if (cands.length === 1) {
+          node.inputs[field] = cands[0]
+          jobLog(`job模型名校正 ${node.class_type}.${field}: ${v} → ${cands[0]}`)
+        }
+      }
+    }
+  }
+
   private async waitForOutput(
     promptId: string,
     kind: 'image' | 'video',
     info: JobInfo,
-    settings: ComfySettings
+    settings: ComfySettings,
+    stagesIn?: { first: boolean; second: boolean; third: boolean; superRes: boolean }
   ): Promise<ShotOutput[]> {
     const client = this.client
     if (!client) throw new Error('ComfyUI 客户端未初始化')
     // H3/长视频在 6GB 显存上很慢；视频给 40 分钟，图片 10 分钟
-    const timeoutMs = kind === 'video' ? 40 * 60 * 1000 : 10 * 60 * 1000
+    // 图片给 20 分钟：6GB 卡上四视图/大画布本来就慢，10 分钟会把还在正常跑的活判死。
+    const timeoutMs = kind === 'video' ? 60 * 60 * 1000 : 30 * 60 * 1000
 
     return await new Promise<ShotOutput[]>((resolve, reject) => {
       let settled = false
@@ -337,15 +429,22 @@ export class JobManager {
         for (const t of timeoutHandles) clearTimeout(t)
       }
       // 收集到的所有产物（WS executed 多次事件 + history 兜底）
+      // 用户勾选的生成阶段（默认全开三采、超分关）
+      const stages = stagesIn ?? { first: true, second: true, third: true, superRes: false }
+      const targetRe = stages.third
+        ? /三采|final|_N471|3rd/i
+        : stages.second
+          ? /二采|second_?pass/i
+          : /一采|_N467|first_?pass/i
       const collected = new Map<string, MediaFile>()
       const addFiles = (files: MediaFile[]): void => {
         for (const f of files) if (f?.filename) collected.set(f.filename, f)
       }
       /** 从收集到的产物里挑最终版本：优先「三采/final」，否则最后一个 */
-      const pickFinal = (): MediaFile[] => pickFinalMedia([...collected.values()], kind)
+      const pickFinal = (): MediaFile[] => pickFinalMedia([...collected.values()], kind, stages)
       /** 是否已拿到最终清晰版（三采/final）——视频任务必须等到它 */
       const hasFinalVersion = (): boolean =>
-        kind !== 'video' || [...collected.values()].some((f) => /三采|final|_N471|3rd/i.test(f.filename))
+        kind !== 'video' || [...collected.values()].some((f) => targetRe.test(f.filename))
       /** 等待最终清晰版的兜底超时（到了就按现有产物交付，不再无限等） */
       const FINAL_WAIT_MS = 12 * 60 * 1000
       const finalDeadline = Date.now() + FINAL_WAIT_MS
@@ -436,18 +535,23 @@ export class JobManager {
         }
       }
 
-      // H3 三采工作流会依次输出 一采 → 二采 → 三采（三个独立节点，各自触发一次 WS executed）。
-      // 若收到第一个产物就交付，归档到的会是"一采"而非最终清晰版。
-      // 因此：视频任务一律等 history 显示 completed 后，再从 history 取全部输出节点，
-      //       优先归档「三采/final」；图片任务（单节点产出）仍走 WS 快速路径。
+      // 交付时机：**必须等 history 显示 completed**，不能收到第一个 executed 就交付。
+      //
+      // 原因（20261120 实测）：千问这类工作流里有多个输出节点（预览图 / 对比图 / 成品图），
+      // 第一个 executed 事件往往来自前面的预览节点 —— 那时主采样链可能还在跑。
+      // 早交付会让软件显示"已生成"，而 ComfyUI 后台继续跑完剩下的节点，
+      // 出来的还是同一张图（同一个 latent），用户看到的就是"软件已经拿到图，
+      // 后面还在生成，而且生成的是同一张"。
+      //
+      // 所以图片和视频统一走：executed 只作为"有进展"的信号去催一次 history 查询，
+      // 真正交付只发生在 history.status.completed 为真之后。
       let collectTimer: ReturnType<typeof setTimeout> | null = null
       const scheduleDeliver = (): void => {
-        if (kind === 'video') return // 视频：等 history 完成信号
         if (collectTimer) return
         collectTimer = setTimeout(() => {
           collectTimer = null
-          void deliverFiles()
-        }, 2500)
+          void pollHistory()
+        }, 1500)
         timeoutHandles.push(collectTimer)
       }
 
@@ -475,6 +579,14 @@ export class JobManager {
 
       /** 查 history：error 判失败，success/completed 时从 outputs 提产物 */
       const pollHistory = async (): Promise<boolean> => {
+        // 用户点了取消：立刻收尾，不再等产物
+        if (this.cancelled.has(info.id)) {
+          finish()
+          const e = new Error('任务已取消') as RetryableError
+          e.noRetry = true
+          reject(e)
+          return true
+        }
         if (settled) return true
         try {
           const history = await client.history(promptId)
@@ -494,6 +606,18 @@ export class JobManager {
             addFiles(collectHistoryFiles(entry.outputs))
             if (collected.size > 0) {
               await deliverFiles()
+            } else {
+              // 执行成功但一个产物都没有：通常是输出节点不可用（例如
+              // banzhangVideoCombine 依赖 ffmpeg 而 ComfyUI 里找不到），
+              // 或者工作流被改成了没有输出节点。
+              // 必须立刻报错 —— 否则任务会一直挂在"运行中"，用户看到的就是"没反应"。
+              finish()
+              reject(
+                new Error(
+                  'ComfyUI 执行完成但没有产出任何文件 —— 检查输出节点是否可用（如 banzhangVideoCombine 需要 ffmpeg）、工作流是否还有 Save/Combine 节点'
+                )
+              )
+              return true
             }
             // 视频还没拿到最终清晰版时继续轮询，等三采节点跑完
             if (kind === 'video' && !hasFinalVersion() && !finalTimeoutReached()) {
@@ -530,7 +654,15 @@ export class JobManager {
             return
           }
           finish()
-          const e = new Error(`生成超时（${Math.round(timeoutMs / 60000)} 分钟），可能仍在生成或产物未就绪，请到生成队列查看/手动重试`) as RetryableError
+          // 超时后必须把 ComfyUI 里这次的任务也停掉：
+          // 否则软件这边显示"失败"，ComfyUI 那边还在算，占着显存和队列，
+          // 下一次生成会一直排队等它 —— 表现就是"越用越慢、再也不出图"。
+          try {
+            await client.interrupt()
+          } catch {
+            // 中断失败不影响报错
+          }
+          const e = new Error(`生成超时（${Math.round(timeoutMs / 60000)} 分钟），已中断；如仍失败请降低画布/步数后重试`) as RetryableError
           e.noRetry = true
           reject(e)
         })()

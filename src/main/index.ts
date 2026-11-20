@@ -187,6 +187,8 @@ function registerIpc(): void {
   })
   ipcMain.handle(CH.projectOpen, async (_e, id: string) => {
     const project = await store.open(id)
+    // 老项目/空项目没有模板时补内置工作流（否则生成时会报「没有工作流」）
+    await seedBuiltinTemplates(project)
     // 打开工程时清一次孤儿媒体文件（没被任何资产/分镜引用的旧图）
     void cleanupOrphansNow()
     // 打开旧项目时按本机显存适配模板（修 12GB 放大模型在 6GB 卡上的 OOM）。

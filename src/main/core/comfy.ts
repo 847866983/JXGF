@@ -227,6 +227,13 @@ export class ComfyClient extends EventEmitter {
     return (await res.json()) as Record<string, unknown>
   }
 
+  /** 拉一份 /object_info（节点定义与可选模型列表），用于提交前校正模型名 */
+  async objectInfo(): Promise<Record<string, { input?: Record<string, Record<string, unknown[]>> }>> {
+    const res = await fetch(`${this.base}/object_info`, { signal: AbortSignal.timeout(20000) })
+    if (!res.ok) throw new Error(`读取节点信息失败：HTTP ${res.status}`)
+    return (await res.json()) as Record<string, { input?: Record<string, Record<string, unknown[]>> }>
+  }
+
   async connect(): Promise<void> {
     if (this.wsReady) return
     await new Promise<void>((resolve, reject) => {
@@ -328,6 +335,31 @@ export class ComfyClient extends EventEmitter {
     })
     await new Promise<void>((resolve) => ws.once('finish', resolve))
     return destPath
+  }
+
+  /**
+   * 取消一个任务：先从 ComfyUI 队列里删掉（还没开始跑的），
+   * 再对正在跑的发 interrupt（带 prompt_id，避免误伤别的同时任务）。
+   */
+  async cancelPrompt(promptId?: string): Promise<void> {
+    try {
+      await fetch(`${this.base}/queue`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ delete: promptId ? [promptId] : [] })
+      })
+    } catch {
+      /* 忽略 */
+    }
+    try {
+      await fetch(`${this.base}/interrupt`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(promptId ? { prompt_id: promptId } : {})
+      })
+    } catch {
+      /* 忽略 */
+    }
   }
 
   async interrupt(): Promise<void> {
