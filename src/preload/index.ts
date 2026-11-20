@@ -70,6 +70,8 @@ const api = {
   mediaDataUrl: (p: string): Promise<string | null> => ipcRenderer.invoke(CH.mediaDataUrl, p),
   mediaDeleteFile: (p: string): Promise<{ deleted: boolean; reason?: string }> =>
     ipcRenderer.invoke(CH.mediaDeleteFile, p),
+  mediaCleanupOrphans: (): Promise<{ removed: number; error?: string }> =>
+    ipcRenderer.invoke(CH.mediaCleanupOrphans),
 
   jobGenerate: (params: JobParams) => ipcRenderer.invoke(CH.jobGenerate, params),
   jobList: () => ipcRenderer.invoke(CH.jobList),

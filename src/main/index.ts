@@ -187,6 +187,8 @@ function registerIpc(): void {
   })
   ipcMain.handle(CH.projectOpen, async (_e, id: string) => {
     const project = await store.open(id)
+    // 打开工程时清一次孤儿媒体文件（没被任何资产/分镜引用的旧图）
+    void cleanupOrphansNow()
     // 打开旧项目时按本机显存适配模板（修 12GB 放大模型在 6GB 卡上的 OOM）。
     // 注意：先重置成作者原配再适配 —— 老项目里存的模板可能被旧版降级逻辑写坏
     // （放大倍数锁成 1、显存预设硬编码 6GB），单纯再适配一次无法恢复。
@@ -509,28 +511,124 @@ function registerIpc(): void {
     }
   })
 
-  // 删除媒体文件（物理删除），删除前检查是否仍被当前项目引用，避免误删其它资产/分镜还在用的文件
+  // 删除媒体文件（物理删除）。
+  //
+  // 为什么不能只看内存里的当前工程：渲染层刚保存完就立刻调用这里，而主进程的
+  // `store.getCurrent()` 与磁盘上的 project.json 之间存在时序/缓存差异时，
+  // 旧快照里还留着这张图 → 被判成「仍被引用」→ 静默不删，下次打开又出现。
+  // 所以这里**以磁盘上的 project.json 为准**，并且扫描全部工程；
+  // 只有确实没有任何工程引用它，才物理删除。删除失败会重试（杀毒/缩略图占用）。
   ipcMain.handle(CH.mediaDeleteFile, async (_e, p: string) => {
     try {
-      const project = store.getCurrent()
-      if (!project) return { deleted: false, reason: '没有打开的项目' }
-      const norm = path.resolve(p)
-      const isReferenced = (file: string | null | undefined): boolean => {
-        if (!file) return false
+      if (!p) return { deleted: false, reason: '没有文件路径' }
+      const abs = path.resolve(p)
+      const key = abs.toLowerCase()
+      const projectsDir = path.join(app.getPath('userData'), 'projects')
+
+      const collectRefs = (proj: Project): { cover: string[]; images: string[]; outputs: string[] } => {
+        const cover: string[] = []
+        const images: string[] = []
+        const outputs: string[] = []
+        for (const a of proj.assets ?? []) {
+          if (a.coverFile) cover.push(path.resolve(a.coverFile).toLowerCase())
+          for (const i of a.images ?? []) if (i) images.push(path.resolve(i).toLowerCase())
+          for (const v of (a as { versions?: { file?: string }[] }).versions ?? []) {
+            if (v?.file) images.push(path.resolve(v.file).toLowerCase())
+          }
+        }
+        for (const s of proj.shots ?? []) {
+          for (const o of s.outputs ?? []) if (o?.file) outputs.push(path.resolve(o.file).toLowerCase())
+          const ref = (s as { refImage?: string }).refImage
+          if (ref) images.push(path.resolve(ref).toLowerCase())
+        }
+        return { cover, images, outputs }
+      }
+
+      // 扫描所有工程（磁盘为准），确认没有别的地方还在用这个文件
+      let usedBy = ''
+      let entries: string[] = []
+      try {
+        entries = (await fsp.readdir(projectsDir, { withFileTypes: true }))
+          .filter((d) => d.isDirectory())
+          .map((d) => d.name)
+      } catch {
+        entries = []
+      }
+      for (const dir of entries) {
+        const file = path.join(projectsDir, dir, 'project.json')
         try {
-          return path.resolve(file) === norm
+          const raw = await fsp.readFile(file, 'utf8')
+          const proj = JSON.parse(raw) as Project
+          const refs = collectRefs(proj)
+          if ([...refs.cover, ...refs.images, ...refs.outputs].includes(key)) {
+            usedBy = proj.name || dir
+            break
+          }
         } catch {
-          return false
+          continue
         }
       }
-      const referenced =
-        project.assets.some((a) => a.coverFile === norm || a.images.some((i) => i === norm)) ||
-        project.shots.some((s) => s.outputs.some((o) => o.file === norm) || isReferenced(s.refImage))
-      if (referenced) return { deleted: false, reason: '该文件仍被其它资产或分镜引用' }
-      await fsp.rm(norm, { force: true })
-      return { deleted: true }
+      if (usedBy) return { deleted: false, reason: `该文件仍被「${usedBy}」使用` }
+
+      // 物理删除（重试，处理缩略图/杀毒短暂占用）
+      let lastErr = ''
+      for (let i = 0; i < 4; i++) {
+        try {
+          await fsp.rm(abs, { force: true })
+          if (!fs.existsSync(abs)) return { deleted: true }
+        } catch (err) {
+          lastErr = String((err as Error).message ?? err)
+        }
+        await new Promise((r) => setTimeout(r, 250))
+      }
+      if (!fs.existsSync(abs)) return { deleted: true }
+      return { deleted: false, reason: lastErr || '文件仍存在（可能被其它程序占用）' }
     } catch (err) {
       return { deleted: false, reason: String((err as Error).message ?? err) }
+    }
+  })
+
+  // 清理当前工程 media/ 里「没有任何引用」的孤儿文件（生成中断、改名残留等）。
+  // 只删 10 分钟以前的，避免和正在下载/写入的生成任务抢文件。
+  const cleanupOrphansNow = async (): Promise<{ removed: number }> => {
+    const project = store.getCurrent()
+    if (!project) return { removed: 0 }
+    const media = store.mediaDir()
+    const refs = new Set<string>()
+    for (const a of project.assets ?? []) {
+      if (a.coverFile) refs.add(path.resolve(a.coverFile).toLowerCase())
+      for (const i of a.images ?? []) if (i) refs.add(path.resolve(i).toLowerCase())
+      for (const v of (a as { versions?: { file?: string }[] }).versions ?? []) {
+        if (v?.file) refs.add(path.resolve(v.file).toLowerCase())
+      }
+    }
+    for (const s of project.shots ?? []) {
+      for (const o of s.outputs ?? []) if (o?.file) refs.add(path.resolve(o.file).toLowerCase())
+      const ref = (s as { refImage?: string }).refImage
+      if (ref) refs.add(path.resolve(ref).toLowerCase())
+    }
+    let removed = 0
+    let list: string[] = []
+    try { list = await fsp.readdir(media) } catch { return { removed: 0 } }
+    const cutoff = Date.now() - 10 * 60 * 1000
+    for (const name of list) {
+      const abs = path.join(media, name)
+      if (refs.has(path.resolve(abs).toLowerCase())) continue
+      try {
+        const st = await fsp.stat(abs)
+        if (!st.isFile() || st.mtimeMs > cutoff) continue
+        await fsp.rm(abs, { force: true })
+        removed += 1
+      } catch { continue }
+    }
+    return { removed }
+  }
+
+  ipcMain.handle(CH.mediaCleanupOrphans, async () => {
+    try {
+      return await cleanupOrphansNow()
+    } catch (err) {
+      return { removed: 0, error: String((err as Error).message ?? err) }
     }
   })
 

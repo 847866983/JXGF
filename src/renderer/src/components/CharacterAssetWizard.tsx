@@ -247,7 +247,8 @@ export function CharacterAssetWizard({ asset, onClose }: { asset: Asset; onClose
       if (a.coverFile === img) a.coverFile = a.images[0] ?? null
       a.updatedAt = new Date().toISOString()
     })
-    void window.api.mediaDeleteFile(img)
+    const del = await window.api.mediaDeleteFile(img)
+    if (!del.deleted) setError(`图片已从项目移除，但磁盘文件删除失败：${del.reason ?? '未知原因'}`)
     setSelected((cur) => (cur === img ? null : cur))
   }
 

@@ -26,6 +26,7 @@ export default function Assets(): React.JSX.Element {
   const project = useApp((s) => s.project)
   const [filter, setFilter] = useState<Filter>('all')
   const [formOpen, setFormOpen] = useState(false)
+  const [delMsg, setDelMsg] = useState<string | null>(null)
   const [editing, setEditing] = useState<Asset | null>(null)
   const [generating, setGenerating] = useState<Asset | null>(null)
   const [wizardAsset, setWizardAsset] = useState<Asset | null>(null)
@@ -36,6 +37,9 @@ export default function Assets(): React.JSX.Element {
     return (
       <div>
         <PageHeader title="资产管理" desc="角色 / 场景 / 道具的统一资产库，供所有剧本共享" />
+      {delMsg && (
+        <div className="mx-8 mt-3 rounded-lg bg-amber-500/10 px-3 py-2 text-xs text-amber-300">{delMsg}</div>
+      )}
         <div className="px-8 pb-8">
           <NoProject />
         </div>
@@ -142,8 +146,10 @@ export default function Assets(): React.JSX.Element {
       if (a.coverFile === img) a.coverFile = a.images[0] ?? null
       a.updatedAt = new Date().toISOString()
     })
-    // 清理磁盘文件（主进程检查是否仍被引用）
-    void window.api.mediaDeleteFile(img)
+    // 清理磁盘文件（主进程以磁盘上的 project.json 为准，扫描全部工程后删除）
+    const del = await window.api.mediaDeleteFile(img)
+    if (!del.deleted) setDelMsg(`磁盘文件未删除：${del.reason ?? '未知原因'}`)
+    else setDelMsg(null)
   }
 
   // 始终用最新项目数据里的资产（生成/改绑定后能实时反映）
