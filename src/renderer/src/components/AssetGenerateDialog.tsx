@@ -78,13 +78,12 @@ export function AssetGenerateDialog({
     setSubmitting(true)
     setError(null)
     try {
-      const style = STYLES.find((s) => s.id === styleId)
       // 有参考图时不做四视图套模板（编辑模式应当尊重用户提示词）
       const useFourView = fourView && refImages.length === 0
-      const finalPositive = useFourView ? buildFourViewPositive(positive, styleId) : styledPositive(positive, styleId)
+      const finalPositive = useFourView ? buildFourViewPositive(positive) : styledPositive(positive)
       const finalNegative = useFourView
-        ? fourViewNegative(styleId)
-        : [style?.negative, negative.trim()].filter(Boolean).join(', ') || undefined
+        ? fourViewNegative()
+        : negative.trim() || undefined
       await window.api.jobGenerate({
         projectId: project.id,
         assetId: asset.id,
@@ -136,17 +135,6 @@ export function AssetGenerateDialog({
               ))}
             </select>
           )}
-        </div>
-
-        <div>
-          <label className="label">画风风格</label>
-          <select className="field" value={styleId} onChange={(e) => setStyleId(e.target.value)}>
-            {STYLES.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.label}
-              </option>
-            ))}
-          </select>
         </div>
 
         {isCharacter && (

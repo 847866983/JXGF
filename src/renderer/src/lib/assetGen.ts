@@ -88,17 +88,34 @@ export function buildFourViewPositive(_desc?: string, _styleId?: string): string
 }
 
 /** 四视图负向提示词：结构词 + 投影压制（styleId 省略时不加画风负词） */
-export function fourViewNegative(styleId?: string): string {
-  if (!styleId) return FOUR_VIEW_STRUCT_NEG
-  const style = getStyle(styleId)
-  return `${style.negative}, ${FOUR_VIEW_STRUCT_NEG}`
+export function fourViewNegative(_styleId?: string): string {
+  // 只要结构负词（压制多角色/投影/渐变边），不掺任何画风负词
+  return FOUR_VIEW_STRUCT_NEG
 }
 
-/** 单图画风前缀（场景/道具等） */
-export function styledPositive(desc: string, styleId?: string): string {
-  const style = getStyle(styleId)
-  const d = desc.trim()
-  return d ? `${style.positive}; ${d}` : style.positive
+/**
+ * 每种画风的**短标签**（中文）。千问这类强指令模型对提示词顺序敏感：
+ * 前面塞一大段英文风格词，会把主体描述压掉，表现为「不按提示词生成」。
+ * 所以用户写了提示词时，只用短标签做个后缀，主体永远是用户那句话。
+ */
+const SHORT_STYLE: Record<string, string> = {
+  cg_real: '游戏CG写实风格，真实皮肤质感，电影级光影',
+  real_photo: '电影剧照风格，真实摄影质感',
+  cg_3d: '3D动画电影风格',
+  anime: '动漫风格，干净线稿',
+  ink_chinese: '国风水墨风格',
+  comic_marvel: '美漫风格，粗描边'
+}
+
+/**
+ * 单图正向提示词。
+ *
+ * **原样返回用户写的提示词**，不拼接任何画风词。
+ * （旧实现会在前面塞一大段英文风格描述，千问这类强指令模型会被带偏，
+ *   表现为「不按提示词生成」。）
+ */
+export function styledPositive(desc: string, _styleId?: string): string {
+  return String(desc ?? '').trim()
 }
 
 /**
@@ -137,15 +154,18 @@ const FOUR_VIEW_H = 1024
 export function buildAssetJobInput(asset: Asset, templates: Template[], styleId?: string): AssetJobInput | null {
   const template = pickAssetTemplate(templates, asset.kind)
   if (!template) return null
-  const style = getStyle(styleId)
   const desc = asset.prompt || asset.description || asset.name || ''
   const isChar = asset.kind === 'character'
   if (isChar) {
     // 角色统一用千问 Image 2.1：出四视图（<mva> 语法 + 多角度 LoRA）
+    // 顺序很关键：<mva> 触发词 → 用户描述 → 结构说明。描述写在结构说明后面
+    // 会被长段模板压掉，模型画出来就是个通用角色，不认你写的外貌。
+    const QWEN_STRUCT = QWEN_QUADVIEW_PROMPT.replace(/^<mva>\s*/, '')
+    const qwenPositive = `<mva> ${desc}\n\n${QWEN_STRUCT}`
     const isQwen = /千问|Qwen/i.test(template.name)
     return {
       templateId: template.id,
-      positive: isQwen ? `${QWEN_QUADVIEW_PROMPT}\n\nCharacter: ${desc}` : buildFourViewPositive(desc, styleId),
+      positive: isQwen ? qwenPositive : buildFourViewPositive(desc, styleId),
       negative: isQwen ? fourViewNegative() : fourViewNegative(styleId),
       width: isQwen ? 2400 : FOUR_VIEW_W,
       height: isQwen ? 1200 : FOUR_VIEW_H,
@@ -157,7 +177,7 @@ export function buildAssetJobInput(asset: Asset, templates: Template[], styleId?
   return {
     templateId: template.id,
     positive: styledPositive(desc, styleId),
-    negative: [style.negative, asset.negative].filter(Boolean).join(', ') || undefined,
+    negative: asset.negative?.trim() || undefined,
     width: 1024,
     height: 1024,
     batch: 1

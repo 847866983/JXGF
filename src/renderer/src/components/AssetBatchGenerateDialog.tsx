@@ -97,17 +97,6 @@ export function AssetBatchGenerateDialog({ onClose }: { onClose: () => void }): 
         </div>
 
         <div>
-          <label className="label">画风风格（应用到全部）</label>
-          <select className="field" value={styleId} onChange={(e) => setStyleId(e.target.value)}>
-            {STYLES.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.label}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div>
           <label className="label">包含类型</label>
           <div className="flex flex-wrap gap-2">
             {kinds3.map((k) => {

@@ -253,6 +253,8 @@ export class JobManager {
         }
       }
 
+      // 记录本次真正提交的提示词，方便核对「注入有没有生效」
+      jobLog(`job提示词 promptId=- 模板=${template.name} 前100字=${String(params.positive ?? '').slice(0, 100)}`)
       const promptId = await this.client.submit(workflow)
       info.promptId = promptId
       this.emit('job:updated', { job: info })
