@@ -220,12 +220,19 @@ export function pickKrea2EditTemplate(templates: Template[]): Template | undefin
   )
 }
 
-/** 千问文生图模板 */
+/**
+ * 千问文生图模板。
+ *
+ * 优先用专门的「文生图 / t2i」模板；没有就退回**千问 Image 2.1 全能编辑**——
+ * 那个模板（CSGlideImageCastCS）不接参考图时就是纯文生图，能力覆盖，
+ * 所以「只有全能编辑、没有单独文生图」不该被判成「缺少工作流」。
+ */
 export function pickQwenT2ITemplate(templates: Template[]): Template | undefined {
   const imgs = templates.filter((t) => t.kind === 'image')
   return (
     imgs.find((t) => /Qwen-image21-文生图|qwen_image_2_1_t2i/i.test(t.name)) ||
-    imgs.find((t) => /Qwen/i.test(t.name) && /文生图|t2i/i.test(t.name))
+    imgs.find((t) => /Qwen/i.test(t.name) && /文生图|t2i/i.test(t.name)) ||
+    pickQwenEditTemplate(imgs)
   )
 }
 
