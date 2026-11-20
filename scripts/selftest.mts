@@ -1528,5 +1528,16 @@ ok('随机种子必须真正写进采样器（否则 ComfyUI 全命中缓存，�
   assert.notEqual(a, b, '不同种子提交内容必须不同，否则 ComfyUI 会判定为同一张图全走缓存')
 })
 
+ok('千问 prompt_text 空串不能再覆盖面板提示词', () => {
+  const qwen = { prompt: '旧提示词', negative_prompt: '', canvas: { w: 512, h: 512 }, canvas_from_ref: false, ref_long: 1024, ref_cap: 1024, alias: true, rewrite: false, rewrite_system: '', rewrite_max_length: 512 }
+  const api = { '284': { class_type: 'CSGlideImageCastCS', inputs: { qwen_data: JSON.stringify(qwen), prompt_text: '' } } }
+  const tpl = { id: 't', name: '千问', kind: 'image', apiJson: api } as never
+  const want = '一个银色短发的女战士，站在雪地里'
+  const wf = buildWorkflow(tpl, { positive: want, width: 1024, height: 1024, seed: 1 }) as Record<string, { inputs: Record<string, unknown> }>
+  const q = JSON.parse(String(wf['284'].inputs.qwen_data))
+  assert.equal(q.prompt, want, 'qwen_data.prompt 必须是用户提示词')
+  assert.equal(wf['284'].inputs.prompt_text, want, 'prompt_text 不能留空串——节点会把面板提示词覆盖成空')
+})
+
 console.log(`\nselftest: ${pass} passed, ${fail} failed`)
 if (fail > 0) process.exit(1)

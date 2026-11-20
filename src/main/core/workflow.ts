@@ -111,6 +111,14 @@ function injectQwenEdit(clone: Workflow, params: WorkflowParams): void {
       data.canvas = { ...(data.canvas ?? {}), w: params.width, h: params.height }
     }
     node.inputs.qwen_data = JSON.stringify(data)
+    // 【关键】转换器会给「未连接」的可选输入补一个空字符串 ""，
+    // 而节点里是 `if prompt_text is not None: cfg["prompt"] = str(prompt_text)` ——
+    // "" 不是 None，于是面板提示词被覆盖成空串，模型收到空提示词，
+    // 表现就是「完全不理我写的提示词」。这里显式写成同一份提示词，
+    // 让「面板原文」和「外接文本」两条路都指向用户写的内容。
+    if ('prompt_text' in node.inputs) {
+      node.inputs.prompt_text = data.prompt ?? ''
+    }
   }
 }
 
