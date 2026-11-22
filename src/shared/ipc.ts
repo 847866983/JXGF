@@ -39,6 +39,7 @@ export const CH = {
   aiListModels: 'ai:list-models',
   aiCancel: 'ai:cancel',
   mediaDataUrl: 'media:data-url',
+  filmExport: 'film:export',
   mediaDeleteFile: 'media:delete-file',
   mediaCleanupOrphans: 'media:cleanup-orphans',
   jobGenerate: 'job:generate',

@@ -554,7 +554,7 @@
           "version": "7.8"
         },
         "painter_output_cache": {
-          "filename": "班长作品_陈九一的影子_N248_0001.png",
+          "filename": "作品_陈九一的影子_N248_0001.png",
           "subfolder": "",
           "type": "output",
           "abs_path": "",
@@ -564,7 +564,7 @@
             "height": 576
           }
         },
-        "detail_info_cache": "━━━━━━━━━━━━━━━━━━━━━━\n📂 文件名称 : 班长作品_陈九一的影子_N248_0001.png\n📏 物理尺寸 : 1024 x 576\n💾 文件体积 : 0.65 MB\n📄 编码格式 : PNG (图片)\n━━━━━━━━━━━━━━━━━━━━━━\n✅ 输出路径 : K:\\ComfyUI_windows_portable\\ComfyUI\\output\\班长作品_陈九一的影子_N248_0001.png\n━━━━━━━━━━━━━━━━━━━━━━",
+        "detail_info_cache": "━━━━━━━━━━━━━━━━━━━━━━\n📂 文件名称 : 作品_陈九一的影子_N248_0001.png\n📏 物理尺寸 : 1024 x 576\n💾 文件体积 : 0.65 MB\n📄 编码格式 : PNG (图片)\n━━━━━━━━━━━━━━━━━━━━━━\n✅ 输出路径 : K:\\ComfyUI_windows_portable\\ComfyUI\\output\\作品_陈九一的影子_N248_0001.png\n━━━━━━━━━━━━━━━━━━━━━━",
         "bz_et_cumulative_time": "7.1秒",
         "bz_video_only": true,
         "bz_preview_h": 420,
@@ -574,7 +574,7 @@
       "widgets_values": [
         24,
         "MP4 (H264/通用)",
-        "班长作品",
+        "作品",
         true,
         "🔇 不播放提示音",
         true,
@@ -584,7 +584,7 @@
       "widgets_values_named": {
         "⏱️ 帧率": 24,
         "📼 视频格式": "MP4 (H264/通用)",
-        "🏷️ 文件前缀": "班长作品",
+        "🏷️ 文件前缀": "作品",
         "💾 保存元数据": true,
         "🔔 提示音文件": "🔇 不播放提示音",
         "🧹 出片后自动净化": true,
@@ -755,7 +755,7 @@
           "version": "7.8"
         },
         "painter_output_cache": {
-          "filename": "班长作品_陈九一的影子_N267_0001.png",
+          "filename": "作品_陈九一的影子_N267_0001.png",
           "subfolder": "",
           "type": "output",
           "abs_path": "",
@@ -765,7 +765,7 @@
             "height": 1152
           }
         },
-        "detail_info_cache": "━━━━━━━━━━━━━━━━━━━━━━\n📂 文件名称 : 班长作品_陈九一的影子_N267_0001.png\n📏 物理尺寸 : 2048 x 1152\n💾 文件体积 : 2.24 MB\n📄 编码格式 : PNG (图片)\n━━━━━━━━━━━━━━━━━━━━━━\n✅ 输出路径 : K:\\ComfyUI_windows_portable\\ComfyUI\\output\\班长作品_陈九一的影子_N267_0001.png\n━━━━━━━━━━━━━━━━━━━━━━",
+        "detail_info_cache": "━━━━━━━━━━━━━━━━━━━━━━\n📂 文件名称 : 作品_陈九一的影子_N267_0001.png\n📏 物理尺寸 : 2048 x 1152\n💾 文件体积 : 2.24 MB\n📄 编码格式 : PNG (图片)\n━━━━━━━━━━━━━━━━━━━━━━\n✅ 输出路径 : K:\\ComfyUI_windows_portable\\ComfyUI\\output\\作品_陈九一的影子_N267_0001.png\n━━━━━━━━━━━━━━━━━━━━━━",
         "bz_et_cumulative_time": "22秒",
         "bz_video_only": true,
         "bz_preview_h": 308,
@@ -775,7 +775,7 @@
       "widgets_values": [
         24,
         "MP4 (H264/通用)",
-        "班长作品",
+        "作品",
         true,
         "🔇 不播放提示音",
         true,
@@ -785,7 +785,7 @@
       "widgets_values_named": {
         "⏱️ 帧率": 24,
         "📼 视频格式": "MP4 (H264/通用)",
-        "🏷️ 文件前缀": "班长作品",
+        "🏷️ 文件前缀": "作品",
         "💾 保存元数据": true,
         "🔔 提示音文件": "🔇 不播放提示音",
         "🧹 出片后自动净化": true,

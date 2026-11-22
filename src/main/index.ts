@@ -140,9 +140,12 @@ function registerIpc(): void {
     const project = store.getCurrent()
     const s = settings ?? project?.settings.comfy ?? { host: '127.0.0.1', port: 8188, protocol: 'http' }
     const client = makeClient(s)
-    const stats = await client.systemStats()
+    // 并行拉取，避免两次 4s 超时串行叠加拖慢状态刷新
+    const [stats, q] = await Promise.all([
+      client.systemStats(),
+      client.queueStatus()
+    ])
     if (stats.online) {
-      const q = await client.queueStatus()
       stats.queueRemaining = q.queueRemaining
       stats.queueRunning = q.queueRunning
     }
@@ -517,6 +520,29 @@ function registerIpc(): void {
       return `data:${mime};base64,${buf.toString('base64')}`
     } catch {
       return null
+    }
+  })
+
+  // 导出成片：把一个已生成的成片文件另存到用户指定位置。
+  // 时间轴「导出成片」用 —— 直接复制本地成片，不做二次编码（保留原画质）。
+  ipcMain.handle(CH.filmExport, async (_e, payload: { source: string; suggestedName: string }) => {
+    try {
+      const src = path.resolve(payload.source)
+      const stat = await fsp.stat(src).catch(() => null)
+      if (!stat || !stat.isFile()) return { ok: false, error: '成片文件不存在' }
+      const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
+      const ext = path.extname(src) || '.mp4'
+      const safe = (payload.suggestedName || '成片').replace(/[\\/:*?"<>|]/g, '_')
+      const res = await dialog.showSaveDialog(win!, {
+        title: '导出成片',
+        defaultPath: path.join(app.getPath('videos'), `${safe}${ext}`),
+        filters: [{ name: '视频', extensions: [ext.replace('.', '')] }]
+      })
+      if (res.canceled || !res.filePath) return { cancelled: true }
+      await fsp.copyFile(src, res.filePath)
+      return { ok: true, outPath: res.filePath }
+    } catch (err) {
+      return { ok: false, error: String((err as Error).message ?? err) }
     }
   })
 

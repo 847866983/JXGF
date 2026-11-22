@@ -510,7 +510,7 @@ export class JobManager {
               while (await pathExists(path.join(media, `${base}_v${i}${suffix}`))) i++
               dest = path.join(media, `${base}_v${i}${suffix}`)
             }
-            // BanZhang 节点给的是本地绝对路径(src_path)，优先直接复制；中文文件名也可靠
+            // 节点包节点给的是本地绝对路径(src_path)，优先直接复制；中文文件名也可靠
             if (f.src_path) {
               try {
                 await fsp.copyFile(f.src_path, dest)

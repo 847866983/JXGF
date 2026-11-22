@@ -12,7 +12,7 @@ import {
 import { Modal } from './Modal'
 
 /**
- * 节点级参数面板 —— 把 ComfyUI 网页端 BanZhang_* 节点的 widget 搬进软件。
+ * 节点级参数面板 —— 把 ComfyUI 网页端 节点包节点的 widget 搬进软件。
  *
  * 覆盖：稀疏注意力(SLA) / 显存优化 / SelfLift / Sigma / 预览 / 视频合成 /
  *       RTX 超分 / 显存守卫 / LoRA 多挂载 / 放大时间分块。
@@ -112,7 +112,7 @@ export default function NodeParamsPanel({ initial, loraFiles, onSave, onClose }:
 
   return (
     <Modal
-      title="节点级参数 · 班长全家桶"
+      title="节点级参数"
       size="xl"
       onClose={onClose}
       footer={
@@ -126,7 +126,7 @@ export default function NodeParamsPanel({ initial, loraFiles, onSave, onClose }:
       }
     >
       <div className="mb-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] leading-relaxed text-amber-200/90">
-        这些参数直接对应 ComfyUI 工作流里的 BanZhang_* 节点。<b>只保存你改过的项</b>——没改的字段继续跟随机显存自动适配。
+        这些参数直接对应 ComfyUI 工作流里的 节点包节点。<b>只保存你改过的项</b>——没改的字段继续跟随机显存自动适配。
         不确定含义的项保持默认即可。
       </div>
 

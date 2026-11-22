@@ -648,7 +648,7 @@ ok('产物：collectHistoryFiles 从 history 多节点 outputs 提取产物', ()
   assert.ok(files.some((f) => f.filename === 'x.png'))
 })
 ok('产物：空 outputs 不误判', () => assert.equal(collectHistoryFiles({}).length, 0))
-ok('产物：识别 BanZhang painter_output（H3 三采视频，之前一直生成中的根因）', () => {
+ok('产物：识别 节点包 painter_output（H3 三采视频，之前一直生成中的根因）', () => {
   const files = collectHistoryFiles({
     '471': { painter_output: [{ filename: '三采_N471_0003.mp4', subfolder: '', type: 'output', src_path: 'D:/comfyui/output/三采_N471_0003.mp4', metadata: { kind: 'video', width: 896, height: 480 } }] }
   })
@@ -933,7 +933,7 @@ ok('缺失降级：不存在的LoRA强度置0', () => {
   const out = degradeMissingLoras(api, tmp2) as typeof api
   assert.equal(out.a.inputs.strength_model, 0)
 })
-ok('缺失降级：BanZhang LoRA文件缺失置空', () => {
+ok('缺失降级：节点包 LoRA文件缺失置空', () => {
   const api = { a: { class_type: 'BanZhang_LoRA_VramSafe', inputs: { 'LoRA文件': 'NOT_EXIST_yyy.safetensors' } } }
   const out = degradeMissingLoras(api, tmp2) as typeof api
   assert.equal(out.a.inputs['LoRA文件'], '')
@@ -1481,7 +1481,7 @@ function rackImages(json: string): { file?: string; alias?: string[] }[] {
   return (JSON.parse(json).slots.images) as { file?: string; alias?: string[] }[]
 }
 
-/* ===== 节点级参数注入（班长全家桶 B 类节点）===== */
+/* ===== 节点级参数注入（工作流节点包 B 类节点）===== */
 
 ok('节点参数：改动的值写进对应节点，字段名逐字对齐', () => {
   const wf = {
@@ -1554,7 +1554,7 @@ ok('节点参数：withNodeParamsDefaults 补齐老工程的半截配置', () =>
   assert.equal(merged.videoCombine?.format, defaultVideoCombine.format)
 })
 
-/* ===== 文案台 / 导演台规则（照搬 ComfyUI-Banzhang-All-1101）===== */
+/* ===== 文案台 / 导演台规则（照搬 工作流节点包）===== */
 
 ok('文案台：片子级 + 本段按顺序拼接', () => {
   assert.equal(composeDeskText('冷调赛博都市', '女主推门而入'), '冷调赛博都市\n女主推门而入')

@@ -3,7 +3,7 @@ import { ChevronDown, ChevronRight, CircleCheck, Cpu, FileUp, Layers3 } from 'lu
 import { NODE_DOMAINS, STATUS_LABEL, type NodeCapabilityStatus } from '@shared/node-catalog'
 
 /**
- * 节点能力总览 —— 班长全家桶 9 大功能域的可发现性入口。
+ * 节点能力总览 —— 工作流节点包 9 大功能域的可发现性入口。
  * 每个节点标注「软件内可调 / 后端自动 / 导入模板」以及在哪一步使用，
  * 让用户按需取舍，不必打开 ComfyUI 网页端也能知道软件覆盖了什么。
  */
@@ -40,7 +40,7 @@ export function NodeCatalogPanel(): React.JSX.Element {
     <div className="panel p-5">
       <div className="mb-1 flex items-center gap-2 text-sm font-medium text-white">
         <Layers3 size={15} className="text-accent-400" />
-        节点能力总览（班长全家桶）
+        节点能力总览
       </div>
       <div className="mb-4 text-xs text-slate-500">
         节点包共 9 大功能域、约 100 个节点。下面标注每一项在镜序工坊里的覆盖方式：

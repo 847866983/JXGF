@@ -13,6 +13,7 @@ import Settings from './pages/Settings'
 export default function App(): React.JSX.Element {
   const loadHardware = useApp((s) => s.loadHardware)
   const refreshJobs = useApp((s) => s.refreshJobs)
+  const refreshComfy = useApp((s) => s.refreshComfy)
   const loadUpdate = useApp((s) => s.loadUpdate)
   const openProject = useApp((s) => s.openProject)
 
@@ -26,6 +27,25 @@ export default function App(): React.JSX.Element {
       const last = localStorage.getItem('jxgf:lastProject')
       if (last) void openProject(last).catch(() => undefined)
     }
+
+    // ComfyUI 运行信息：全局单一轮询源（Sidebar / Dashboard / Settings 不再各自起定时器）
+    // 用递归 setTimeout 而非 setInterval：保证上一轮结束后才排下一轮，请求永不堆积；
+    // 页面隐藏时暂停，回到前台立刻刷新。有生成任务在跑时加快到 1.5s。
+    let pollTimer: ReturnType<typeof setTimeout> | undefined
+    let pollStopped = false
+    const pollComfy = async (): Promise<void> => {
+      if (pollStopped) return
+      if (!document.hidden) await refreshComfy()
+      if (pollStopped) return
+      const jobs = useApp.getState().jobs
+      const busy = jobs.some((j) => j.status === 'running' || j.status === 'queued')
+      pollTimer = setTimeout(() => void pollComfy(), busy ? 1500 : 3000)
+    }
+    void pollComfy()
+    const onVisible = (): void => {
+      if (!document.hidden) void refreshComfy()
+    }
+    document.addEventListener('visibilitychange', onVisible)
 
     const off = window.api.onEvent((event) => {
       if (event.type === 'job:updated' || event.type === 'job:progress') {
@@ -45,8 +65,13 @@ export default function App(): React.JSX.Element {
         useApp.setState({ update: event.info })
       }
     })
-    return off
-  }, [loadHardware, refreshJobs, loadUpdate, openProject])
+    return () => {
+      pollStopped = true
+      if (pollTimer) clearTimeout(pollTimer)
+      document.removeEventListener('visibilitychange', onVisible)
+      off()
+    }
+  }, [loadHardware, refreshJobs, refreshComfy, loadUpdate, openProject])
 
   const location = useLocation()
   if (location.pathname === '/') return <Navigate to="/dashboard" replace />

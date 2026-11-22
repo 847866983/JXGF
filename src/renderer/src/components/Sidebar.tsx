@@ -27,18 +27,12 @@ const items = [
 export function Sidebar(): React.JSX.Element {
   const project = useApp((s) => s.project)
   const comfy = useApp((s) => s.comfy)
-  const refreshComfy = useApp((s) => s.refreshComfy)
   const listProjects = useApp((s) => s.listProjects)
   const openProject = useApp((s) => s.openProject)
 
   const [projects, setProjects] = useState<ProjectSummary[]>([])
 
-  // 每 5 秒刷新一次 ComfyUI 运行信息
-  useEffect(() => {
-    void refreshComfy()
-    const timer = setInterval(() => void refreshComfy(), 5000)
-    return () => clearInterval(timer)
-  }, [refreshComfy])
+  // ComfyUI 状态改为 App 根组件统一轮询（单一数据源），这里不再各自起定时器
 
   // 加载项目列表（用于切换）
   useEffect(() => {
@@ -123,7 +117,7 @@ export function Sidebar(): React.JSX.Element {
               {comfy.gpu?.name && (
                 <div className="flex justify-between">
                   <span>显卡</span>
-                  <span className="max-w-[120px] truncate text-slate-300">{comfy.gpu.name}</span>
+                  <span className="max-w-[120px] truncate text-slate-300" title={comfy.gpu.name}>{comfy.gpu.name}</span>
                 </div>
               )}
               <div className="flex justify-between">

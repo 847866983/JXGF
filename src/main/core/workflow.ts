@@ -33,7 +33,7 @@ export interface WorkflowParams {
   refImages?: string[]
   /** 需要挂载的 LoRA（如千问多角度四视图） */
   loras?: { file: string; strength: number }[]
-  /** 班长全家桶节点级参数（SLA/显存/Sigma/预览/视频合成/RTX/LoRA 等） */
+  /** 工作流节点包节点级参数（SLA/显存/Sigma/预览/视频合成/RTX/LoRA 等） */
   nodeParams?: NodeParams
   /** 文案台快捷短语（写进 desk_data.presets 作网页端 state 镜像） */
   presets?: string[]
@@ -387,7 +387,7 @@ function writeCastSlots(
 /**
  * 在提示词里补上参考素材的 @ 引用标签。
  *
- * H3 的绑定机制（见 Banzhang csglide_cast.py）：
+ * H3 的绑定机制（见 csglide_cast.py）：
  *   提示词里写 @图片1 / @视频1 / @音频1，节点会转写成 <Picture 1> / <Video 1> / <Audio 1>，
  *   并按实际填充的槽位重新编号。**提示词里没有 @ 引用，模型就完全不会用参考图。**
  *
@@ -619,7 +619,7 @@ export function buildWorkflow(template: Template, params: WorkflowParams): unkno
     }
   }
 
-  // 班长全家桶节点级参数（SLA/显存/Sigma/预览/视频合成/RTX/LoRA 多挂载）。
+  // 工作流节点包节点级参数（SLA/显存/Sigma/预览/视频合成/RTX/LoRA 多挂载）。
   // 探测式注入：只写与出厂默认不同的值，避免覆盖 template-adapt 的显存自动适配。
   // 放在 LoRA 单挂载之后，让「LoRA配置」多挂载面板覆盖单个兜底字段。
   if (params.nodeParams) applyNodeParams(clone, params.nodeParams)
@@ -808,7 +808,7 @@ export function extractH3Chain(workflow: unknown): { name: string; shot: string 
   return null
 }
 
-/** 从工作流里读出各 BanZhang 节点的当前参数（节点级参数面板回填用） */
+/** 从工作流里读出各 节点包节点的当前参数（节点级参数面板回填用） */
 export function readWorkflowNodeParams(workflow: unknown): Partial<NodeParams> {
   return readNodeParams(workflow)
 }

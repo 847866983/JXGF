@@ -38,8 +38,8 @@ export interface Script {
   createdAt: string
 }
 
-// ---------- 班长全家桶：节点级参数（B 类）----------
-// 这些参数直接映射到工作流里 BanZhang_* 节点的 widget 字段。
+// ---------- 工作流节点包：节点级参数（B 类）----------
+// 这些参数直接映射到工作流里 节点包节点的 widget 字段。
 // 字段名与 ComfyUI 节点 INPUT_TYPES 逐字对齐（见注入层 applyNodeParams）。
 // 按「全片一份」挂在 Episode 上：SLA / 显存 / Sigma / 预览 / 视频合成 / RTX
 // 都是工作流级设置，不属于某一段。
@@ -160,7 +160,7 @@ export interface LoraSlot {
   note?: string
 }
 
-/** 全片级的 BanZhang 节点参数集合 */
+/** 全片级的 节点包节点参数集合 */
 export interface NodeParams {
   sla?: SlaParams
   memOpt?: MemOptimizerParams
@@ -198,7 +198,9 @@ export interface Episode {
   stageParams?: Partial<Record<'first' | 'second' | 'third' | 'superRes', { steps?: number; cfg?: number; sampler?: string; scheduler?: string; denoise?: number }>>
   /** 文案台 presets 快捷短语（点一下追加到当前段提示词） */
   presets?: string[]
-  /** 班长全家桶节点级参数（全片一份） */
+  /** 时间轴「推送整片」：把已生成的整片作为视频参考传给后续段 */
+  wholeFilmAsRef?: boolean
+  /** 工作流节点包节点级参数（全片一份） */
   nodeParams?: NodeParams
 }
 
@@ -508,7 +510,7 @@ export interface JobParams {
   loras?: { file: string; strength: number }[]
   /** 参考视频（本段生成方式=视频参考时，传上一段成片） */
   refVideos?: string[]
-  /** 班长全家桶节点级参数（SLA/显存/Sigma/预览/视频合成/RTX/LoRA 等） */
+  /** 工作流节点包节点级参数（SLA/显存/Sigma/预览/视频合成/RTX/LoRA 等） */
   nodeParams?: NodeParams
   /** 文案台快捷短语 */
   presets?: string[]

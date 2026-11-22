@@ -10,6 +10,27 @@ import type {
   UpdateInfo
 } from '@shared/types'
 
+/** comfyStatus 在途标记（模块级单例，防止并发重复请求） */
+let comfyInFlight = false
+
+/** 比较两次状态的关键字段是否一致，避免无意义重渲染 */
+function comfyStatsEqual(a: ComfySystemStats | null, b: ComfySystemStats | null): boolean {
+  if (a === b) return true
+  if (!a || !b) return false
+  return (
+    a.online === b.online &&
+    a.version === b.version &&
+    a.cpuAvailable === b.cpuAvailable &&
+    a.queueRunning === b.queueRunning &&
+    a.queueRemaining === b.queueRemaining &&
+    a.gpu?.name === b.gpu?.name &&
+    a.gpu?.vramTotal === b.gpu?.vramTotal &&
+    a.gpu?.vramFree === b.gpu?.vramFree &&
+    a.ram?.total === b.ram?.total &&
+    a.ram?.free === b.ram?.free
+  )
+}
+
 interface AppState {
   hardware: HardwareReport | null
   comfy: ComfySystemStats | null
@@ -48,9 +69,18 @@ export const useApp = create<AppState>((set, get) => ({
   },
 
   refreshComfy: async (settings) => {
-    const s = settings ?? get().project?.settings.comfy
-    const comfy = await window.api.comfyStatus(s)
-    set({ comfy })
+    // 并发去重：同一时刻只允许一个 comfyStatus 在飞，避免多处轮询错开时请求堆积
+    if (comfyInFlight) return
+    comfyInFlight = true
+    try {
+      const s = settings ?? get().project?.settings.comfy
+      const comfy = await window.api.comfyStatus(s)
+      // 值没变就不 set —— 否则每轮都新建对象，触发所有订阅组件重渲染（卡顿主因）
+      const prev = get().comfy
+      if (!comfyStatsEqual(prev, comfy)) set({ comfy })
+    } finally {
+      comfyInFlight = false
+    }
   },
 
   testComfy: async (settings) => window.api.comfyTest(settings ?? get().project?.settings.comfy),

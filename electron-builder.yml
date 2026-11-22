@@ -23,7 +23,7 @@ extraResources:
     to: tools
     filter:
       - '**/*'
-  # 内置 BanZhang 自定义节点包，安装 ComfyUI 后自动解压到 custom_nodes
+  # 内置 工作流自定义节点包，安装 ComfyUI 后自动解压到 custom_nodes
   - from: resources/comfy-nodes
     to: comfy-nodes
     filter:

@@ -61,8 +61,7 @@ export default function Dashboard(): React.JSX.Element {
     void loadHardware()
     void refreshComfy()
     loadProjects()
-    const t = setInterval(() => void refreshComfy(), 6000)
-    return () => clearInterval(t)
+    // ComfyUI 状态改为 App 根组件统一轮询（单一数据源），这里不再各自起定时器
   }, [loadHardware, refreshComfy])
 
   const gpu = hardware?.gpu

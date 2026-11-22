@@ -1,5 +1,5 @@
 /**
- * 班长全家桶 B 类节点参数注入。
+ * 工作流节点包 B 类节点参数注入。
  *
  * 把 Episode.nodeParams（用户在「节点级参数」面板里配的值）写进 API 工作流，
  * 按 class_type **探测式**定位节点，不写死节点 ID —— 换模板/改连线照样生效。
@@ -9,7 +9,7 @@
  *   · 用户改过的字段 → 写入 → 手动值覆盖自动适配。
  * 每次生成都从干净的模板 clone 开始，所以「把值改回默认」也能正确恢复。
  *
- * 字段名逐字对齐 ComfyUI-Banzhang-All-1101 的 INPUT_TYPES（见 shared/node-params.ts 注释）。
+ * 字段名逐字对齐 工作流节点包 的 INPUT_TYPES（见 shared/node-params.ts 注释）。
  */
 import type { NodeParams } from '@shared/types'
 import {

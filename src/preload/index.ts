@@ -71,6 +71,8 @@ const api = {
     ipcRenderer.invoke(CH.aiListModels, providerId),
 
   mediaDataUrl: (p: string): Promise<string | null> => ipcRenderer.invoke(CH.mediaDataUrl, p),
+  filmExport: (source: string, suggestedName: string): Promise<{ cancelled?: boolean; ok?: boolean; outPath?: string; error?: string }> =>
+    ipcRenderer.invoke(CH.filmExport, { source, suggestedName }),
   mediaDeleteFile: (p: string): Promise<{ deleted: boolean; reason?: string }> =>
     ipcRenderer.invoke(CH.mediaDeleteFile, p),
   mediaCleanupOrphans: (): Promise<{ removed: number; error?: string }> =>

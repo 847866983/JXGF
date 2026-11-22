@@ -3,17 +3,17 @@ import path from 'node:path'
 import type { GpuInfo } from '@shared/types'
 
 /**
- * 按本机显存自动适配工作流模板（H3 三采的 BanZhang 放大 / 稀疏注意力 / 显存守卫）。
+ * 按本机显存自动适配工作流模板（H3 三采的 节点包放大 / 稀疏注意力 / 显存守卫）。
  *
  * 背景：H3 模板按 12GB 显存配置。放大节点加载真实放大模型
  *   minimax_h3_latent_upscaler_3d_bf16.safetensors（约 659MB）在低显存卡上会 OOM。
  *
- * 显存预设档位来自 BanZhang 节点定义（banzhang_mmh3_upscale.py 的 _VRAM_PRESETS）：
+ * 显存预设档位来自 节点包定义（banzhang_mmh3_upscale.py 的 _VRAM_PRESETS）：
  *   4 GB / 6 GB / 8 GB / 12 GB / 16 GB / 24 GB
  * 这里按启动时检测到的实际显存**动态选最接近的档位**，而不是硬编码 6GB。
  */
 
-/** BanZhang 放大节点支持的显存预设档位（与节点 _VRAM_PRESETS 一致） */
+/** 节点包放大节点支持的显存预设档位（与节点 _VRAM_PRESETS 一致） */
 const VRAM_PRESET_TIERS = [4, 6, 8, 12, 16, 24] as const
 
 /** 免模型的最近邻放大（不加载任何模型，几乎不吃显存） */

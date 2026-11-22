@@ -1,4 +1,4 @@
-// 端到端验证：用项目里的 BanZhang 模板 + buildWorkflow 跑真实 H3 出片
+// 端到端验证：用项目里的 节点包模板 + buildWorkflow 跑真实 H3 出片
 import fsp from 'node:fs/promises'
 import { ComfyClient } from '../src/main/core/comfy.ts'
 import { buildWorkflow, extractH3Chain } from '../src/main/core/workflow.ts'
@@ -47,4 +47,4 @@ const output = await outPromise
 const videos = (output.videos ?? [])
 console.log('输出视频:', videos.map((v) => v.filename).join(', ') || '(无视频)')
 client.close()
-console.log('BanZhang E2E 完成')
+console.log('工作流节点包 E2E 完成')

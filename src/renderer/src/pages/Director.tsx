@@ -7,11 +7,8 @@ import { useApp } from '../store/app'
 import { EmptyState, PageHeader } from '../components/ui'
 import { NoProject } from '../components/NoProject'
 import { ShotStatusBadge } from '../components/badges'
-import { MediaImage } from '../components/MediaImage'
-import { VideoThumb } from '../components/VideoThumb'
 import { Modal } from '../components/Modal'
 import { persistProject } from '../components/mutate'
-import FilmMonitor from '../components/FilmMonitor'
 import DirectorStage from '../components/DirectorStage'
 import { GenerationInfoPanel } from '../components/GenerationInfoPanel'
 import { readStageDefaults } from '../lib/stageDefaults'
@@ -38,7 +35,7 @@ function computeShots(p: { episodes: { id: string; index: number }[]; scenes: { 
     })
 }
 
-/** 导演台默认模板：优先用户所选；否则优先 H3/MiniMax/BanZhang 视频模板；再退其它视频/首个 */
+/** 导演台默认模板：优先用户所选；否则优先 H3/MiniMax/节点包视频模板；再退其它视频/首个 */
 function pickDirectorTemplate(templates: Template[], id: string): Template | null {
   return (
     templates.find((t) => t.id === id) ??
@@ -106,8 +103,6 @@ export default function Director(): React.JSX.Element {
   const [globalOpen, setGlobalOpen] = useState(false)
   /** 右栏分页：文案 / 段参数 / 剧本 */
   const [rightTab, setRightTab] = useState<'prompt' | 'params' | 'meta'>('prompt')
-  /** 成片时间轴刷新计数（生成完成后 +1） */
-  const [filmRefresh, setFilmRefresh] = useState(0)
   /** 文案台「AI 改写」进行中 */
   const [rewriting, setRewriting] = useState(false)
   /** 分镜剧本信息区是否展开 */
@@ -334,11 +329,21 @@ export default function Director(): React.JSX.Element {
     }
     let refVideos: string[] = []
     if (s.genMode === 'video') {
-      const prev = liveShots[index - 1]
-      const prevVideos = (prev?.outputs ?? [])
-        .filter((o) => o.kind === 'video' && o.kept !== false)
-        .map((o) => o.file)
-      if (prevVideos.length > 0) refVideos = [prevVideos[prevVideos.length - 1]]
+      const liveEp = liveProject.episodes.find((e) => e.id === selectedEpisode.id)
+      if (liveEp?.wholeFilmAsRef) {
+        // 「推送整片」开启：把时间轴上所有已生成段按顺序作为参考视频（最多取前若干段，避免超出槽位）
+        const filmFiles = liveShots.flatMap((sh) =>
+          (sh.outputs ?? []).filter((o) => o.kind === 'video' && o.kept !== false).map((o) => o.file)
+        )
+        refVideos = filmFiles.slice(0, 8)
+      }
+      if (refVideos.length === 0) {
+        const prev = liveShots[index - 1]
+        const prevVideos = (prev?.outputs ?? [])
+          .filter((o) => o.kind === 'video' && o.kept !== false)
+          .map((o) => o.file)
+        if (prevVideos.length > 0) refVideos = [prevVideos[prevVideos.length - 1]]
+      }
     }
     // 角色位置/动作拼进提示词
     const notes = shot.characterNotes ?? {}
@@ -472,7 +477,6 @@ export default function Director(): React.JSX.Element {
         if (s.outputs.length > 0) continue
         await submitJob(s, i)
         const result = await waitJobDone(s.id)
-        if (result === 'done') setFilmRefresh((v) => v + 1)
         if (result === 'failed') {
           // 失败后停止连续生成，让用户去队列看原因，避免后续段空跑
           break
@@ -494,9 +498,87 @@ export default function Director(): React.JSX.Element {
     })
   }
 
+  /* ============ 时间轴（全片总览）工具栏/段操作 ============ */
+
+  /** 改任意一段的段参数（时间轴的保留头尾、取消接续用） */
+  const patchSegmentById = async (shotId: string, patch: Partial<SegmentSettings>): Promise<void> => {
+    const live = useApp.getState().project
+    const sh = live?.shots.find((x) => x.id === shotId)
+    if (!sh) return
+    await saveSegment(shotId, { ...segOf(sh), ...patch })
+  }
+
+  /** 接一段：往当前剧集末尾追加一个新分镜，并选中它 */
+  const appendShot = async (): Promise<void> => {
+    let newId = ''
+    await persistProject((draft) => {
+      // 取该剧集下的场景；没有就先建一个
+      let scene = draft.scenes
+        .filter((sc) => sc.episodeId === selectedEpisode.id)
+        .sort((a, b) => a.index - b.index)[0]
+      if (!scene) {
+        scene = {
+          id: crypto.randomUUID(), episodeId: selectedEpisode.id,
+          index: 1, title: '场景 1', location: '', time: '', summary: ''
+        }
+        draft.scenes.push(scene)
+      }
+      const siblings = draft.shots.filter((s) => s.sceneId === scene!.id)
+      const index = siblings.length ? Math.max(...siblings.map((s) => s.index)) + 1 : 1
+      const now = new Date().toISOString()
+      const shot: Shot = {
+        id: crypto.randomUUID(), sceneId: scene.id, index,
+        title: `分镜 ${index}`, description: '', dialogue: '', camera: '', duration: 5,
+        prompt: '', characterIds: [], assetIds: [], refImage: null,
+        status: 'draft', outputs: [], createdAt: now, updatedAt: now
+      }
+      draft.shots.push(shot)
+      newId = shot.id
+    })
+    if (newId) {
+      setSelectedShotId(newId)
+      setNotice('已接一段 —— 在右侧写好提示词后点「生成本段」')
+      window.setTimeout(() => setNotice(null), 4000)
+    }
+  }
+
+  /** 导出成片：把某段的成片另存到本地 */
+  const exportFilm = async (file: string, name: string): Promise<void> => {
+    try {
+      const r = await window.api.filmExport(file, `镜序工坊_${project.name}_${name}`)
+      if (r.cancelled) return
+      if (r.ok) {
+        setNotice(`成片已导出：${r.outPath}`)
+        window.setTimeout(() => setNotice(null), 6000)
+      } else if (r.error) {
+        setError(`导出失败：${r.error}`)
+      }
+    } catch (err) {
+      setError(`导出失败：${String((err as Error).message ?? err)}`)
+    }
+  }
+
+  /** 推送整片：把已拼接整片登记为剧集级视频参考，供后续段使用 */
+  const pushWhole = async (): Promise<void> => {
+    const live = useApp.getState().project
+    const liveShots = live ? computeShots(live, selectedEpisode.id) : shots
+    const hasFilm = liveShots.some((s) => s.outputs.some((o) => o.kind === 'video' && o.kept !== false))
+    if (!hasFilm) {
+      setNotice('还没有可推送的成片 —— 先生成至少一段')
+      window.setTimeout(() => setNotice(null), 4000)
+      return
+    }
+    await persistProject((draft) => {
+      const ep = draft.episodes.find((e) => e.id === selectedEpisode.id)
+      if (ep) ep.wholeFilmAsRef = true
+    })
+    setNotice('已把拼接整片设为视频参考（后续段生成时会带上整片）')
+    window.setTimeout(() => setNotice(null), 5000)
+  }
+
   /**
    * 文案台「立即改写」：把本段提示词喂给已配置的 AI，按 H3 官方六段规范重写。
-   * 照搬节点包的 REWRITE_SYSTEM_OFFICIAL（精简版）：六段固定顺序、@标签逐字保留。
+   * 对齐工作流节点包的 REWRITE_SYSTEM_OFFICIAL（精简版）：六段固定顺序、@标签逐字保留。
    * 改写只改**文字**，不动任何画布/采样参数。
    */
   const rewritePrompt = async (shot: Shot): Promise<void> => {
@@ -817,6 +899,18 @@ export default function Director(): React.JSX.Element {
             setPromptDraft((d) => ({ ...d, [curShot.id]: next }))
             setPromptDirty(true)
           }}
+          onAppendShot={() => void appendShot()}
+          onExportFilm={(file, name) => void exportFilm(file, name)}
+          onPushWhole={() => void pushWhole()}
+          onOpenProjects={() => navigate('/')}
+          onPatchSegment={(shotId, patch) => void patchSegmentById(shotId, patch)}
+          onKeepTake={(shotId, outputId) => void keepOutput(shotId, outputId)}
+          takes={(curShot?.outputs ?? []).map((o, i) => ({
+            id: o.id,
+            label: `v${i + 1}`,
+            file: o.file,
+            kept: o.kept !== false
+          }))}
         />
       </div>
       {paramsShotId && (() => {

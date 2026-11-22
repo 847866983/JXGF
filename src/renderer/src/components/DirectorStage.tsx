@@ -1,12 +1,11 @@
 import { useEffect, useState } from 'react'
 import {
-  Check, ChevronLeft, ChevronRight, Clapperboard, Eye, Film, Link2,
+  ChevronLeft, ChevronRight, Eye, Film, Link2,
   PenLine, Play, Settings2, Wand2
 } from 'lucide-react'
 import type { SegmentSettings, Shot } from '@shared/types'
 import { alignFrames, framesFor } from '../lib/segment'
-import { MediaImage } from '../components/MediaImage'
-import { VideoThumb } from '../components/VideoThumb'
+import LocalFilm, { type LocalClip, type LocalTake } from './LocalFilm'
 import DeskPanel from './DeskPanel'
 import { RefBindingPanel, type RefPick, type RefAssetOption } from './RefBindingPanel'
 
@@ -56,14 +55,15 @@ export interface DirectorStageProps {
   onBindRef: (name: string) => void
   onUnbindRef: (name: string, tag: string) => void
   submitting: boolean
-}
-
-function outputOf(shot: Shot | null): { file: string; kind: string } | null {
-  if (!shot || shot.outputs.length === 0) return null
-  const kept = shot.outputs.find((o) => o.kept !== false)
-  const last = shot.outputs[shot.outputs.length - 1]
-  const pick = kept ?? last
-  return pick ? { file: pick.file, kind: pick.kind } : null
+  /** 时间轴工具栏 */
+  onAppendShot: () => void
+  onExportFilm: (file: string, name: string) => void
+  onPushWhole: () => void
+  onOpenProjects: () => void
+  onPatchSegment: (shotId: string, patch: Partial<SegmentSettings>) => void
+  onKeepTake: (shotId: string, outputId: string) => void
+  /** 当前段的产物版本（历史面板） */
+  takes: LocalTake[]
 }
 
 const fieldCls =
@@ -127,13 +127,30 @@ function Row({
   )
 }
 
-const SIZE_PRESETS: Record<string, [number, number][]> = {
-  '16:9': [[576, 320], [768, 432], [960, 544], [1280, 720]],
-  '9:16': [[320, 576], [432, 768], [544, 960], [720, 1280]],
-  '1:1': [[512, 512], [768, 768]],
-  '4:3': [[512, 384], [768, 576]],
-  '3:4': [[384, 512], [576, 768]],
-  '21:9': [[768, 320], [1024, 432]]
+/** 画布尺寸预设：[宽, 高, 标注]。对齐节点包 H3 导演台的档位列表。 */
+type SizePreset = [number, number, string?]
+const SIZE_PRESETS: Record<string, SizePreset[]> = {
+  '16:9': [
+    [1344, 768, '本地'],
+    [1248, 704],
+    [1120, 640],
+    [1024, 576],
+    [896, 512],
+    [800, 448],
+    [768, 448, '700阶段'],
+    [672, 384],
+    [608, 352, '草案'],
+    [576, 320, '草案']
+  ],
+  '9:16': [
+    [768, 1344, '本地'], [704, 1248], [640, 1120], [576, 1024],
+    [512, 896], [448, 800], [448, 768, '700阶段'], [384, 672],
+    [352, 608, '草案'], [320, 576, '草案']
+  ],
+  '1:1': [[768, 768, '本地'], [704, 704], [640, 640], [576, 576], [512, 512, '草案'], [448, 448, '草案']],
+  '4:3': [[1024, 768, '本地'], [896, 672], [768, 576], [640, 480], [512, 384, '草案']],
+  '3:4': [[768, 1024, '本地'], [672, 896], [576, 768], [480, 640], [384, 512, '草案']],
+  '21:9': [[1344, 576, '本地'], [1120, 480], [896, 384], [768, 320, '草案']]
 }
 
 /** 「规格」tab：参考图的密集参数表，字段与 SegmentSettings 一一对应 */
@@ -173,18 +190,21 @@ function SpecPanel({
           {Object.keys(SIZE_PRESETS).map((r) => <option key={r} value={r}>{r}</option>)}
         </select>
         <select
-          className={`${fieldCls} w-[92px]`}
+          className={`${fieldCls} w-[124px]`}
           value={`${seg.width}x${seg.height}`}
+          title="画面尺寸预设（本地 / 700阶段 / 草案 为 H3 档位标注）"
           onChange={(e) => {
             const [w, h] = e.target.value.split('x').map(Number)
             patch({ width: w, height: h })
           }}
         >
-          {(SIZE_PRESETS[seg.ratio] ?? []).map(([w, h]) => (
-            <option key={`${w}x${h}`} value={`${w}x${h}`}>{w} x {h}</option>
+          {(SIZE_PRESETS[seg.ratio] ?? []).map(([w, h, tag]) => (
+            <option key={`${w}x${h}`} value={`${w}x${h}`}>
+              {w} x {h}{tag ? ` · ${tag}` : ''}
+            </option>
           ))}
           {!SIZE_PRESETS[seg.ratio]?.some(([w, h]) => w === seg.width && h === seg.height) && (
-            <option value={`${seg.width}x${seg.height}`}>{seg.width} x {seg.height}</option>
+            <option value={`${seg.width}x${seg.height}`}>{seg.width} x {seg.height} · 自定义</option>
           )}
         </select>
         <NumCell value={seg.width} onCommit={(w) => patch({ width: w })} className="w-14" min={64} />
@@ -386,14 +406,48 @@ export default function DirectorStage(props: DirectorStageProps): React.JSX.Elem
   }, [prompt])
 
   const curIndex = curShot ? shots.indexOf(curShot) : -1
-  const out = outputOf(curShot)
   const prev = curIndex > 0 ? shots[curIndex - 1] : null
   const next = curIndex >= 0 && curIndex < shots.length - 1 ? shots[curIndex + 1] : null
   const pick = (shot: Shot | null): void => {
     if (shot) props.onSelect(shot.id)
   }
 
+  /** 从每段已生成的 outputs 里挑出当前成片，交给本地整片组件 */
+  const localClips: LocalClip[] = shots.map((s, i) => {
+    const outs = s.outputs ?? []
+    const kept = outs.find((o) => o.kept !== false)
+    const chosen = kept ?? outs[outs.length - 1]
+    const seg = s.segment
+    return {
+      shotId: s.id,
+      index: i + 1,
+      file: chosen?.file ?? null,
+      kind: chosen?.kind === 'image' ? 'image' : 'video',
+      frames: seg?.frames ?? 100,
+      durationSec: seg?.durationSec ?? 5,
+      contMode: seg?.contMode ?? 'none',
+      pinHead: seg?.pinHead ?? 0,
+      pinTail: seg?.pinTail ?? 0
+    }
+  })
+  const localFps = curSeg?.fps ?? 24
+
   return (
+    <LocalFilm
+      clips={localClips}
+      fps={localFps}
+      activeShotId={curShot?.id}
+      takes={props.takes}
+      onSelectShot={(shotId) => props.onSelect(shotId)}
+      onAppendShot={props.onAppendShot}
+      onExportFilm={props.onExportFilm}
+      onPushWhole={props.onPushWhole}
+      onOpenProjects={props.onOpenProjects}
+      onPatchPin={(shotId, field, value) => props.onPatchSegment(shotId, { [field]: value })}
+      onCancelContinue={(shotId) => props.onPatchSegment(shotId, { contMode: 'none' })}
+      onKeepTake={(takeId) => curShot && props.onKeepTake(curShot.id, takeId)}
+      viewerClassName="h-[300px]"
+      render={({ viewer, timeline }) => (
     <div className="flex flex-col gap-3">
       {/* ============ 顶栏：成片监视器 / 工程 / 段数 / 全局操作 ============ */}
       <div className="panel flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2">
@@ -429,44 +483,28 @@ export default function DirectorStage(props: DirectorStageProps): React.JSX.Elem
 
       {/* ============ 主体：左监视器 / 右参数面板 ============ */}
       <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.06fr)] gap-3">
-        {/* 左：成片监视器 */}
+        {/* 左：整片监视器（上方大窗口播放拼接后的整片，时间轴在下方） */}
         <section className="panel flex flex-col overflow-hidden">
           <div className="flex items-center gap-2 border-b border-white/5 px-3 py-2">
             <Eye size={13} className="text-accent-400" />
-            <span className="text-[11px] font-medium text-slate-300">预览</span>
+            <span className="text-[11px] font-medium text-slate-300">整片预览</span>
             <span className="rounded bg-white/[0.05] px-1.5 py-0.5 text-[10px] text-slate-400">
-              第 {curIndex + 1} 段
+              正在编辑第 {curIndex + 1} 段
             </span>
             <div className="ml-auto flex items-center gap-0.5">
               <button className="rounded p-0.5 text-slate-500 hover:text-slate-200 disabled:opacity-25" disabled={!prev} onClick={() => pick(prev)} title="上一段"><ChevronLeft size={14} /></button>
               <button className="rounded p-0.5 text-slate-500 hover:text-slate-200 disabled:opacity-25" disabled={!next} onClick={() => pick(next)} title="下一段"><ChevronRight size={14} /></button>
             </div>
           </div>
-          <div className="relative flex-1 bg-black" style={{ minHeight: 400 }}>
-            {out ? (
-              out.kind === 'video' ? (
-                <VideoThumb src={out.file} className="h-full w-full object-contain" />
-              ) : (
-                <MediaImage src={out.file} alt="" className="h-full w-full object-contain" fallback={<div className="h-full w-full" />} />
-              )
-            ) : (
-              <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
-                <span className="flex h-11 w-11 items-center justify-center rounded-full border border-white/10 bg-white/[0.03]">
-                  <Play size={16} className="ml-0.5 text-slate-600" />
-                </span>
-                <span className="text-xs text-slate-400">这一段还没有成片</span>
-                <span className="max-w-[240px] text-[10px] leading-relaxed text-slate-600">
-                  在右侧写好提示词、绑好参考图，点下方「生成本段」试试效果
-                </span>
-              </div>
-            )}
+          <div className="relative flex-1 bg-black p-1.5">
+            {viewer}
             {props.submitting && (
               <div className="absolute inset-0 flex items-center justify-center bg-black/60 text-xs text-accent-200">正在生成…</div>
             )}
           </div>
           <div className="border-t border-white/5 p-2.5">
             <button className="btn-primary w-full" disabled={!curShot || props.submitting} onClick={props.onGenerateOne}>
-              <Wand2 size={13} /> {props.submitting ? '提交中…' : '生成本段'}
+              <Wand2 size={13} /> {props.submitting ? '渲染中…' : '渲染本段'}
             </button>
           </div>
         </section>
@@ -533,77 +571,18 @@ export default function DirectorStage(props: DirectorStageProps): React.JSX.Elem
         </section>
       </div>
 
-      {/* ============ 时间轴：全片总览 + 段块轨道 + 刻度 ============ */}
+      {/* ============ 时间轴：工具栏 + 段工具 + 整片拼接轨道（对齐节点包全片总览） ============ */}
       <section className="panel overflow-hidden">
-        <div className="flex flex-wrap items-center gap-2 border-b border-white/5 px-3 py-2">
-          <Clapperboard size={13} className="text-accent-400" />
-          <span className="text-[11px] font-medium text-slate-300">全片总览</span>
-          <span className="text-[10px] text-slate-600">{shots.length} 段</span>
-          <span className="ml-auto text-[10px] text-slate-600">
-            橙「续」= 接上一段 · 绿✓ = 已生成 · 点段块切换编辑
-          </span>
-        </div>
-        <div className="px-3 py-2.5">
-          {shots.length === 0 ? (
-            <div className="rounded-lg border border-dashed border-white/10 bg-black/30 py-8 text-center text-[11px] text-slate-600">
-              还没有分段 —— 请先在「剧本与分镜」里添加分镜
-            </div>
-          ) : (
-            <div className="flex gap-1 overflow-x-auto pb-1">
-              {shots.map((s, i) => {
-                const o = outputOf(s)
-                const seg = s.segment
-                const active = s.id === curShot?.id
-                const frames = seg?.frames ?? 100
-                return (
-                  <button
-                    key={s.id}
-                    onClick={() => pick(s)}
-                    className={`relative flex h-[64px] min-w-[92px] shrink-0 flex-col overflow-hidden rounded border text-left transition-colors ${
-                      active ? 'border-accent-500 bg-accent-600/10 ring-1 ring-accent-500/30' : 'border-white/10 bg-white/[0.02] hover:border-white/25'
-                    }`}
-                    style={{ flexGrow: frames }}
-                    title={`第 ${i + 1} 段 · ${frames} 帧${seg && seg.contMode !== 'none' ? ' · 续接' : ''}`}
-                  >
-                    <div className="relative h-[42px] w-full bg-black">
-                      {o ? (
-                        o.kind === 'video' ? (
-                          <VideoThumb src={o.file} className="h-full w-full object-cover" />
-                        ) : (
-                          <MediaImage src={o.file} alt="" className="h-full w-full object-cover" fallback={<div className="h-full w-full" />} />
-                        )
-                      ) : (
-                        <div className="flex h-full w-full items-center justify-center text-[9px] text-slate-600">待生成</div>
-                      )}
-                      <span className={`absolute left-1 top-0.5 rounded px-1 text-[9px] ${active ? 'bg-accent-600 text-white' : 'bg-black/70 text-white'}`}>第{i + 1}段</span>
-                      {seg && seg.contMode !== 'none' && (
-                        <span className="absolute right-1 top-0.5 rounded bg-amber-500/90 px-1 text-[9px] font-medium text-black">续</span>
-                      )}
-                      {o && (
-                        <span className="absolute bottom-0.5 right-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-emerald-500/85 text-black"><Check size={9} strokeWidth={3} /></span>
-                      )}
-                    </div>
-                    <div className="px-1.5 py-0.5 text-[9px] text-slate-500">
-                      {seg ? `${seg.durationSec}s · ${frames}帧` : '—'}
-                    </div>
-                  </button>
-                )
-              })}
-            </div>
-          )}
-          {/* 刻度尺 + 音轨锁（视觉对齐参考图） */}
-          <div className="mt-1.5 flex items-center border-t border-white/5 pt-1.5">
-            <div className="flex flex-1 items-end gap-0 overflow-hidden">
-              {Array.from({ length: 12 }).map((_, i) => (
-                <span key={i} className="flex-1 border-l border-white/10 pl-0.5 text-[9px] leading-none text-slate-700">
-                  {i === 0 ? '0:00' : ''}
-                </span>
-              ))}
-            </div>
-            <span className="ml-2 shrink-0 text-[9px] text-slate-700">音轨锁</span>
+        {shots.length === 0 ? (
+          <div className="px-3 py-8 text-center text-[11px] text-slate-600">
+            还没有分段 —— 点上方「接一段」或到「剧本与分镜」添加分镜
           </div>
-        </div>
+        ) : (
+          timeline
+        )}
       </section>
     </div>
+      )}
+    />
   )
 }

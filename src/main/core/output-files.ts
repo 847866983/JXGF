@@ -4,7 +4,7 @@ export interface MediaFile {
   filename: string
   subfolder: string
   type: string
-  /** BanZhang painter_output 里的本地绝对路径（可选，优先直接读取） */
+  /** 节点包 painter_output 里的本地绝对路径（可选，优先直接读取） */
   src_path?: string
   /** 附加元数据（fps/frame_count/width/height/duration/kind） */
   metadata?: Record<string, unknown>
@@ -12,7 +12,7 @@ export interface MediaFile {
 
 /**
  * 从单个节点的 output 里收集媒体文件。
- * 支持标准 images/videos/gifs，以及 BanZhang 节点的 painter_output（H3 三采/一采/二采）。
+ * 支持标准 images/videos/gifs，以及 节点包节点的 painter_output（H3 三采/一采/二采）。
  */
 export function collectMediaFiles(output: unknown): MediaFile[] {
   if (!output || typeof output !== 'object') return []
@@ -59,7 +59,7 @@ function formatStamp(fmt: string, d = new Date()): string {
 /**
  * 规范化产出文件名，避免 Windows 非法字符导致写盘失败。
  *
- * 关键问题：BanZhang/千问模板的 SaveImage 前缀常带 `%date:yyyyMMddhhmmss%`，
+ * 关键问题：工作流/千问模板的 SaveImage 前缀常带 `%date:yyyyMMddhhmmss%`，
  * 其中的冒号在 Windows 上是非法文件名字符 —— ComfyUI 展开后写盘失败（只留 0 字节文件），
  * 且每次生成的"文件名"完全相同，资产图库去重后永远不增加新版本，
  * 表现为「点了生成没反应」。

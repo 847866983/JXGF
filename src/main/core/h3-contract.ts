@@ -1,7 +1,7 @@
 /**
  * CSGlide 三大数据契约的权威 TS 定义与构造器。
  *
- * 照搬节点包 ComfyUI-Banzhang-All-1101 的前端面板 state：
+ * 对齐工作流节点包 工作流节点包 的前端面板 state：
  *   rack_data（媒体架）→ desk_data（文案台）→ h3_data（导演台）
  * 三者都是单行 STRING widget，后端做白名单解析。
  *
