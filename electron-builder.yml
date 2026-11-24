@@ -2,7 +2,8 @@ appId: com.jingxu.studio
 productName: 镜序工坊
 directories:
   buildResources: build
-  output: release
+  # release 目录曾被系统进程锁死（杀软扫描大 asar），换 dist 避开
+  output: dist
 files:
   - out/**/*
   - package.json
