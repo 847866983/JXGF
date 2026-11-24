@@ -33,7 +33,7 @@ export function AssetCard({
           <KindBadge kind={asset.kind} />
         </div>
         {versionCount > 0 && (
-          <span className="absolute bottom-2 right-2 rounded bg-black/60 px-1.5 py-0.5 text-[10px] text-slate-200">
+          <span className="absolute bottom-2 right-2 rounded bg-black/60 px-1.5 py-0.5 text-[11px] text-slate-200">
             {versionCount} 版
           </span>
         )}
@@ -64,12 +64,12 @@ export function AssetCard({
         {asset.tags.length > 0 && (
           <div className="mt-2 flex flex-wrap gap-1">
             {asset.tags.slice(0, 4).map((t) => (
-              <span key={t} className="rounded bg-white/5 px-1.5 py-0.5 text-[10px] text-slate-400">
+              <span key={t} className="rounded bg-white/5 px-1.5 py-0.5 text-[11px] text-slate-400">
                 {t}
               </span>
             ))}
             {asset.tags.length > 4 && (
-              <span className="text-[10px] text-slate-600">+{asset.tags.length - 4}</span>
+              <span className="text-[11px] text-slate-600">+{asset.tags.length - 4}</span>
             )}
           </div>
         )}

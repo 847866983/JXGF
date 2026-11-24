@@ -18,16 +18,6 @@ extraResources:
     to: skills
     filter:
       - '**/*'
-  # 内置解压工具 7za.exe，供「一键安装 ComfyUI」解压便携版
-  - from: resources/tools
-    to: tools
-    filter:
-      - '**/*'
-  # 内置 工作流自定义节点包，安装 ComfyUI 后自动解压到 custom_nodes
-  - from: resources/comfy-nodes
-    to: comfy-nodes
-    filter:
-      - '**/*'
   # 内置图片/视频工作流，随软件分发，打开/新建项目时自动注入
   - from: resources/workflows
     to: workflows

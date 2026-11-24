@@ -15,6 +15,7 @@ import {
   buildCharacterFourViewInput,
   buildCharacterEditInput,
   filterRenderableVersions,
+  pickMossTemplate,
   ENGINE_LABEL,
   type ImageEngine,
   type AssetJobInput
@@ -225,16 +226,20 @@ export function CharacterAssetWizard({ asset, onClose }: { asset: Asset; onClose
   }
 
   const removeVersion = async (img: string): Promise<void> => {
-    await persistProject((draft) => {
-      const a = draft.assets.find((x) => x.id === asset.id)
-      if (!a) return
-      a.images = a.images.filter((x) => x !== img)
-      if (a.coverFile === img) a.coverFile = a.images[0] ?? null
-      a.updatedAt = new Date().toISOString()
-    })
-    const del = await window.api.mediaDeleteFile(img)
-    if (!del.deleted) setError(`图片已从项目移除，但磁盘文件删除失败：${del.reason ?? '未知原因'}`)
-    setSelected((cur) => (cur === img ? null : cur))
+    try {
+      await persistProject((draft) => {
+        const a = draft.assets.find((x) => x.id === asset.id)
+        if (!a) return
+        a.images = a.images.filter((x) => x !== img)
+        if (a.coverFile === img) a.coverFile = a.images[0] ?? null
+        a.updatedAt = new Date().toISOString()
+      })
+      const del = await window.api.mediaDeleteFile(img)
+      if (!del.deleted) setError(`图片已从项目移除，但磁盘文件删除失败：${del.reason ?? '未知原因'}。可稍后重试或手动删除。`)
+      setSelected((cur) => (cur === img ? null : cur))
+    } catch (err) {
+      setError(`删除失败：${String((err as Error)?.message ?? err)}`)
+    }
   }
 
   const useAsCover = async (img: string): Promise<void> => {
@@ -249,11 +254,19 @@ export function CharacterAssetWizard({ asset, onClose }: { asset: Asset; onClose
     window.setTimeout(() => setStatus(null), 2000)
   }
 
-  const hasT2I = engine === 'krea2' ? Boolean(pickKrea2T2ITemplate(templates)) : Boolean(pickQwenT2ITemplate(templates))
-  const hasEdit =
+  const hasT2I =
     engine === 'krea2'
-      ? Boolean(pickKrea2EditTemplate(templates) ?? pickQwenEditTemplate(templates))
-      : Boolean(pickQwenEditTemplate(templates))
+      ? Boolean(pickKrea2T2ITemplate(templates))
+      : engine === 'moss'
+        ? Boolean(pickMossTemplate(templates))
+        : Boolean(pickQwenT2ITemplate(templates))
+  // MOSS 仅支持纯文生图（模板无参考图通道），编辑/四视图在这两个引擎下做
+  const hasEdit =
+    engine === 'moss'
+      ? false
+      : engine === 'krea2'
+        ? Boolean(pickKrea2EditTemplate(templates) ?? pickQwenEditTemplate(templates))
+        : Boolean(pickQwenEditTemplate(templates))
 
   return (
     <Modal
@@ -317,14 +330,14 @@ export function CharacterAssetWizard({ asset, onClose }: { asset: Asset; onClose
                         />
                       </button>
                       {bound && (
-                        <span className="pointer-events-none absolute inset-x-0 bottom-0 bg-accent-600/80 text-center text-[9px] text-white">
+                        <span className="pointer-events-none absolute inset-x-0 bottom-0 bg-accent-600/80 text-center text-[11px] text-white">
                           绑定图
                         </span>
                       )}
                       <button
                         type="button"
                         title="删除这一版"
-                        className="absolute right-0.5 top-0.5 hidden h-4 w-4 items-center justify-center rounded bg-black/70 text-[10px] text-white hover:bg-rose-600 group-hover:flex"
+                        className="absolute right-0.5 top-0.5 hidden h-4 w-4 items-center justify-center rounded bg-black/70 text-[11px] text-white hover:bg-rose-600 group-hover:flex"
                         onClick={() => void removeVersion(img)}
                       >
                         ×
@@ -383,7 +396,7 @@ export function CharacterAssetWizard({ asset, onClose }: { asset: Asset; onClose
           <div className="flex items-center gap-2 text-xs text-slate-500">
             <span className="shrink-0">引擎</span>
             <div className="flex flex-1 gap-1 rounded-md border border-white/5 bg-ink-900 p-0.5">
-              {(['qwen', 'krea2'] as ImageEngine[]).map((e) => (
+              {(['qwen', 'krea2', 'moss'] as ImageEngine[]).map((e) => (
                 <button
                   key={e}
                   type="button"
@@ -445,7 +458,12 @@ export function CharacterAssetWizard({ asset, onClose }: { asset: Asset; onClose
 
           {/* 6. 确认动作 */}
           <div className="grid grid-cols-2 gap-2">
-            <button className="btn-ghost" disabled={busy || !selected || !hasEdit} onClick={() => void toFourView()}>
+            <button
+              className="btn-ghost"
+              disabled={busy || !selected || !hasEdit}
+              title={engine === 'moss' ? 'MOSS 为纯文生图，转四视图请切换到千问或 Krea2 引擎' : undefined}
+              onClick={() => void toFourView()}
+            >
               <ScanFace size={15} />
               确定，转四视图
             </button>
@@ -459,7 +477,11 @@ export function CharacterAssetWizard({ asset, onClose }: { asset: Asset; onClose
             </button>
           </div>
           {!hasEdit && selected && (
-            <div className="text-xs text-amber-400/80">缺少千问「全能编辑」模板，无法编辑或转四视图</div>
+            <div className="text-xs text-amber-400/80">
+              {engine === 'moss'
+                ? 'MOSS 为纯文生图引擎，不支持参考图编辑/四视图——请切换到千问或 Krea2 引擎'
+                : '缺少千问「全能编辑」模板，无法编辑或转四视图'}
+            </div>
           )}
 
           {/* 基本信息（折叠，弱化） */}

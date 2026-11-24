@@ -7,12 +7,11 @@ export const CH = {
   hardwareDetect: 'hardware:detect',
   comfyStatus: 'comfy:status',
   comfyTest: 'comfy:test',
+  comfyStageSamplers: 'comfy:stage-samplers',
   comfyRuntimeStatus: 'runtime:status',
   comfyRuntimeStart: 'runtime:start',
   comfyRuntimeStop: 'runtime:stop',
   comfyRuntimeSetConfig: 'runtime:set-config',
-  comfyInstallState: 'comfy-install:state',
-  nodePackStatus: 'node-pack:status',
   projectList: 'project:list',
   projectOpen: 'project:open',
   projectCreate: 'project:create',
@@ -23,10 +22,9 @@ export const CH = {
   projectImportTemplate: 'project:import-template',
   h3ChainCont: 'h3:chain-cont',
   cglideFilmSummary: 'cglide:film-summary',
+  cglideExportWholeFilm: 'cglide:export-whole-film',
   cglideJoinWaveform: 'cglide:join-waveform',
   cglideBase: 'cglide:base',
-  workflowSyncList: 'workflow:sync-list',
-  workflowSyncApply: 'workflow:sync-apply',
   memoryList: 'memory:list',
   memoryRead: 'memory:read',
   memoryWrite: 'memory:write',
@@ -37,7 +35,6 @@ export const CH = {
   aiExtractCharacters: 'ai:extract-characters',
   aiTest: 'ai:test',
   aiListModels: 'ai:list-models',
-  aiCancel: 'ai:cancel',
   mediaDataUrl: 'media:data-url',
   filmExport: 'film:export',
   mediaDeleteFile: 'media:delete-file',
@@ -50,9 +47,6 @@ export const CH = {
   updateDownload: 'update:download',
   updateInstall: 'update:install',
   updateInfo: 'update:info',
-  downloadStart: 'download:start',
-  downloadList: 'download:list',
-  downloadCancel: 'download:cancel',
   shellOpenPath: 'shell:open-path',
   event: 'event:push'
 } as const
@@ -61,14 +55,11 @@ export type IpcChannel = (typeof CH)[keyof typeof CH]
 
 /** 主进程 -> 渲染进程 推送事件负载 */
 export type PushEvent =
-  | { type: 'job:updated'; job: import('./types').JobInfo }
+  | { type: 'job:updated'; job: import('./types').JobInfo; project?: import('./types').Project }
   | { type: 'job:progress'; jobId: string; progress: number; node?: string }
   | { type: 'comfy:status'; status: import('./types').ComfySystemStats }
   | { type: 'update:state'; info: import('./types').UpdateInfo }
-  | { type: 'download:state'; task: import('./types').DownloadTask }
   | { type: 'comfy:runtime'; state: import('./types').ComfyRuntimeState }
-  | { type: 'comfy:install'; state: import('./types').ComfyInstallState }
-  | { type: 'model-pack:progress'; message: string }
   | { type: 'ai:status'; text: string }
   | { type: 'ai:tool'; name: string; args: Record<string, unknown>; summary?: string }
   | { type: 'ai:done'; changed: boolean }

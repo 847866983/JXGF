@@ -160,7 +160,7 @@ export function ScriptImportDialog({
             />
           </div>
           {fileName && (
-            <div className="mb-1.5 flex items-center gap-1.5 text-[10px] text-slate-500">
+            <div className="mb-1.5 flex items-center gap-1.5 text-[11px] text-slate-500">
               <FileText size={11} />
               {fileName}
             </div>
@@ -175,7 +175,7 @@ export function ScriptImportDialog({
             placeholder="把剧本粘贴到这里，例如：&#10;&#10;第一场 内景 咖啡馆&#10;林小雨：（端起咖啡）你今天怎么这么晚？&#10;陈默：路上堵车。她是谁？&#10;……"
           />
           <div className="mt-2 flex items-center justify-between">
-            <span className="text-[10px] text-slate-600">{text.length} 字（最多送 2 万字给 AI）</span>
+            <span className="text-[11px] text-slate-600">{text.length} 字（最多送 2 万字给 AI）</span>
             <button className="btn-primary" disabled={extracting || !text.trim()} onClick={() => void extract()}>
               {extracting ? <Loader2 size={15} className="animate-spin" /> : <Sparkles size={15} />}
               {extracting ? '提取中…' : '提取角色'}
@@ -237,7 +237,7 @@ export function ScriptImportDialog({
                     placeholder="一句话描述（身份 / 性格）"
                   />
                   <textarea
-                    className="field mt-1.5 w-full resize-y py-1 font-mono text-[10px] leading-relaxed"
+                    className="field mt-1.5 w-full resize-y py-1 font-mono text-[11px] leading-relaxed"
                     rows={2}
                     value={r.prompt}
                     onChange={(e) => patch(r.key, { prompt: e.target.value })}

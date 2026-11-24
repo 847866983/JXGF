@@ -118,8 +118,8 @@ export function AiSettings({ onSaved }: { onSaved?: (cfg: AiConfig) => void }): 
                   onChange={() => setConfig((prev) => (prev ? { ...prev, activeProviderId: p.id } : prev))}
                 />
                 {p.name || '未命名接口'}
-                {active && <span className="rounded bg-accent-600/20 px-1.5 py-0.5 text-[10px] text-accent-400">使用中</span>}
-                {!active && <span className="text-[10px] text-amber-400">（未选中，不会使用）</span>}
+                {active && <span className="rounded bg-accent-600/20 px-1.5 py-0.5 text-[11px] text-accent-400">使用中</span>}
+                {!active && <span className="text-[11px] text-amber-400">（未选中，不会使用）</span>}
               </label>
             </div>
             <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
@@ -193,7 +193,7 @@ export function AiSettings({ onSaved }: { onSaved?: (cfg: AiConfig) => void }): 
               )}
             </div>
             {result && !result.ok && result.url && (
-              <div className="mt-1 break-all rounded bg-black/30 px-2 py-1 font-mono text-[10px] text-slate-500">
+              <div className="mt-1 break-all rounded bg-black/30 px-2 py-1 font-mono text-[11px] text-slate-500">
                 实际请求：{result.url}
               </div>
             )}

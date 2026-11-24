@@ -26,21 +26,18 @@ const tabs: { id: Filter; label: string }[] = [
 export default function Assets(): React.JSX.Element {
   const project = useApp((s) => s.project)
   const refreshJobs = useApp((s) => s.refreshJobs)
-  const openProject = useApp((s) => s.openProject)
 
-  // 后台生成轮询：有任务在跑时每 5 秒刷新一次任务列表和工程数据，
-  // 这样在别处提交的生成完成后，资产页能自动出现新图，不用手动重开。
+  // 后台生成轮询：有任务在跑时每 5 秒刷新任务列表。
+  // ⚠️ 不要在这里 openProject 重读工程——done 事件会带最新工程快照自动刷新（App.tsx），
+  // 而轮询里的磁盘重读会与主进程的产物回写竞态，把刚写回的生成图冲掉（表现为
+  // 「生成完成但资产里不显示」）。任务列表刷新用轻量的 refreshJobs 就够了。
   useEffect(() => {
     if (!project?.id) return
     const timer = window.setInterval(() => {
       void refreshJobs()
-      const running = (useApp.getState().jobs ?? []).some(
-        (j) => j.status === 'running' || j.status === 'queued'
-      )
-      if (running) void openProject(project.id)
     }, 5000)
     return () => window.clearInterval(timer)
-  }, [project?.id, refreshJobs, openProject])
+  }, [project?.id, refreshJobs])
   const [filter, setFilter] = useState<Filter>('all')
   const [formOpen, setFormOpen] = useState(false)
   const [delMsg, setDelMsg] = useState<string | null>(null)
@@ -195,17 +192,21 @@ export default function Assets(): React.JSX.Element {
 
   /** 删除某张生成图；若删的是绑定图，自动改绑到剩下的第一张 */
   const handleRemoveImage = async (assetId: string, img: string): Promise<void> => {
-    await persistProject((draft) => {
-      const a = draft.assets.find((x) => x.id === assetId)
-      if (!a) return
-      a.images = a.images.filter((x) => x !== img)
-      if (a.coverFile === img) a.coverFile = a.images[0] ?? null
-      a.updatedAt = new Date().toISOString()
-    })
-    // 清理磁盘文件（主进程以磁盘上的 project.json 为准，扫描全部工程后删除）
-    const del = await window.api.mediaDeleteFile(img)
-    if (!del.deleted) setDelMsg(`磁盘文件未删除：${del.reason ?? '未知原因'}`)
-    else setDelMsg(null)
+    try {
+      await persistProject((draft) => {
+        const a = draft.assets.find((x) => x.id === assetId)
+        if (!a) return
+        a.images = a.images.filter((x) => x !== img)
+        if (a.coverFile === img) a.coverFile = a.images[0] ?? null
+        a.updatedAt = new Date().toISOString()
+      })
+      // 清理磁盘文件（主进程以磁盘上的 project.json 为准，扫描全部工程后删除）
+      const del = await window.api.mediaDeleteFile(img)
+      if (!del.deleted) setDelMsg(`图片已从项目移除，但磁盘文件删除失败：${del.reason ?? '未知原因'}。可稍后重试或手动删除。`)
+      else setDelMsg(null)
+    } catch (err) {
+      setDelMsg(`删除失败：${String((err as Error)?.message ?? err)}`)
+    }
   }
 
   // 始终用最新项目数据里的资产（生成/改绑定后能实时反映）
@@ -350,7 +351,7 @@ export default function Assets(): React.JSX.Element {
                         />
                       </button>
                       {bound && (
-                        <span className="pointer-events-none absolute left-1 top-1 rounded bg-accent-600 px-1.5 py-0.5 text-[10px] text-white">
+                        <span className="pointer-events-none absolute left-1 top-1 rounded bg-accent-600 px-1.5 py-0.5 text-[11px] text-white">
                           绑定
                         </span>
                       )}

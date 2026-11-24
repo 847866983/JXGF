@@ -222,7 +222,7 @@ export default function Dashboard(): React.JSX.Element {
                         <div className="flex items-center gap-2">
                           <span className="truncate font-semibold text-white">{p.name}</span>
                           {p.id === localStorage.getItem('jxgf:lastProject') && (
-                            <span className="shrink-0 rounded bg-emerald-500/20 px-1.5 py-0.5 text-[10px] text-emerald-300">
+                            <span className="shrink-0 rounded bg-emerald-500/20 px-1.5 py-0.5 text-[11px] text-emerald-300">
                               最近
                             </span>
                           )}

@@ -1,12 +1,11 @@
 {
   "name": "frameforge",
-  "version": "0.9.9",
+  "version": "1.9.0",
   "description": "镜序工坊 - 本地 AI 视频生成工作台（资产库 / 剧本分镜 / 导演台，后端 ComfyUI）",
   "main": "./out/main/index.js",
   "author": "镜序工坊",
   "license": "MIT",
   "scripts": {
-    "dev": "electron-vite dev",
     "build": "electron-vite build",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/selftest.mts",
@@ -14,7 +13,6 @@
     "test:mcp-client": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/mcp-client-test.mts",
     "mcp": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON src/mcp/server.ts",
     "test:integration": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/integration-test.mts",
-    "start": "electron-vite preview",
     "build:mcp": "node scripts/build-mcp.mjs",
     "package": "electron-vite build && node scripts/build-mcp.mjs && electron-builder --win",
     "package:dir": "electron-vite build && node scripts/build-mcp.mjs && electron-builder --win --dir"
@@ -22,7 +20,6 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.2",
     "electron-updater": "^6.6.2",
-    "undici": "^6.29.1",
     "ws": "^8.18.0",
     "zod": "^4.6.7"
   },

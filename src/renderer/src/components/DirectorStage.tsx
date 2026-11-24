@@ -4,8 +4,8 @@ import {
   PenLine, Play, Settings2, Wand2
 } from 'lucide-react'
 import type { SegmentSettings, Shot } from '@shared/types'
-import { alignFrames, framesFor } from '../lib/segment'
-import LocalFilm, { type LocalClip, type LocalTake } from './LocalFilm'
+import { alignFrames, framesFor, ratioOf, RATIO_OPTIONS } from '../lib/segment'
+import LocalFilm, { type LocalClip } from './LocalFilm'
 import DeskPanel from './DeskPanel'
 import { RefBindingPanel, type RefPick, type RefAssetOption } from './RefBindingPanel'
 
@@ -62,8 +62,14 @@ export interface DirectorStageProps {
   onOpenProjects: () => void
   onPatchSegment: (shotId: string, patch: Partial<SegmentSettings>) => void
   onKeepTake: (shotId: string, outputId: string) => void
-  /** 当前段的产物版本（历史面板） */
-  takes: LocalTake[]
+  /** 删除指定段的某个产物版本 */
+  onDeleteTake: (shotId: string, outputId: string) => void
+  /** 请求无缝整片 data URL（多段导成一个视频）；返回 null 退回分段播放 */
+  onRequestWholeFilm: () => Promise<string | null>
+  /** 重抽指定段（生成新版本） */
+  onRegenShot: (shotId: string) => void
+  /** 潜空间续接：把当前段末尾当下一段开头，设置下一段并生成 */
+  onContinueToNext: (shotId: string) => void
 }
 
 const fieldCls =
@@ -120,9 +126,9 @@ function Row({
 }): React.JSX.Element {
   return (
     <div className="flex min-h-[32px] items-center gap-2 border-b border-white/[0.04] px-2.5 py-1 last:border-b-0">
-      <span className="w-[62px] shrink-0 text-[10px] text-slate-500">{label}</span>
+      <span className="w-[62px] shrink-0 text-[11px] text-slate-500">{label}</span>
       <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">{children}</div>
-      {hint != null && <span className="ml-auto shrink-0 text-[10px] text-slate-600">{hint}</span>}
+      {hint != null && <span className="ml-auto shrink-0 text-[11px] text-slate-600">{hint}</span>}
     </div>
   )
 }
@@ -153,6 +159,13 @@ const SIZE_PRESETS: Record<string, SizePreset[]> = {
   '21:9': [[1344, 576, '本地'], [1120, 480], [896, 384], [768, 320, '草案']]
 }
 
+/** 比例不在预设表时（如硬件低配档 896×480）的通用档位，保证下拉永远有可选项 */
+const COMMON_SIZES: SizePreset[] = [
+  [1344, 768, '本地'], [1280, 720], [1120, 640], [1024, 576],
+  [960, 544], [896, 512], [896, 480, '低配档'], [800, 448],
+  [768, 448], [672, 384], [608, 352], [576, 320]
+]
+
 /** 「规格」tab：参考图的密集参数表，字段与 SegmentSettings 一一对应 */
 function SpecPanel({
   seg, onPatch
@@ -165,12 +178,22 @@ function SpecPanel({
   useEffect(() => setDurLocal(Math.round(seg.durationSec)), [seg.durationSec])
 
   const patch = (p: Partial<SegmentSettings>): void => onPatch(p)
+  // 比例框永远显示由当前宽高归一出的标准比例（忽略旧数据里可能存着的 "576:320" 数字串）
+  const normRatio = ratioOf(seg.width, seg.height)
+  const canvasLong = Math.max(seg.width, seg.height) // 后端「跟画布」= 跟随画布长边
   const applyRatio = (ratio: string): void => {
-    const [w, h] = SIZE_PRESETS[ratio]?.[0] ?? [seg.width, seg.height]
+    const [w, h] = SIZE_PRESETS[ratio]?.[0] ?? COMMON_SIZES[0]
     patch({ ratio, width: w, height: h })
   }
+  const sizeList: SizePreset[] = SIZE_PRESETS[normRatio]?.length
+    ? SIZE_PRESETS[normRatio]
+    : COMMON_SIZES
+  // 图片参考：match = 跟随画布长边（数值档为固定长边）
   const imgMatch = seg.refImageSize === 'match' || seg.refImageSize === 'match_canvas'
-  const vidMatch = seg.refVideoSize === seg.width
+  const imgLong = imgMatch ? canvasLong : (Number(seg.refImageSize) || canvasLong)
+  // 视频参考：默认固定 768；勾「跟画布」时数值等于画布长边
+  const vidMatch = seg.refVideoSize === canvasLong
+  const vidLong = seg.refVideoSize || 768
   const stages = seg.stages ?? { first: true, second: true, third: true, superRes: false }
 
   const commitDur = (): void => patch({ durationSec: durLocal, frames: framesFor(durLocal, seg.fps) })
@@ -184,32 +207,33 @@ function SpecPanel({
       <Row label="画布" hint={`${((seg.width * seg.height) / 1e6).toFixed(2)} MP`}>
         <select
           className={`${fieldCls} w-[62px]`}
-          value={seg.ratio}
+          value={normRatio}
           onChange={(e) => applyRatio(e.target.value)}
+          title="画面宽高比（切换会套用该比例的默认生成尺寸）"
         >
-          {Object.keys(SIZE_PRESETS).map((r) => <option key={r} value={r}>{r}</option>)}
+          {RATIO_OPTIONS.map((r) => <option key={r} value={r}>{r}</option>)}
         </select>
         <select
           className={`${fieldCls} w-[124px]`}
           value={`${seg.width}x${seg.height}`}
-          title="画面尺寸预设（本地 / 700阶段 / 草案 为 H3 档位标注）"
+          title="生成视频尺寸（本地 / 700阶段 / 低配档 / 草案 为档位标注）"
           onChange={(e) => {
             const [w, h] = e.target.value.split('x').map(Number)
-            patch({ width: w, height: h })
+            patch({ width: w, height: h, ratio: ratioOf(w, h) })
           }}
         >
-          {(SIZE_PRESETS[seg.ratio] ?? []).map(([w, h, tag]) => (
+          {sizeList.map(([w, h, tag]) => (
             <option key={`${w}x${h}`} value={`${w}x${h}`}>
               {w} x {h}{tag ? ` · ${tag}` : ''}
             </option>
           ))}
-          {!SIZE_PRESETS[seg.ratio]?.some(([w, h]) => w === seg.width && h === seg.height) && (
+          {!sizeList.some(([w, h]) => w === seg.width && h === seg.height) && (
             <option value={`${seg.width}x${seg.height}`}>{seg.width} x {seg.height} · 自定义</option>
           )}
         </select>
-        <NumCell value={seg.width} onCommit={(w) => patch({ width: w })} className="w-14" min={64} />
+        <NumCell value={seg.width} onCommit={(w) => patch({ width: w, ratio: ratioOf(w, seg.height) })} className="w-14" min={64} />
         <span className="text-[11px] text-slate-600">×</span>
-        <NumCell value={seg.height} onCommit={(h) => patch({ height: h })} className="w-14" min={64} />
+        <NumCell value={seg.height} onCommit={(h) => patch({ height: h, ratio: ratioOf(seg.width, h) })} className="w-14" min={64} />
       </Row>
 
       <Row label="时长" hint={`${seg.fps} fps`}>
@@ -226,42 +250,42 @@ function SpecPanel({
           title="拖动设定秒数"
         />
         <NumCell value={durLocal} onCommit={(d) => { setDurLocal(d); patch({ durationSec: d, frames: framesFor(d, seg.fps) }) }} className="w-12" min={1} />
-        <span className="text-[10px] text-slate-600">秒</span>
+        <span className="text-[11px] text-slate-600">秒</span>
         <NumCell value={seg.frames} onCommit={commitFrames} className="w-14" min={5} />
-        <span className="text-[10px] text-slate-600">帧</span>
+        <span className="text-[11px] text-slate-600">帧</span>
       </Row>
 
-      <Row label="图片参考" hint={`长边 ${imgMatch ? seg.width : seg.refImageSize}px`}>
+      <Row label="图片参考" hint={`长边 ${imgLong}px${imgMatch ? '（跟画布）' : ''}`}>
         <input
           type="checkbox"
           className="accent-[#7c5cff]"
           checked={imgMatch}
-          onChange={(e) => patch({ refImageSize: e.target.checked ? 'match' : String(seg.width) })}
+          onChange={(e) => patch({ refImageSize: e.target.checked ? 'match' : String(canvasLong) })}
         />
-        <span className="text-[10px] text-slate-500">跟画布</span>
+        <span className="text-[11px] text-slate-500">跟画布</span>
         <NumCell
-          value={imgMatch ? seg.width : Number(seg.refImageSize) || seg.width}
+          value={imgLong}
           onCommit={(n) => patch({ refImageSize: String(n) })}
           className="w-14"
           min={64}
         />
       </Row>
 
-      <Row label="视频参考" hint={`长边 ${seg.refVideoSize}px`}>
+      <Row label="视频参考" hint={`长边 ${vidLong}px${vidMatch ? '（跟画布）' : '（固定档）'}`}>
         <input
           type="checkbox"
           className="accent-[#7c5cff]"
           checked={vidMatch}
-          onChange={(e) => patch({ refVideoSize: e.target.checked ? seg.width : 768 })}
+          onChange={(e) => patch({ refVideoSize: e.target.checked ? canvasLong : 768 })}
         />
-        <span className="text-[10px] text-slate-500">跟画布</span>
-        <NumCell value={seg.refVideoSize} onCommit={(n) => patch({ refVideoSize: n })} className="w-14" min={64} />
+        <span className="text-[11px] text-slate-500">跟画布</span>
+        <NumCell value={vidLong} onCommit={(n) => patch({ refVideoSize: n })} className="w-14" min={64} />
         <NumCell value={seg.refVideoFps} onCommit={(n) => patch({ refVideoFps: n })} className="w-12" min={1} />
-        <span className="text-[10px] text-slate-600">fps</span>
+        <span className="text-[11px] text-slate-600">fps</span>
       </Row>
 
       <Row label="放大重叠" hint={seg.refScaleHd === 1 ? '不额外缩放' : undefined}>
-        <span className="text-[10px] text-slate-500">参考档位倍数</span>
+        <span className="text-[11px] text-slate-500">参考档位倍数</span>
         <NumCell value={seg.refScaleHd} onCommit={(n) => patch({ refScaleHd: n })} className="w-12" step={0.1} min={0.1} />
       </Row>
 
@@ -272,8 +296,8 @@ function SpecPanel({
           className="w-12"
           min={1}
         />
-        <span className="text-[10px] text-slate-600">fps</span>
-        <label className="ml-2 flex items-center gap-1 text-[10px] text-slate-500">
+        <span className="text-[11px] text-slate-600">fps</span>
+        <label className="ml-2 flex items-center gap-1 text-[11px] text-slate-500">
           <input
             type="checkbox"
             className="accent-[#7c5cff]"
@@ -302,12 +326,12 @@ function SpecPanel({
           <option value="head">首帧</option>
           <option value="tail">尾帧</option>
         </select>
-        <span className="text-[10px] text-slate-600">强度</span>
+        <span className="text-[11px] text-slate-600">强度</span>
         <NumCell value={seg.bridgeAlpha} onCommit={(n) => patch({ bridgeAlpha: n })} className="w-12" step={0.1} />
       </Row>
 
       <Row label="整片空间">
-        <label className="flex items-center gap-1.5 text-[10px] text-slate-400">
+        <label className="flex items-center gap-1.5 text-[11px] text-slate-400">
           <input
             type="checkbox"
             className="accent-[#7c5cff]"
@@ -320,30 +344,30 @@ function SpecPanel({
 
       <Row label="首尾帧" hint="多参考模式下不参与">
         <button
-          className="rounded border border-white/10 bg-white/[0.03] px-2 py-0.5 text-[10px] text-slate-400 hover:text-slate-200"
+          className="rounded border border-white/10 bg-white/[0.03] px-2 py-0.5 text-[11px] text-slate-400 hover:text-slate-200"
           onClick={() => setShowPins((v) => !v)}
         >
           {showPins ? '收起 ▲' : '展开 ▼'}
         </button>
         {showPins && (
           <>
-            <span className="text-[10px] text-slate-600">头</span>
+            <span className="text-[11px] text-slate-600">头</span>
             <NumCell value={seg.pinHead} onCommit={(n) => patch({ pinHead: n })} className="w-12" min={0} />
-            <span className="text-[10px] text-slate-600">尾</span>
+            <span className="text-[11px] text-slate-600">尾</span>
             <NumCell value={seg.pinTail} onCommit={(n) => patch({ pinTail: n })} className="w-12" min={0} />
           </>
         )}
       </Row>
 
       <div className="mt-1.5 border-t border-white/10 px-2.5 pt-2">
-        <div className="mb-1 text-[10px] font-medium uppercase tracking-wide text-slate-600">生成</div>
+        <div className="mb-1 text-[11px] font-medium uppercase tracking-wide text-slate-600">生成</div>
         <Row label="方式">
           {([
             ['ref2va', '参考图'], ['video', '参考视频'], ['t2v', '纯文生']
           ] as const).map(([m, label]) => (
             <button
               key={m}
-              className={`rounded px-2 py-0.5 text-[10px] ${
+              className={`rounded px-2 py-0.5 text-[11px] ${
                 seg.genMode === m ? 'bg-accent-600/30 text-accent-200 ring-1 ring-accent-500/60' : 'bg-white/5 text-slate-400 hover:bg-white/10'
               }`}
               onClick={() => patch({ genMode: m })}
@@ -369,7 +393,7 @@ function SpecPanel({
                 min={0}
                 title="承接帧数 5/22/39/56/73…"
               />
-              <span className="text-[10px] text-slate-600">承接帧</span>
+              <span className="text-[11px] text-slate-600">承接帧</span>
             </>
           )}
         </Row>
@@ -377,7 +401,7 @@ function SpecPanel({
           {([
             ['first', '一采'], ['second', '二采'], ['third', '三采'], ['superRes', '超分']
           ] as const).map(([k, label]) => (
-            <label key={k} className="flex items-center gap-1 text-[10px] text-slate-400">
+            <label key={k} className="flex items-center gap-1 text-[11px] text-slate-400">
               <input
                 type="checkbox"
                 className="accent-[#7c5cff]"
@@ -427,7 +451,13 @@ export default function DirectorStage(props: DirectorStageProps): React.JSX.Elem
       durationSec: seg?.durationSec ?? 5,
       contMode: seg?.contMode ?? 'none',
       pinHead: seg?.pinHead ?? 0,
-      pinTail: seg?.pinTail ?? 0
+      pinTail: seg?.pinTail ?? 0,
+      takes: outs.map((o, k) => ({
+        id: o.id,
+        label: `v${k + 1}`,
+        file: o.file,
+        kept: o.kept !== false
+      }))
     }
   })
   const localFps = curSeg?.fps ?? 24
@@ -437,7 +467,6 @@ export default function DirectorStage(props: DirectorStageProps): React.JSX.Elem
       clips={localClips}
       fps={localFps}
       activeShotId={curShot?.id}
-      takes={props.takes}
       onSelectShot={(shotId) => props.onSelect(shotId)}
       onAppendShot={props.onAppendShot}
       onExportFilm={props.onExportFilm}
@@ -445,7 +474,11 @@ export default function DirectorStage(props: DirectorStageProps): React.JSX.Elem
       onOpenProjects={props.onOpenProjects}
       onPatchPin={(shotId, field, value) => props.onPatchSegment(shotId, { [field]: value })}
       onCancelContinue={(shotId) => props.onPatchSegment(shotId, { contMode: 'none' })}
-      onKeepTake={(takeId) => curShot && props.onKeepTake(curShot.id, takeId)}
+      onRegenShot={(shotId) => props.onRegenShot(shotId)}
+      onContinueToNext={(shotId) => props.onContinueToNext(shotId)}
+      onKeepTake={(shotId, takeId) => props.onKeepTake(shotId, takeId)}
+      onDeleteTake={(shotId, takeId) => props.onDeleteTake(shotId, takeId)}
+      onRequestWholeFilm={() => props.onRequestWholeFilm()}
       viewerClassName="h-[300px]"
       render={({ viewer, timeline }) => (
     <div className="flex flex-col gap-3">
@@ -454,7 +487,7 @@ export default function DirectorStage(props: DirectorStageProps): React.JSX.Elem
         <div className="flex items-center gap-2">
           <Film size={14} className="text-accent-400" />
           <span className="text-xs font-medium text-slate-200">成片监视器</span>
-          <span className="text-[10px] text-slate-600">
+          <span className="text-[11px] text-slate-600">
             {props.projectName} · {shots.length} 段 · 待生成 <span className="text-amber-300">{props.pendingCount}</span>
           </span>
         </div>
@@ -472,11 +505,13 @@ export default function DirectorStage(props: DirectorStageProps): React.JSX.Elem
           </button>
           <button
             className="btn-primary px-2.5 py-1 text-[11px]"
-            disabled={!props.canGenerate || props.batchRunning || props.pendingCount === 0}
+            disabled={!props.canGenerate || props.batchRunning || props.shots.length === 0}
             onClick={props.onGenerateAll}
-            title="按时间轴顺序批量渲染未生成的段，已生成的跳过"
+            title={props.pendingCount > 0
+              ? '按时间轴顺序渲染未生成的段（已生成的跳过）；段与段按潜空间续接串联'
+              : '所有段都已生成 —— 点此按时间轴顺序全部重渲染，各段产出新版本'}
           >
-            <Play size={12} /> {props.batchRunning ? '渲染中…' : '全部渲染'}
+            <Play size={12} /> {props.batchRunning ? '渲染中…' : (props.pendingCount > 0 ? '全部渲染' : '全部重渲染')}
           </button>
         </div>
       </div>
@@ -488,7 +523,7 @@ export default function DirectorStage(props: DirectorStageProps): React.JSX.Elem
           <div className="flex items-center gap-2 border-b border-white/5 px-3 py-2">
             <Eye size={13} className="text-accent-400" />
             <span className="text-[11px] font-medium text-slate-300">整片预览</span>
-            <span className="rounded bg-white/[0.05] px-1.5 py-0.5 text-[10px] text-slate-400">
+            <span className="rounded bg-white/[0.05] px-1.5 py-0.5 text-[11px] text-slate-400">
               正在编辑第 {curIndex + 1} 段
             </span>
             <div className="ml-auto flex items-center gap-0.5">
@@ -529,7 +564,7 @@ export default function DirectorStage(props: DirectorStageProps): React.JSX.Elem
                 {icon}{label}
               </button>
             ))}
-            <span className="ml-auto text-[10px] text-slate-600">第 {curIndex + 1} 段</span>
+            <span className="ml-auto text-[11px] text-slate-600">第 {curIndex + 1} 段</span>
           </div>
           <div className="flex-1 overflow-y-auto">
             {!curShot || !curSeg ? (

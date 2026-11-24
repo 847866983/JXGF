@@ -59,10 +59,6 @@ export const STYLES: StyleDef[] = [
 
 export const DEFAULT_STYLE_ID = 'cg_real'
 
-export function getStyle(id: string | undefined): StyleDef {
-  return STYLES.find((s) => s.id === id) ?? STYLES[0]
-}
-
 /** 四视图结构负向词（配合固定提示词，抑制投影/地面/走形） */
 const FOUR_VIEW_STRUCT_NEG =
   'multiple different characters, inconsistent design, different outfit between views, different face, extra heads, extra limbs, deformed, bad anatomy, blurry face, text, watermark, logo, signature, cropped, out of frame, low quality, chibi, super deformed, big head, oversized head, tiny body, short legs, childlike, doll, figurine, ' +
@@ -152,10 +148,14 @@ const FOUR_VIEW_H = 1024
 
 /** 根据资产生成 jobGenerate 参数：角色→四视图（横图），其他→单图，均按所选画风 */
 export function buildAssetJobInput(asset: Asset, templates: Template[], styleId?: string): AssetJobInput | null {
-  const template = pickAssetTemplate(templates, asset.kind)
-  if (!template) return null
+  const picked = pickAssetTemplate(templates, asset.kind)
+  if (!picked) return null
   const desc = asset.prompt || asset.description || asset.name || ''
   const isChar = asset.kind === 'character'
+  // 角色生成走专用四视图模板；非千问引擎（如 Krea2）保持原模板不变。
+  const template = isChar && /千问|Qwen/i.test(picked.name)
+    ? pickQwenFourViewTemplate(templates) ?? picked
+    : picked
   if (isChar) {
     // 角色统一用千问 Image 2.1：出四视图（<mva> 语法 + 多角度 LoRA）
     // 顺序很关键：<mva> 触发词 → 用户描述 → 结构说明。描述写在结构说明后面
@@ -167,9 +167,9 @@ export function buildAssetJobInput(asset: Asset, templates: Template[], styleId?
       templateId: template.id,
       positive: isQwen ? qwenPositive : buildFourViewPositive(desc, styleId),
       negative: isQwen ? fourViewNegative() : fourViewNegative(styleId),
-      // 画布与步数保持原样（用户指定：不要动分辨率和步数）。
-      // 变慢的根因是模板里的「图片高清放大」节点，已在主进程关闭。
-      width: isQwen ? 2400 : FOUR_VIEW_W,
+      // 四视图 2000×1200（20261124 用户指定）；不开放大链——放大链会把
+      // 四视图排版二次放大到 4000 宽，破坏面板结构。
+      width: isQwen ? 2000 : FOUR_VIEW_W,
       height: isQwen ? 1200 : FOUR_VIEW_H,
       batch: 1,
       steps: isQwen ? 8 : undefined,
@@ -180,21 +180,29 @@ export function buildAssetJobInput(asset: Asset, templates: Template[], styleId?
     templateId: template.id,
     positive: styledPositive(desc, styleId),
     negative: asset.negative?.trim() || undefined,
-    width: 1024,
-    height: 1024,
+    // 与 buildCharacterT2IInput 同口径：原生 2K 画布
+    width: 2048,
+    height: 2048,
     batch: 1
   }
 }
 
-// ---------- 角色资产生成（双引擎：千问 / Krea2） ----------
+// ---------- 角色资产生成（引擎：千问 / Krea2 / MOSS） ----------
 
-/** 生图引擎 */
-export type ImageEngine = 'qwen' | 'krea2'
+/** 生图引擎。MOSS 仅支持纯文生图（模板无参考图通道），编辑/四视图请用千问或 Krea2 */
+export type ImageEngine = 'qwen' | 'krea2' | 'moss'
 
 /** 引擎显示名 */
 export const ENGINE_LABEL: Record<ImageEngine, string> = {
   qwen: '千问 Qwen-Image 2.1',
-  krea2: 'Krea2'
+  krea2: 'Krea2',
+  moss: 'MOSS-Image'
+}
+
+/** MOSS 是否支持某模式 */
+export function engineSupports(engine: ImageEngine, mode: 't2i' | 'edit' | 'fourView'): boolean {
+  if (engine === 'moss') return mode === 't2i'
+  return true
 }
 
 /** 千问四视图多角度 LoRA（已下载到 models/loras） */
@@ -262,11 +270,20 @@ export function pickQwenT2ITemplate(templates: Template[]): Template | undefined
 export function pickQwenEditTemplate(templates: Template[]): Template | undefined {
   const imgs = templates.filter((t) => t.kind === 'image')
   return (
-    // 明确优先「千问 Image 2.1 全能编辑」——这是用户指定的默认生图模板
-    imgs.find((t) => /千问.*2\.1.*全能编辑|千问.*Image.*2\.1/i.test(t.name)) ||
+    // 三套千问工作流各司其职：编辑 / 文生图 / 四视图。
+    // 先排除后两类，避免旧的兜底正则把「文生图」「四视图」误当编辑模板。
+    imgs.filter((t) => !/文生图|t2i/i.test(t.name) && !/四视图|four.?view|multi.?angle/i.test(t.name)).find((t) => /千问.*2\.1.*图像编辑/i.test(t.name)) ||
     imgs.find((t) => /千问图片编辑|全能编辑/i.test(t.name)) ||
-    imgs.find((t) => /Qwen/i.test(t.name) && /编辑|edit/i.test(t.name)) ||
-    imgs.find((t) => /千问|Qwen/i.test(t.name))
+    imgs.find((t) => /Qwen/i.test(t.name) && /编辑|edit/i.test(t.name))
+  )
+}
+
+/** 千问角色四视图模板（默认挂多角度 LoRA） */
+export function pickQwenFourViewTemplate(templates: Template[]): Template | undefined {
+  const imgs = templates.filter((t) => t.kind === 'image')
+  return (
+    imgs.find((t) => /千问.*四视图|Qwen.*四视图|Qwen.*four.?view|Qwen.*multi.?angle/i.test(t.name)) ||
+    pickQwenEditTemplate(imgs)
   )
 }
 
@@ -281,10 +298,18 @@ export function pickKrea2T2ITemplate(templates: Template[]): Template | undefine
 
 /** 按引擎选文生图模板 */
 export function pickT2ITemplate(templates: Template[], engine: ImageEngine): Template | undefined {
-  return engine === 'krea2' ? pickKrea2T2ITemplate(templates) : pickQwenT2ITemplate(templates)
+  if (engine === 'krea2') return pickKrea2T2ITemplate(templates)
+  if (engine === 'moss') return pickMossTemplate(templates)
+  return pickQwenT2ITemplate(templates)
 }
 
-/** 步骤1：文生图生成角色单图（不带参考图），支持双引擎 */
+/** MOSS-Image 文生图模板（纯文生图，不支持参考图） */
+export function pickMossTemplate(templates: Template[]): Template | undefined {
+  const imgs = templates.filter((t) => t.kind === 'image')
+  return imgs.find((t) => /MOSS/i.test(t.name)) || imgs.find((t) => /moss/i.test(t.name))
+}
+
+/** 步骤1：文生图生成角色单图（不带参考图），支持千问 / Krea2 / MOSS 三引擎 */
 export function buildCharacterT2IInput(
   asset: Asset,
   templates: Template[],
@@ -294,17 +319,21 @@ export function buildCharacterT2IInput(
   const template = pickT2ITemplate(templates, engine)
   if (!template) return null
   const desc = asset.prompt || asset.description || asset.name || ''
+  // MOSS 的出厂画布是 1184×896（qwen_data canvas），尊重模板设计不用方形。
+  // 千问文生图直接用原生 2K 画布（2048×2048，4.2MP）：原生分辨率生成的细节
+  // 远好于小图后期放大；四视图 2.9MP 在同卡已验证可行（20261124 用户指定 2K）。
+  const [w, h] = engine === 'moss' ? [1184, 896] : [2048, 2048]
   return {
     templateId: template.id,
     positive: desc,
     negative: asset.negative || undefined,
-    width: 1024,
-    height: 1024,
+    width: w,
+    height: h,
     batch: 1
   }
 }
 
-/** 步骤2a：满意 → 转四视图。Krea2 用现成四视图模板；千问用编辑+多角度LoRA */
+/** 步骤2a：满意 → 转四视图。Krea2 用现成四视图模板；千问用编辑+多角度LoRA；MOSS 不支持（返回 null） */
 export function buildCharacterFourViewInput(
   asset: Asset,
   templates: Template[],
@@ -312,6 +341,8 @@ export function buildCharacterFourViewInput(
   refImage: string,
   engine: ImageEngine = 'krea2'
 ): AssetJobInput | null {
+  // MOSS 无参考图通道，做不了图生图四视图
+  if (engine === 'moss') return null
   if (engine === 'krea2') {
     const template = pickFourViewTemplate(templates)
     if (!template || !refImage) return null
@@ -325,16 +356,15 @@ export function buildCharacterFourViewInput(
       refImages: [refImage]
     }
   }
-  // 千问：编辑模板 + 多角度 LoRA，提示词用 <mva> 语法
-  const template = pickQwenEditTemplate(templates)
+  // 千问：专用四视图模板（内置多角度 LoRA）；没有时退回编辑模板
+  const template = pickQwenFourViewTemplate(templates)
   if (!template || !refImage) return null
   return {
     templateId: template.id,
     positive: QWEN_QUADVIEW_PROMPT,
     negative: fourViewNegative(),
-    // 画布与步数保持原样（用户指定：不要动分辨率和步数）。
-    // 变慢的根因是模板里的「图片高清放大」节点，已在主进程关闭。
-    width: 2400,
+    // 四视图 2000×1200（20261124 用户指定），8 步 + 多角度 LoRA
+    width: 2000,
     height: 1200,
     batch: 1,
     steps: 8,
@@ -343,7 +373,7 @@ export function buildCharacterFourViewInput(
   }
 }
 
-/** 步骤2b：不满意 → 编辑。千问用全能编辑；Krea2 用其四视图/编辑模板按指令改图 */
+/** 步骤2b：不满意 → 编辑。千问用全能编辑；Krea2 用其四视图/编辑模板按指令改图；MOSS 不支持（返回 null） */
 export function buildCharacterEditInput(
   asset: Asset,
   templates: Template[],
@@ -352,6 +382,8 @@ export function buildCharacterEditInput(
   editPrompt: string,
   engine: ImageEngine = 'qwen'
 ): AssetJobInput | null {
+  // MOSS 无参考图通道，做不了指令编辑
+  if (engine === 'moss') return null
   const prompt = (editPrompt || '').trim()
   if (!prompt || !refImage) return null
   // 按引擎选对应的编辑工作流（两套各自独立、功能对齐）：

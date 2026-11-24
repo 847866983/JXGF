@@ -2,17 +2,6 @@ import { useEffect, useState } from 'react'
 
 /** 本地图片/视频预览：本地路径经主进程 IPC 读成 data URL（避开 file:// 安全限制与自定义协议坑） */
 
-export function isRenderable(src: string | null | undefined): boolean {
-  if (!src) return false
-  return (
-    /^(https?:|data:)/i.test(src) ||
-    /^[a-zA-Z]:[\\/]/.test(src) ||
-    src.startsWith('\\\\') ||
-    src.startsWith('/') ||
-    /^file:/i.test(src)
-  )
-}
-
 function toLocalPath(src: string): string {
   if (/^file:/i.test(src)) {
     try {
@@ -24,25 +13,6 @@ function toLocalPath(src: string): string {
     }
   }
   return src
-}
-
-/** 把本地绝对路径转成 appmedia:// URL（用于 <video> 流式播放，避免大文件转 base64） */
-export function appmediaSrc(src: string | null | undefined): string | null {
-  if (!src) return null
-  if (/^(https?:|data:|blob:|appmedia:)/i.test(src)) return src
-  let p = src
-  if (/^file:/i.test(p)) {
-    try {
-      p = decodeURIComponent(new URL(p).pathname)
-      if (/^\/[a-zA-Z]:/.test(p)) p = p.slice(1)
-    } catch {
-      // ignore
-    }
-  }
-  p = p.replace(/\\/g, '/')
-  if (/^[a-zA-Z]:\//.test(p)) return `appmedia:///${p}`
-  if (p.startsWith('//')) return `appmedia:${p}` // UNC
-  return `appmedia://${p}`
 }
 
 /** 把任意图片来源解析成 <img>/<video> 可用的 src；本地文件通过 IPC 读成 data URL */

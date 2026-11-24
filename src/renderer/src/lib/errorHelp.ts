@@ -66,7 +66,7 @@ export function explainError(raw: string | null | undefined): ErrorHelp | null {
   if (/econnrefused|fetch failed|connect.*refused|network|timeout|超时|无法连接/.test(m)) {
     return {
       reason: '连接 ComfyUI 失败（可能没启动或地址/端口不对）',
-      suggestion: '确认 ComfyUI 已启动且在运行（设置 → 环境检测 → 内置 ComfyUI 启动），检查地址端口后重试。'
+      suggestion: '确认 ComfyUI 已启动且在运行（设置 → ComfyUI 连接 → 本机 ComfyUI → 启动），检查地址端口后重试。'
     }
   }
   // 上传参考图

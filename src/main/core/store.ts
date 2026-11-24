@@ -31,6 +31,7 @@ export function emptyProject(name = '未命名项目'): Project {
       autoRetry: 1,
       retryDelaySec: 8,
       activeScriptId: script.id,
+      activeEpisodeId: null,
       presetId: 'auto'
     },
     scripts: [script],
@@ -55,6 +56,28 @@ function migrate(data: Project): Project {
 }
 
 /**
+ * 把后台写回的产物合并进"基于旧快照的待保存项目"：只补 incoming 里缺失的产物（按 file 去重），
+ * 不删除用户改动的字段。仅在乐观锁检测到快照过期时调用。
+ */
+function mergeBackgroundOutputs(incoming: Project, current: Project): void {
+  for (const curShot of current.shots ?? []) {
+    const target = (incoming.shots ?? []).find((s) => s.id === curShot.id)
+    if (!target) continue
+    const have = new Set((target.outputs ?? []).map((o) => o.file))
+    for (const o of curShot.outputs ?? []) {
+      if (!have.has(o.file)) (target.outputs ??= []).push({ ...o })
+    }
+  }
+  for (const curAsset of current.assets ?? []) {
+    const target = (incoming.assets ?? []).find((a) => a.id === curAsset.id)
+    if (!target) continue
+    const have = new Set(target.images ?? [])
+    for (const f of curAsset.images ?? []) if (!have.has(f)) (target.images ??= []).push(f)
+    if (!target.coverFile && curAsset.coverFile) target.coverFile = curAsset.coverFile
+  }
+}
+
+/**
  * 项目仓库：一个项目一个目录，project.json + media/ 子目录。
  * 不引入数据库，文件即真相，方便备份与迁移。
  */
@@ -64,6 +87,8 @@ export class ProjectStore {
   private readonly projectsDir: string
   /** 串行化 flush：多个调用方（jobs 回写 / 防抖保存 / 窗口关闭）可能并发，排队依次写盘 */
   private flushChain: Promise<void> = Promise.resolve()
+  /** 运行时乐观锁计数：任何对 current 的写入都递增，供渲染层保存时判断是否基于过期快照 */
+  private rev = 0
 
   constructor(projectsDir: string) {
     this.projectsDir = projectsDir
@@ -106,14 +131,21 @@ export class ProjectStore {
     await this.init()
     const p = emptyProject(name)
     this.current = p
+    this.rev += 1
+    p.rev = this.rev
     await this.flush()
     return p
   }
 
   async open(id: string): Promise<Project> {
+    // 先把队列里待写的工程落盘再读——否则会读到旧数据，把 current（连同后台刚写回的产物）拉回过去
+    await this.flush()
     const file = path.join(this.projectsDir, id, PROJECT_FILE)
     const raw = await fsp.readFile(file, 'utf8')
     this.current = migrate(parseJsonLoose(raw) as Project)
+    // 新读入的快照给一个新的乐观锁版本：渲染层之后保存时才有新旧依据
+    this.rev += 1
+    this.current.rev = this.rev
     return this.current
   }
 
@@ -121,10 +153,30 @@ export class ProjectStore {
     return this.current
   }
 
-  /** 渲染进程把整份项目数据回传保存（落盘后再返回，避免随后重读磁盘拿到旧数据） */
+  /** 给 IPC 用的快照：带上乐观锁 rev，渲染层保存时原样回传以校验是否过期 */
+  snapshot(): Project | null {
+    if (!this.current) return null
+    return { ...structuredClone(this.current), rev: this.rev }
+  }
+
+  /**
+   * 渲染进程把整份项目数据回传保存（落盘后再返回，避免随后重读磁盘拿到旧数据）。
+   * 乐观锁：若 project.rev 缺失或落后于当前 rev，说明渲染层拿着的是旧快照
+   * （openProject 返回的旧对象 / 页面滞留的 state），期间可能已有后台写入
+   * （生成产物回写）——此时把 current 里的产物合并回来再保存，避免旧快照把
+   * 刚生成的产物抹掉（表现为「生成完成但资产里不显示」）。
+   * rev 一致则直接保存（用户主动删除版本的意图能正常生效）。
+   */
   async save(project: Project): Promise<Project> {
+    if (this.current && project.rev !== this.rev) {
+      mergeBackgroundOutputs(project, this.current)
+    }
+    const nextRev = this.rev + 1
     project.updatedAt = now()
-    this.current = migrate(project)
+    const saved = migrate(project)
+    saved.rev = nextRev
+    this.current = saved
+    this.rev = nextRev
     await this.flush()
     return this.current
   }
@@ -154,12 +206,73 @@ export class ProjectStore {
     if (fs.existsSync(file)) {
       await fsp.copyFile(file, `${file}.bak`).catch(() => undefined)
     }
-    await fsp.rename(tmp, file)
+    // Windows 上 project.json 可能被杀毒/索引/另一实例瞬时占用，rename 会抛 EPERM。
+    // 这里重试；仍失败则回退为直接覆盖写，保证工程一定能落盘（否则删除等写操作会静默丢失）。
+    let renamed = false
+    for (let i = 0; i < 6; i++) {
+      try {
+        await fsp.rename(tmp, file)
+        renamed = true
+        break
+      } catch {
+        await new Promise((r) => setTimeout(r, 120))
+      }
+    }
+    if (!renamed) {
+      try {
+        await fsp.writeFile(file, body, 'utf8')
+        await fsp.rm(tmp, { force: true })
+      } catch (err) {
+        // 兜底也失败时留下 tmp（不误删），并明确抛出，让前端能提示用户
+        throw new Error(`工程保存失败：${String((err as Error).message ?? err)}`)
+      }
+    }
   }
 
   mediaDir(): string {
     if (!this.current) throw new Error('没有打开的项目')
-    return path.join(this.projectRoot(this.current.id), 'media')
+    return this.mediaDirFor(this.current.id)
+  }
+
+  /** 指定工程的 media 目录（不依赖 current，供后台任务归档到提交时的工程） */
+  mediaDirFor(id: string): string {
+    return path.join(this.projectRoot(id), 'media')
+  }
+
+  /**
+   * 后台任务回写：把产物写进"提交任务时的工程"，即使此时用户已切到别的工程。
+   * - 目标就是 current：直接改内存 current（前端 done 快照能拿到），再落盘。
+   * - 目标不是 current：从磁盘读出来改完写回，绝不动 current，避免把用户正在看的工程切走。
+   * 两条路径都复用 flushChain 串行化，避免与防抖保存/窗口关闭写盘互相覆盖。
+   */
+  async mutateProject(id: string, fn: (p: Project) => void): Promise<boolean> {
+    if (this.current?.id === id) {
+      fn(this.current)
+      this.rev += 1
+      await this.flush()
+      return true
+    }
+    // 非当前工程：读盘 → 改 → 写盘（串行），不影响 current
+    const file = path.join(this.projectRoot(id), PROJECT_FILE)
+    let project: Project
+    try {
+      const raw = await fsp.readFile(file, 'utf8')
+      project = migrate(parseJsonLoose(raw) as Project)
+    } catch {
+      return false
+    }
+    fn(project)
+    project.updatedAt = now()
+    this.flushChain = this.flushChain.then(async () => {
+      const root = this.projectRoot(id)
+      await fsp.mkdir(path.join(root, 'media'), { recursive: true })
+      const tmp = `${file}.${process.pid}.${Date.now()}.tmp`
+      await fsp.writeFile(tmp, JSON.stringify(project, null, 2), 'utf8')
+      if (fs.existsSync(file)) await fsp.copyFile(file, `${file}.bak`).catch(() => undefined)
+      await fsp.rename(tmp, file)
+    })
+    await this.flushChain
+    return true
   }
 
   /** 当前项目根目录（project.json 所在目录） */

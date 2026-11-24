@@ -78,15 +78,6 @@ export function sanitizeOutputName(name: string, d = new Date()): string {
   return n || 'output'
 }
 
-/** 规范化完整相对路径（逐段处理，保留 / 分隔与子目录） */
-export function sanitizeOutputPath(relPath: string, d = new Date()): string {
-  const parts = String(relPath ?? '')
-    .split(/[\\/]+/)
-    .filter(Boolean)
-    .map((seg) => sanitizeOutputName(seg, d))
-  return parts.join('/')
-}
-
 /**
  * 从多个产物里挑「最终清晰版」。
  * H3 三采工作流依次产出 一采/二采/三采，必须选三采；
@@ -105,6 +96,14 @@ export interface StagePick {
  * H3 三采工作流会依次产出 一采 → 二采 → 三采（三个独立输出节点）。
  * 用户只勾一采时，就只要一采那一条，不要后面的放大/重绘版本。
  */
+
+/** 各生成阶段产物的文件名匹配规则（唯一实现，jobs.ts waitForOutput 复用，勿在别处手写副本） */
+export const STAGE_RES = {
+  first: /一采|_N467|first_?pass/i,
+  second: /二采|second_?pass/i,
+  third: /三采|final|_N471|3rd/i
+} as const
+
 export function pickFinalMedia(
   files: MediaFile[],
   kind: 'image' | 'video',
@@ -115,11 +114,7 @@ export function pickFinalMedia(
   if (kind !== 'video') return all.slice(-1)
 
   const s = stages ?? { first: true, second: true, third: true, superRes: false }
-  const RE = {
-    first: /一采|_N467|first_?pass/i,
-    second: /二采|second_?pass/i,
-    third: /三采|final|_N471|3rd/i
-  }
+  const RE = STAGE_RES
   const order: ('third' | 'second' | 'first')[] = ['third', 'second', 'first']
   for (const key of order) {
     if (!s[key]) continue

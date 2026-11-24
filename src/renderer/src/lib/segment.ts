@@ -2,18 +2,36 @@ import type { Shot, SegmentSettings, UpscaleSettings, RifeSettings } from '@shar
 
 /** 分段导演台：段参数默认值 / 工具 */
 
+export const RATIO_OPTIONS = ['16:9', '9:16', '4:3', '3:4', '1:1', '21:9'] as const
+
+/**
+ * 由宽高推出最接近的标准比例标签。
+ * ratio 只用于 UI 分组（后端并不读它），所以对小尺寸的低配档也归一到标准比例：
+ * 576×320(1.80)、896×480(1.87) 都归 16:9；绝不再返回 "576:320" 这种数字串。
+ * 横屏/竖屏分别只在横屏/竖屏比例里找，避免 16:9 被误判成 21:9。
+ */
 export function ratioOf(w: number, h: number): string {
   const r = w / h
+  const landscape = r >= 1
   const known: [string, number][] = [
     ['16:9', 16 / 9],
-    ['9:16', 9 / 16],
     ['4:3', 4 / 3],
-    ['3:4', 3 / 4],
     ['1:1', 1],
-    ['21:9', 21 / 9]
+    ['21:9', 21 / 9],
+    ['9:16', 9 / 16],
+    ['3:4', 3 / 4]
   ]
-  for (const [label, v] of known) if (Math.abs(r - v) < 0.02) return label
-  return `${w}:${h}`
+  const candidates = known.filter(([, v]) => (v >= 1) === landscape)
+  let best = landscape ? '16:9' : '9:16'
+  let bestDiff = Infinity
+  for (const [label, v] of candidates) {
+    const diff = Math.abs(r - v)
+    if (diff < bestDiff) {
+      bestDiff = diff
+      best = label
+    }
+  }
+  return best
 }
 
 /**

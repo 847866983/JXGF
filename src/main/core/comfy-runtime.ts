@@ -32,7 +32,9 @@ async function isAlive(pid: number): Promise<boolean> {
         (_err, out) => resolve(String(out ?? ''))
       )
     })
-    const alive = stdout.includes(String(pid))
+    // 必须校验映像名是 python：pid 可能被其它进程复用（实测被 WorkBuddy 的 node.exe
+    // 复用后，stop/start 会误判 ComfyUI 还活着而"复用"一个早已死掉的实例）
+    const alive = /^[^"]*python/i.test(stdout) && stdout.includes(String(pid))
     aliveCache.set(pid, { at: Date.now(), alive })
     return alive
   } catch {
@@ -229,6 +231,16 @@ export class ComfyRuntime extends EventEmitter {
     // 启动，可彻底隐藏窗口；同时用 -PassThru 回读真实 pid 写入状态文件。
     const env_prefix =
       '$env:PYTHONIOENCODING="utf-8";$env:PYTHONUTF8="1";$env:PYTHONLEGACYWINDOWSSTDIO="0";'
+    // 低显存卡（<8GB）自动加 --lowvram：模型分块加载 + 及时卸载，显著降低峰值显存。
+    // 6GB 卡跑 H3 视频时，normalvram 会在模型加载阶段就 OOM（0.2 秒内失败）。
+    let vramArgs = ''
+    try {
+      const { nvidiaVramUsage } = await import('./hardware')
+      const vram = await nvidiaVramUsage()
+      if (vram && vram.totalMB > 0 && vram.totalMB < 8192) vramArgs = ",'--lowvram'"
+    } catch {
+      /* 探测失败就保持默认参数 */
+    }
     const psArgs = [
       '-NoProfile',
       '-NonInteractive',
@@ -236,7 +248,7 @@ export class ComfyRuntime extends EventEmitter {
       'Hidden',
       '-Command',
       `${env_prefix}$p=Start-Process -FilePath '${python.replace(/'/g, "''")}' ` +
-        `-ArgumentList @('-s','${mainPy.replace(/'/g, "''")}','--windows-standalone-build','--listen','127.0.0.1','--port','${port}') ` +
+        `-ArgumentList @('-s','${mainPy.replace(/'/g, "''")}','--windows-standalone-build','--listen','127.0.0.1','--port','${port}'${vramArgs}) ` +
         `-WorkingDirectory '${path.dirname(mainPy).replace(/'/g, "''")}' -WindowStyle Hidden -PassThru ` +
         `-RedirectStandardOutput '${logPath.replace(/'/g, "''")}' -RedirectStandardError '${logPath.replace(/'/g, "''")}.err'; ` +
         `$p.Id`

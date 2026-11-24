@@ -68,20 +68,31 @@ export function EmptyState({
   title,
   desc,
   icon,
-  action
+  action,
+  compact
 }: {
   title: string
   desc?: string
   icon?: ReactNode
   action?: ReactNode
+  /** 紧凑模式：内边距与图标更小，适合嵌在时间轴/面板内部 */
+  compact?: boolean
 }): React.JSX.Element {
   return (
-    <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-white/10 bg-white/[0.01] px-8 py-14 text-center">
-      <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-white/[0.04] text-slate-500">
-        {icon ?? <Inbox size={22} />}
+    <div
+      className={`flex flex-col items-center justify-center rounded-xl border border-dashed border-white/10 bg-white/[0.01] text-center ${
+        compact ? 'px-6 py-6' : 'px-8 py-14'
+      }`}
+    >
+      <div
+        className={`mb-3 flex items-center justify-center rounded-2xl bg-white/[0.04] text-slate-500 ${
+          compact ? 'h-8 w-8' : 'h-12 w-12'
+        }`}
+      >
+        {icon ?? <Inbox size={compact ? 16 : 22} />}
       </div>
-      <div className="text-sm font-medium text-slate-300">{title}</div>
-      {desc && <div className="mt-1 max-w-md text-xs text-slate-500">{desc}</div>}
+      <div className={`font-medium text-slate-300 ${compact ? 'text-xs' : 'text-sm'}`}>{title}</div>
+      {desc && <div className={`mt-1 max-w-md text-slate-500 ${compact ? 'text-[11px]' : 'text-xs'}`}>{desc}</div>}
       {action && <div className="mt-4">{action}</div>}
     </div>
   )

@@ -1,21 +1,21 @@
-import { useEffect, useRef, useState, type ChangeEvent } from 'react'
-import { Copy, Download, FileUp, Plug, RefreshCw, RotateCw, Save, ShieldCheck, Sparkles, Workflow } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { Copy, Download, Play, Plug, RefreshCw, RotateCw, Save, ShieldCheck, Square } from 'lucide-react'
 import type { ComfySettings } from '@shared/types'
 import { useApp } from '../store/app'
 import { PageHeader } from '../components/ui'
-import { AiSettings } from '../components/AiSettings'
 import { NodeCatalogPanel } from '../components/NodeCatalogPanel'
 
 const DEFAULT_COMFY: ComfySettings = { host: '127.0.0.1', port: 8188, protocol: 'http' }
 
 export default function Settings(): React.JSX.Element {
   const comfy = useApp((s) => s.comfy)
+  const comfyRuntime = useApp((s) => s.comfyRuntime)
+  const refreshComfyRuntime = useApp((s) => s.refreshComfyRuntime)
   const update = useApp((s) => s.update)
   const project = useApp((s) => s.project)
   const refreshComfy = useApp((s) => s.refreshComfy)
   const testComfy = useApp((s) => s.testComfy)
   const saveProject = useApp((s) => s.saveProject)
-  const importTemplate = useApp((s) => s.importTemplate)
   const loadUpdate = useApp((s) => s.loadUpdate)
 
   const saved = project?.settings.comfy ?? DEFAULT_COMFY
@@ -23,14 +23,20 @@ export default function Settings(): React.JSX.Element {
   const [port, setPort] = useState(String(saved.port))
   const [protocol, setProtocol] = useState<'http' | 'https'>(saved.protocol)
   const [savedFlag, setSavedFlag] = useState(false)
+  /** ComfyUI 运行时：根目录 / 端口 / 操作忙碌 / 错误提示 */
+  const [runtimeRoot, setRuntimeRoot] = useState('')
+  const [runtimePort, setRuntimePort] = useState('8188')
+  const [runtimeBusy, setRuntimeBusy] = useState(false)
+  const [runtimeError, setRuntimeError] = useState<string | null>(null)
+  // 运行时状态变化时同步输入框（首次 / 启动停止后）
+  useEffect(() => {
+    if (!comfyRuntime) return
+    setRuntimeRoot(comfyRuntime.root ?? '')
+    setRuntimePort(String(comfyRuntime.port ?? 8188))
+  }, [comfyRuntime?.root, comfyRuntime?.port])
   const [testResult, setTestResult] = useState<{ ok: boolean; version: string; error: string | null } | null>(null)
   const [checking, setChecking] = useState(false)
   const [downloading, setDownloading] = useState(false)
-  const [importError, setImportError] = useState<string | null>(null)
-  /** 从 ComfyUI 同步：进行中 / 结果提示 */
-  const [syncing, setSyncing] = useState(false)
-  const [syncResult, setSyncResult] = useState<string | null>(null)
-  const fileRef = useRef<HTMLInputElement>(null)
   const [mcp, setMcp] = useState<{
     command: string
     args: string[]
@@ -63,17 +69,75 @@ export default function Settings(): React.JSX.Element {
   }
 
   const saveComfy = async (): Promise<void> => {
-    if (!project) return
+    // 基于主进程最新快照改，避免闭包里的旧 project 整份覆盖掉后台写回的产物
+    const latest = await window.api.projectGetCurrent()
+    if (!latest) return
     const next = {
-      ...project,
+      ...latest,
       settings: {
-        ...project.settings,
+        ...latest.settings,
         comfy: { host: host.trim() || '127.0.0.1', port: Number(port) || 8188, protocol }
       }
     }
     await saveProject(next)
     setSavedFlag(true)
     setTimeout(() => setSavedFlag(false), 2000)
+  }
+
+  /** 保存 ComfyUI 根目录 / 端口（runtime.json，独立于连接配置） */
+  const saveRuntimeConfig = async (): Promise<void> => {
+    setRuntimeError(null)
+    try {
+      const st = await window.api.comfyRuntimeSetConfig({
+        root: runtimeRoot.trim() || null,
+        port: Number(runtimePort) || 8188,
+        python: null
+      })
+      await refreshComfyRuntime()
+      // 让"测试连接/生成"用的端口与运行时端口保持一致
+      if (String(st.port) !== port) {
+        setPort(String(st.port))
+        await window.api.projectGetCurrent().then(async (latest) => {
+          if (!latest) return
+          await saveProject({
+            ...latest,
+            settings: { ...latest.settings, comfy: { ...latest.settings.comfy, port: st.port } }
+          })
+        })
+      }
+      setSavedFlag(true)
+      setTimeout(() => setSavedFlag(false), 2000)
+    } catch (err) {
+      setRuntimeError(`保存路径失败：${String((err as Error).message ?? err)}`)
+    }
+  }
+
+  const startRuntime = async (): Promise<void> => {
+    setRuntimeBusy(true)
+    setRuntimeError(null)
+    try {
+      await window.api.comfyRuntimeStart()
+      await refreshComfyRuntime()
+      await refreshComfy()
+    } catch (err) {
+      setRuntimeError(`启动失败：${String((err as Error).message ?? err)}`)
+    } finally {
+      setRuntimeBusy(false)
+    }
+  }
+
+  const stopRuntime = async (): Promise<void> => {
+    setRuntimeBusy(true)
+    setRuntimeError(null)
+    try {
+      await window.api.comfyRuntimeStop()
+      await refreshComfyRuntime()
+      await refreshComfy()
+    } catch (err) {
+      setRuntimeError(`停止失败：${String((err as Error).message ?? err)}`)
+    } finally {
+      setRuntimeBusy(false)
+    }
   }
 
   const downloadUpdate = (): void => {
@@ -94,69 +158,6 @@ export default function Settings(): React.JSX.Element {
     })
   }
 
-  /**
-   * 从 ComfyUI 网页端同步工作流。
-   * 按工作流名字匹配项目里已有的模板，整份替换成网页端的最新版本
-   * （你在网页端关掉的 LoRA、改过的采样器参数都会同步过来）。
-   */
-  const onSyncFromComfy = async (): Promise<void> => {
-    if (!project) return
-    setSyncing(true)
-    setSyncResult(null)
-    setImportError(null)
-    try {
-      const { items } = (await window.api.workflowSyncList()) as {
-        comfyRoot: string
-        items: { file: string; name: string; inProject: boolean; mtime: string }[]
-      }
-      if (items.length === 0) {
-        setImportError('ComfyUI 的 workflows 目录里没有找到工作流文件')
-        return
-      }
-      // 同步全部（已存在的整份替换，缺的新增）
-      const res = (await window.api.workflowSyncApply(items.map((i) => i.file))) as {
-        replaced: number
-        added: number
-        failed: { file: string; error: string }[]
-      }
-      const parts: string[] = []
-      if (res.replaced > 0) parts.push(`替换 ${res.replaced} 个`)
-      if (res.added > 0) parts.push(`新增 ${res.added} 个`)
-      if (res.failed.length > 0) parts.push(`失败 ${res.failed.length} 个`)
-      setSyncResult(parts.length > 0 ? `同步完成：${parts.join('，')}` : '没有需要同步的工作流')
-      if (res.failed.length > 0) {
-        setImportError(res.failed.map((f) => `${f.file}: ${f.error}`).join('\n'))
-      }
-      // 重新拉项目，让界面上的模板列表刷新
-      await useApp.getState().openProject(project.id)
-    } catch (err) {
-      setImportError(`同步失败：${String((err as Error).message ?? err)}`)
-    } finally {
-      setSyncing(false)
-    }
-  }
-
-  const onFile = async (e: ChangeEvent<HTMLInputElement>): Promise<void> => {
-    const file = e.target.files?.[0]
-    e.target.value = ''
-    if (!file) return
-    setImportError(null)
-    try {
-      const text = await file.text()
-      const json: unknown = JSON.parse(text)
-      // 兼容两种格式：UI 格式（nodes/links）会在主进程自动转 API；API 格式直接导入
-      const name = file.name.replace(/\.json$/i, '') || '未命名工作流'
-      const isUi = Boolean((json as { nodes?: unknown }).nodes && (json as { links?: unknown }).links)
-      // kind 交给主进程自动判定（UI 格式转换后判定，API 格式直接判定）
-      await importTemplate(name, undefined, json)
-      setImportError(null)
-      void isUi
-    } catch (err) {
-      setImportError(`导入失败：${String((err as Error).message ?? err)}`)
-    }
-  }
-
-  const templates = project?.templates ?? []
 
   /** 设置内容分类 */
   const ComfyConn = (
@@ -221,77 +222,80 @@ export default function Settings(): React.JSX.Element {
             {testResult.ok ? `连接成功，ComfyUI v${testResult.version}` : testResult.error}
           </div>
         )}
-      </div>
-    </div>
-  )
 
-  const WorkflowPanel = (
-    <div className="panel p-5">
-      <div className="mb-3 flex items-center justify-between">
-        <div className="flex items-center gap-2 text-sm font-medium text-white">
-          <Workflow size={15} className="text-accent-400" />
-          工作流模板
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            className="btn-ghost"
-            disabled={!project || syncing}
-            onClick={() => void onSyncFromComfy()}
-            title="从 ComfyUI 网页端重新拉取工作流配置（你在网页端改的 LoRA/参数会同步过来）"
-          >
-            <RefreshCw size={15} className={syncing ? 'animate-spin' : ''} />
-            {syncing ? '同步中…' : '从 ComfyUI 同步'}
-          </button>
-          <button
-            className="btn-primary"
-            disabled={!project}
-            onClick={() => fileRef.current?.click()}
-            title={project ? undefined : '请先打开项目'}
-          >
-            <FileUp size={15} />
-            导入工作流
-          </button>
-        </div>
-        <input ref={fileRef} type="file" accept=".json" className="hidden" onChange={(e) => void onFile(e)} />
-      </div>
-
-      <div className="mb-2 text-xs text-slate-500">
-        支持 ComfyUI 界面格式（含 nodes/links）与「导出（API）」格式；界面格式会自动转换为 API 格式。需 ComfyUI 在线。
-        <br />
-        <span className="text-slate-600">
-          在 ComfyUI 网页端改过工作流（关 LoRA、调参数…）后，点「从 ComfyUI 同步」按名字整份替换，软件才会用新配置。
-        </span>
-      </div>
-
-      {syncResult && (
-        <div className="mb-3 rounded-lg bg-emerald-500/10 px-3 py-2 text-sm text-emerald-300">{syncResult}</div>
-      )}
-
-      {importError && (
-        <div className="mb-3 rounded-lg bg-rose-500/10 px-3 py-2 text-sm text-rose-300">{importError}</div>
-      )}
-
-      {templates.length === 0 ? (
-        <div className="rounded-lg border border-dashed border-white/10 px-4 py-8 text-center text-sm text-slate-500">
-          {project ? '还没有模板，点击右上角「导入工作流」' : '请先打开项目，再导入工作流'}
-        </div>
-      ) : (
-        <div className="space-y-2">
-          {templates.map((t) => (
-            <div key={t.id} className="flex items-center gap-3 rounded-lg bg-white/[0.03] px-3 py-2.5">
-              <span
-                className={`rounded px-2 py-0.5 text-xs ${
-                  t.kind === 'video' ? 'bg-accent-600/15 text-accent-400' : 'bg-emerald-500/10 text-emerald-400'
-                }`}
-              >
-                {t.kind === 'video' ? '视频' : '图片'}
-              </span>
-              <span className="min-w-0 flex-1 truncate text-sm text-slate-200">{t.name}</span>
-              <span className="text-[11px] text-slate-500">{t.id.slice(0, 12)}</span>
+        {/* 本机 ComfyUI 运行时：路径 + 启动/停止（与上面的连接配置相互独立） */}
+        <div className="border-t border-white/10 pt-3">
+          <div className="mb-2 flex items-center gap-2 text-xs font-medium text-slate-300">
+            本机 ComfyUI
+            {(() => {
+              const s = comfyRuntime?.status ?? 'missing'
+              const map: Record<string, { label: string; tone: string }> = {
+                missing: { label: '未安装', tone: 'text-slate-400' },
+                installed: { label: '已安装（未运行）', tone: 'text-amber-400' },
+                starting: { label: '启动中…', tone: 'text-accent-400' },
+                running: { label: '运行中', tone: 'text-emerald-400' },
+                stopped: { label: '已停止', tone: 'text-slate-400' },
+                error: { label: '出错', tone: 'text-rose-400' }
+              }
+              const m = map[s] ?? map.missing
+              return <span className={`rounded bg-white/5 px-2 py-0.5 text-[11px] ${m.tone}`}>{m.label}</span>
+            })()}
+            {comfyRuntime?.status === 'running' && (
+              <span className="text-[11px] text-slate-500">pid {comfyRuntime.pid} · 端口 {comfyRuntime.port}</span>
+            )}
+          </div>
+          <div className="grid grid-cols-[1fr_110px_auto] gap-2">
+            <div>
+              <label className="label">ComfyUI 路径（含 main.py 或 ComfyUI\ 子目录）</label>
+              <input
+                className="field"
+                placeholder="例如 E:\ComfyUI"
+                value={runtimeRoot}
+                onChange={(e) => setRuntimeRoot(e.target.value)}
+              />
             </div>
-          ))}
+            <div>
+              <label className="label">端口</label>
+              <input className="field" value={runtimePort} onChange={(e) => setRuntimePort(e.target.value)} />
+            </div>
+            <div className="flex items-end gap-2">
+              <button className="btn-ghost" onClick={() => void saveRuntimeConfig()} title="保存路径与端口">
+                <Save size={15} />
+              </button>
+            </div>
+          </div>
+          <div className="mt-2 flex gap-2">
+            {comfyRuntime?.status === 'running' ? (
+              <button className="btn-ghost" disabled={runtimeBusy} onClick={() => void stopRuntime()}>
+                <Square size={15} /> 停止
+              </button>
+            ) : (
+              <button
+                className="btn-primary"
+                disabled={runtimeBusy || !runtimeRoot.trim()}
+                title={runtimeRoot.trim() ? undefined : '请先填写并保存 ComfyUI 路径'}
+                onClick={() => void startRuntime()}
+              >
+                <Play size={15} /> 启动
+              </button>
+            )}
+            <button className="btn-ghost" disabled={runtimeBusy} onClick={() => void refreshComfyRuntime()}>
+              <RefreshCw size={15} /> 刷新状态
+            </button>
+          </div>
+          {runtimeError && <div className="mt-2 text-xs text-rose-400">{runtimeError}</div>}
+          {comfyRuntime?.status === 'missing' && (
+            <div className="mt-2 text-xs text-amber-300">
+              还没找到 ComfyUI：可填上面的路径并保存，或让软件自动检测（启动时会检测一次）。
+            </div>
+          )}
+          {comfyRuntime?.logTail && (
+            <pre className="mt-2 max-h-32 overflow-auto rounded-lg bg-ink-950/70 p-2 font-mono text-[11px] leading-relaxed text-slate-400">
+              {comfyRuntime.logTail}
+            </pre>
+          )}
         </div>
-      )}
+      </div>
     </div>
   )
 
@@ -447,7 +451,7 @@ export default function Settings(): React.JSX.Element {
 
   return (
     <div>
-      <PageHeader title="设置" desc="ComfyUI 连接、工作流、AI 接入与更新" />
+      <PageHeader title="设置" desc="ComfyUI 连接、节点能力、MCP 接入与更新" />
 
       <div className="px-8 pb-8 space-y-4">
         {/* 一、ComfyUI 连接 */}
@@ -456,40 +460,21 @@ export default function Settings(): React.JSX.Element {
           {ComfyConn}
         </section>
 
-        {/* 二、工作流模板 */}
+        {/* 二、节点能力总览 */}
         <section>
-          <div className="mb-2 text-xs font-medium text-slate-500">二 · 工作流模板</div>
-          {WorkflowPanel}
-        </section>
-
-        {/* 三、节点能力总览 */}
-        <section>
-          <div className="mb-2 text-xs font-medium text-slate-500">三 · 节点能力总览</div>
+          <div className="mb-2 text-xs font-medium text-slate-500">二 · 节点能力总览</div>
           <NodeCatalogPanel />
         </section>
 
-        {/* 四、AI 与接入 */}
+        {/* 三、MCP 接入（AI 助手调用） */}
         <section>
-          <div className="mb-2 text-xs font-medium text-slate-500">四 · AI 与接入</div>
-          <div className="space-y-4">
-            {McpPanel}
-            <div className="panel p-5">
-              <div className="mb-3 flex items-center gap-2 text-sm font-medium text-white">
-                <Sparkles size={15} className="text-accent-400" />
-                AI 助手（内置大模型）
-              </div>
-              <div className="mb-3 text-xs text-slate-500">
-                给软件内置的「AI 助手」配置大模型接口（OpenAI 兼容）。配好后到左侧「AI 助手」页即可对话；
-                它会自动读取记忆库、按 H3 规则写分镜并可调机检。
-              </div>
-              <AiSettings />
-            </div>
-          </div>
+          <div className="mb-2 text-xs font-medium text-slate-500">三 · MCP 接入</div>
+          {McpPanel}
         </section>
 
-        {/* 五、关于与更新 */}
+        {/* 四、关于与更新 */}
         <section>
-          <div className="mb-2 text-xs font-medium text-slate-500">五 · 关于与更新</div>
+          <div className="mb-2 text-xs font-medium text-slate-500">四 · 关于与更新</div>
           {AboutPanel}
         </section>
       </div>

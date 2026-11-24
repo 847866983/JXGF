@@ -7,9 +7,12 @@ import {
   Film,
   FolderKanban,
   LayoutDashboard,
+  Loader2,
+  Play,
   Server,
   Settings,
-  Sparkles
+  Sparkles,
+  Square
 } from 'lucide-react'
 import type { ProjectSummary } from '@shared/types'
 import { useApp } from '../store/app'
@@ -27,12 +30,35 @@ const items = [
 export function Sidebar(): React.JSX.Element {
   const project = useApp((s) => s.project)
   const comfy = useApp((s) => s.comfy)
+  const comfyRuntime = useApp((s) => s.comfyRuntime)
   const listProjects = useApp((s) => s.listProjects)
   const openProject = useApp((s) => s.openProject)
+  const refreshComfy = useApp((s) => s.refreshComfy)
+  const refreshComfyRuntime = useApp((s) => s.refreshComfyRuntime)
 
   const [projects, setProjects] = useState<ProjectSummary[]>([])
+  const [runtimeBusy, setRuntimeBusy] = useState(false)
+  const [runtimeErr, setRuntimeErr] = useState<string | null>(null)
 
   // ComfyUI 状态改为 App 根组件统一轮询（单一数据源），这里不再各自起定时器
+
+  /** 手动启动/停止本机 ComfyUI（软件启动不再自动拉起） */
+  const toggleRuntime = async (): Promise<void> => {
+    if (runtimeBusy) return
+    const running = comfyRuntime?.status === 'running'
+    setRuntimeBusy(true)
+    setRuntimeErr(null)
+    try {
+      if (running) await window.api.comfyRuntimeStop()
+      else await window.api.comfyRuntimeStart()
+      await refreshComfyRuntime()
+      await refreshComfy()
+    } catch (err) {
+      setRuntimeErr(`${running ? '停止' : '启动'}失败：${String((err as Error)?.message ?? err)}`)
+    } finally {
+      setRuntimeBusy(false)
+    }
+  }
 
   // 加载项目列表（用于切换）
   useEffect(() => {
@@ -68,7 +94,7 @@ export function Sidebar(): React.JSX.Element {
         </div>
         <div>
           <div className="text-sm font-semibold tracking-wide text-white">镜序工坊</div>
-          <div className="text-[10px] uppercase tracking-widest text-slate-500">JingXu Studio</div>
+          <div className="text-[11px] uppercase tracking-widest text-slate-500">JingXu Studio</div>
         </div>
       </div>
 
@@ -94,9 +120,21 @@ export function Sidebar(): React.JSX.Element {
       {/* ComfyUI 运行信息 */}
       <div className="border-t border-white/5 px-4 py-3">
         <div className="rounded-lg bg-ink-850 p-3">
-          <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-widest text-slate-500">
-            <Server size={11} />
-            ComfyUI
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-widest text-slate-500">
+              <Server size={11} />
+              ComfyUI
+            </div>
+            <button
+              type="button"
+              disabled={runtimeBusy}
+              onClick={() => void toggleRuntime()}
+              title={comfy?.online ? '关闭本机 ComfyUI' : '启动本机 ComfyUI'}
+              className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-slate-300 transition-colors hover:bg-white/10 hover:text-white disabled:opacity-50"
+            >
+              {runtimeBusy ? <Loader2 size={12} className="animate-spin" /> : comfy?.online ? <Square size={11} /> : <Play size={11} />}
+              {runtimeBusy ? '处理中' : comfy?.online ? '关闭' : '启动'}
+            </button>
           </div>
           <div className="mt-1.5 flex items-center gap-2">
             <span
@@ -108,6 +146,7 @@ export function Sidebar(): React.JSX.Element {
               {comfy?.online ? '运行中' : '未连接'}
             </span>
           </div>
+          {runtimeErr && <div className="mt-1.5 text-[11px] leading-snug text-rose-400">{runtimeErr}</div>}
           {comfy?.online && (
             <div className="mt-2 space-y-2 text-[11px] text-slate-400">
               <div className="flex justify-between">
@@ -159,7 +198,7 @@ export function Sidebar(): React.JSX.Element {
 
       <div className="border-t border-white/5 p-4">
         <div className="rounded-lg bg-ink-850 p-3">
-          <div className="text-[10px] uppercase tracking-widest text-slate-500">当前项目</div>
+          <div className="text-[11px] uppercase tracking-widest text-slate-500">当前项目</div>
           <select
             className="field mt-1.5 w-full"
             value={project?.id ?? ''}

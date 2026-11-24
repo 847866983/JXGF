@@ -20,10 +20,10 @@ function randomSeed(): number {
 }
 import { convertUiToApi, isUiWorkflow } from './workflow-convert'
 import { detectGpu } from './hardware'
-import { adaptTemplateForGpu } from './template-adapt'
-import { appendRefTags, buildWorkflow, extractH3Chain, injectH3Prompt, injectH3RefImages, injectH3RefVideos } from './workflow'
+import { adaptTemplateForGpu, degradeMissingLoras } from './template-adapt'
+import { appendRefTags, buildWorkflow, extractH3Chain, injectH3Prompt, injectH3RefImages, injectH3RefVideos, setH3ChainClip } from './workflow'
 import { uid, now, ProjectStore } from './store'
-import { collectMediaFiles, collectHistoryFiles, pickFinalMedia, sanitizeOutputName, type MediaFile } from './output-files'
+import { collectMediaFiles, collectHistoryFiles, pickFinalMedia, sanitizeOutputName, STAGE_RES, type MediaFile } from './output-files'
 import { buildBuiltinTemplates } from './builtin-workflows'
 
 /** 任务诊断日志（写 userData/logs/jobs.log，便于排查生成失败） */
@@ -42,6 +42,8 @@ interface QueuedJob {
   params: JobParams
   template: Template
   settings: ComfySettings
+  /** 提交任务时的工程 id：产物必须归档回这个工程，即使生成期间用户切了工程 */
+  projectId: string
   attempt: number
 }
 
@@ -64,10 +66,13 @@ export class JobManager {
   private readonly store: ProjectStore
   /** 记录每个 jobId 的原始参数，供失败后一键重试 */
   private jobParams = new Map<string, JobParams>()
+  /** 生成时按需查 ComfyUI 模型根目录，用于缺失 LoRA 降级（不持久化，只作用于本次生成的工作流副本） */
+  private readonly modelsRootProvider?: () => string | null
 
-  constructor(store: ProjectStore, emit: Emit) {
+  constructor(store: ProjectStore, emit: Emit, modelsRootProvider?: () => string | null) {
     this.store = store
     this.emit = emit
+    this.modelsRootProvider = modelsRootProvider
   }
 
   list(): JobInfo[] {
@@ -79,12 +84,20 @@ export class JobManager {
     if (!project) throw new Error('请先打开一个项目')
     let template = project.templates.find((t) => t.id === params.templateId)
     if (!template) {
-      // 项目模板缺失（老项目 / 无模板项目）：先补内置工作流再重试一次
+      // 项目模板缺失（老项目 / 无模板项目）：先补内置工作流再重试一次。
+      // 注意：补进来的模板 id 是新建的随机值，按旧的 params.templateId 永远找不到——
+      // 必须先按 id 找，找不到再按用途兜底（分镜=video，资产=image），不能只找一次就放弃。
       const added = buildBuiltinTemplates(project.templates, uid, now)
       if (added.length > 0) {
         project.templates.push(...added)
         void this.store.flush()
-        template = project.templates.find((t) => t.id === params.templateId)
+        template =
+          project.templates.find((t) => t.id === params.templateId) ??
+          project.templates.find((t) => t.kind === (params.shotId ? 'video' : 'image')) ??
+          added[0]
+        if (template && template.id !== params.templateId) {
+          jobLog(`模板兜底：请求的 id=${params.templateId} 不存在，改用 ${template.kind} 模板 ${template.name}(${template.id})`)
+        }
       }
     }
     jobLog(`enqueue templateId=${params.templateId} assetId=${params.assetId ?? '-'} 模板=${template?.name ?? '未找到'} 项目模板数=${project.templates.length}`)
@@ -100,7 +113,7 @@ export class JobManager {
     }
     this.jobs.set(info.id, info)
     this.jobParams.set(info.id, params)
-    this.queue.push({ info, params, template, settings: project.settings.comfy, attempt: 0 })
+    this.queue.push({ info, params, template, settings: project.settings.comfy, projectId: project.id, attempt: 0 })
     this.emit('job:updated', { job: info })
     void this.pump()
     return info
@@ -149,7 +162,7 @@ export class JobManager {
   }
 
   private async runJob(q: QueuedJob): Promise<void> {
-    const { info, params, template, settings } = q
+    const { info, params, template, settings, projectId } = q
     const project = this.store.getCurrent()
     info.status = 'running'
     info.startedAt = now()
@@ -166,11 +179,23 @@ export class JobManager {
       let useTemplate = template
       if (isUiWorkflow(template.apiJson)) {
         try {
-          const api = await convertUiToApi(template.apiJson, settings, { keepSuperRes: params.stages?.superRes === true, stageParams: params.stageParams })
+          const api = await convertUiToApi(template.apiJson, settings, {
+            keepSuperRes: params.stages?.superRes === true,
+            stages: params.stages,
+            stageParams: params.stageParams
+          })
           // 转完再按本机显存降级（6GB 卡：免模型放大 + 省显存档位）。
           // 界面格式模板在导入时做不了这一步（那是 UI 数组，不是节点字典）。
           const gpu = await detectGpu()
-          useTemplate = { ...template, apiJson: adaptTemplateForGpu(api, gpu) }
+          let adapted = adaptTemplateForGpu(api, gpu)
+          // 缺失 LoRA 降级：只作用于本次生成的工作流副本，不写回用户模板。
+          // 之前是打开工程时持久化改写，会静默改掉用户手动调过的 LoRA 强度——已移除。
+          const modelsRoot = this.modelsRootProvider?.() ?? null
+          if (modelsRoot) {
+            const degraded = degradeMissingLoras(adapted, modelsRoot)
+            if (degraded !== adapted) adapted = degraded as typeof adapted
+          }
+          useTemplate = { ...template, apiJson: adapted }
         } catch (err) {
           throw new Error(`界面格式工作流转换失败（需要 ComfyUI 在线）：${String((err as Error).message ?? err)}`)
         }
@@ -181,6 +206,10 @@ export class JobManager {
       // 所以用户没指定种子时，一律随机一个，确保每次都真正执行出新图。
       const effectiveSeed = params.seed ?? randomSeed()
       jobLog(`job种子 promptId=- 种子=${effectiveSeed} ${params.seed === undefined ? '(随机)' : '(用户指定)'}`)
+      // 「编辑跟随参考图」判定：有参考图 + 没给显式宽高（0/undefined 均视为未给）。
+      // 文生图无参考图、四视图给了显式宽高，都不命中——只有图片编辑走放大链 2K 交付。
+      const refCount = Array.isArray(params.refImages) ? params.refImages.filter(Boolean).length : 0
+      const editFollowRef = template.kind === 'image' && refCount > 0 && !(params.width && params.height)
       const workflow = buildWorkflow(useTemplate, {
         positive: params.positive,
         globalPrompt: params.globalPrompt,
@@ -194,22 +223,28 @@ export class JobManager {
         cfg: params.cfg,
         samplerName: params.samplerName,
         scheduler: params.scheduler,
-        keepTemplateSampler: params.keepTemplateSampler,
         h3: params.h3,
-        // 图片任务默认**不放大**：很多生图模板里焊死了「高清放大 2×」，
-        // 2000 宽的图会被放大到 4000+（像素翻 4 倍），6GB 卡直接卡死。
-        // 资产图不需要 4K，交给模板作者的原配置反而更慢。
+        // 图片任务放大链口径（20261124 与 2K 需求一起重定）：
+        //   · 文生图（无参考图/显式宽高）——画布已是原生 2K（2048²），不再放大；
+        //   · 四视图——画布 2000×1200 已是 2K 级，且放大链会把排版二次放大到
+        //     4000 宽破坏面板结构，必须关闭；
+        //   · 图片编辑（有参考图且未给显式宽高，画布跟随参考图）——主输出只有
+        //     参考图的 1MP，开启模板自带的「高清放大 2×」把交付拉到 2K 长边，
+        //     这也是用户指定「编辑也原样 2K」的实现路径。
+        // 之前一刀切关闭是因为旧模板链路会把 2000 宽放大到 4000+ 卡死 6GB 卡；
+        // 现在只对「编辑跟随参考图」这一种场景开启，且 denoise 已在
+        // applyUpscaleParams 里压到 0.25（轻度细化，不毁编辑内容）。
         upscale:
           params.upscale ??
           (template.kind === 'image'
             ? {
-                enabled: false,
+                enabled: editFollowRef,
                 mode: '倍数' as const,
-                scale: 1,
-                targetWidth: 1280,
-                targetHeight: 704,
+                scale: editFollowRef ? 2 : 1,
+                targetWidth: 2048,
+                targetHeight: 2048,
                 steps: 2,
-                denoise: 0.45,
+                denoise: 0.25,
                 audioDenoise: 0.3,
                 sampler: 'euler',
                 scheduler: 'simple',
@@ -231,41 +266,49 @@ export class JobManager {
       const refImages = Array.isArray(params.refImages) ? params.refImages.filter(Boolean) : []
       const refAliases = Array.isArray(params.refAliases) ? params.refAliases : []
       if (refImages.length > 0) {
-        try {
-          const uploaded: string[] = []
-          for (const localPath of refImages) {
+        const uploaded: string[] = []
+        const failed: string[] = []
+        for (const localPath of refImages) {
+          try {
             const up = await this.client.uploadImage(localPath)
             uploaded.push(up.subfolder ? `${up.subfolder}/${up.name}` : up.name)
+          } catch (err) {
+            failed.push(`${path.basename(localPath)}: ${String((err as Error).message ?? err)}`)
           }
-          injectH3RefImages(workflow, uploaded, refAliases)
-          // 补 @图片N 引用：只在**别名模式关闭**时做。
-          // 别名模式开启时，提示词里的角色名会被 H3 按槽位 alias 展开成 @图片N；
-          // 这时再补一遍会把没提到的参考图也塞进去（6GB 卡上极易 OOM），
-          // 与导演台「提示词没提就不送」的口径相反。
-          if (params.h3?.alias === false) {
-            const tagged = appendRefTags(params.positive ?? '', uploaded)
-            if (tagged !== (params.positive ?? '')) {
-              injectH3Prompt(workflow, tagged, params.globalPrompt ?? '')
-            }
+        }
+        // 参考图是创作的关键输入：上传失败却静默按"无参考"生成，会得到完全不对的图
+        // 而界面显示"完成"。改为明确报错，让用户能及时发现并处理。
+        if (failed.length > 0) {
+          jobLog(`上传参考图失败 ${failed.length}/${refImages.length}: ${failed.join(' | ')}`)
+          throw new Error(`参考图上传失败（${failed.length}/${refImages.length}），未提交生成。请检查图片文件是否仍存在、ComfyUI 是否在线：${failed[0]}`)
+        }
+        injectH3RefImages(workflow, uploaded, refAliases)
+        // 补 @图片N 引用：只在**别名模式关闭**时做。
+        // 别名模式开启时，提示词里的角色名会被 H3 按槽位 alias 展开成 @图片N；
+        // 这时再补一遍会把没提到的参考图也塞进去（6GB 卡上极易 OOM），
+        // 与导演台「提示词没提就不送」的口径相反。
+        if (params.h3?.alias === false) {
+          const tagged = appendRefTags(params.positive ?? '', uploaded)
+          if (tagged !== (params.positive ?? '')) {
+            injectH3Prompt(workflow, tagged, params.globalPrompt ?? '')
           }
-        } catch (err) {
-          console.warn('[jobs] 上传参考图失败（不阻断生成）:', String((err as Error).message ?? err))
         }
       }
 
       // 参考视频：本段生成方式=视频参考时，上传上一段成片并写入媒体架 videos 槽
       const refVideos = Array.isArray(params.refVideos) ? params.refVideos.filter(Boolean) : []
       if (refVideos.length > 0) {
+        const uploaded: string[] = []
         try {
-          const uploaded: string[] = []
           for (const localPath of refVideos) {
             const up = await this.client.uploadImage(localPath)
             uploaded.push(up.subfolder ? `${up.subfolder}/${up.name}` : up.name)
           }
-          injectH3RefVideos(workflow, uploaded)
         } catch (err) {
-          console.warn('[jobs] 上传参考视频失败（不阻断生成）:', String((err as Error).message ?? err))
+          // 视频参考模式下缺了参考视频，结果是错的，明确失败而不是静默按无参考生成
+          throw new Error(`参考视频上传失败，未提交生成。请检查视频文件与 ComfyUI 在线状态：${String((err as Error).message ?? err)}`)
         }
+        injectH3RefVideos(workflow, uploaded)
       }
 
       // H3 链式续接：提交前登记工程名 + 当前段，否则存档节点会拒绝。
@@ -275,6 +318,10 @@ export class JobManager {
       if (chain) {
         try {
           registeredCid = await this.client.registerClip(chain.name, { shot: chain.shot, frames: params.frames })
+          // 用服务端返回的真实 clip id 覆盖前端按段序猜的 chain.clip（见 setH3ChainClip 注释）。
+          // 档案顺序错乱时（删段/重建/重排），猜的 clip_000N 会指向别人的段，H3 误当续写
+          // 而吐出累积片（段时长翻倍）。必须在 submit 前回填。
+          if (registeredCid) setH3ChainClip(workflow, registeredCid)
         } catch (err) {
           console.warn('[jobs] 登记段落失败（不阻断生成）:', String((err as Error).message ?? err))
         }
@@ -297,7 +344,7 @@ export class JobManager {
         this.emit('job:updated', { job: info })
         return
       }
-      const outputs = await this.waitForOutput(promptId, template.kind, info, settings, params.stages)
+      const outputs = await this.waitForOutput(promptId, template.kind, info, settings, params.stages, projectId)
       jobLog(`job完成 promptId=${promptId} kind=${template.kind} 产物数=${outputs.length} 文件=${outputs.map((o) => path.basename(o.file)).join(',')}`)
       info.outputs = outputs.map((o) => ({ file: o.file, kind: o.kind }))
       // 成片登记：把这次渲染的片子认领到段落档案里，时间轴/监视器才有东西可播。
@@ -309,13 +356,17 @@ export class JobManager {
           console.warn('[jobs] 成片登记失败（不阻断生成）:', String((err as Error).message ?? err))
         }
       }
-      this.writeShotOutputs(params.shotId, outputs)
-      await this.writeAssetOutputs(params.assetId, outputs) // 先落盘
+      await this.writeShotOutputs(projectId, params.shotId, outputs)
+      await this.writeAssetOutputs(projectId, params.assetId, outputs) // 先落盘
       info.status = 'done'
       info.progress = 100
       info.finishedAt = now()
-      // done 事件带上最新项目快照，前端直接用它刷新，避免重读磁盘的竞态
-      this.emit('job:updated', { job: info, project: this.store.getCurrent() })
+      // done 事件只在"用户当前看的就是提交工程"时带快照；否则带了会把前端切到错误工程
+      const currentIsTarget = this.store.getCurrent()?.id === projectId
+      this.emit('job:updated', {
+        job: info,
+        ...(currentIsTarget ? { project: this.store.getCurrent() } : {})
+      })
     } catch (err) {
       // 取消导致的退出：保持 cancelled 状态，不要被改写成 failed
       if (this.cancelled.has(info.id)) {
@@ -409,7 +460,8 @@ export class JobManager {
     kind: 'image' | 'video',
     info: JobInfo,
     settings: ComfySettings,
-    stagesIn?: { first: boolean; second: boolean; third: boolean; superRes: boolean }
+    stagesIn?: { first: boolean; second: boolean; third: boolean; superRes: boolean },
+    projectId?: string
   ): Promise<ShotOutput[]> {
     const client = this.client
     if (!client) throw new Error('ComfyUI 客户端未初始化')
@@ -433,11 +485,12 @@ export class JobManager {
       // 收集到的所有产物（WS executed 多次事件 + history 兜底）
       // 用户勾选的生成阶段（默认全开三采、超分关）
       const stages = stagesIn ?? { first: true, second: true, third: true, superRes: false }
+      // 复用 pickFinalMedia 的阶段匹配规则（唯一实现），避免两份正则漂移
       const targetRe = stages.third
-        ? /三采|final|_N471|3rd/i
+        ? STAGE_RES.third
         : stages.second
-          ? /二采|second_?pass/i
-          : /一采|_N467|first_?pass/i
+          ? STAGE_RES.second
+          : STAGE_RES.first
       const collected = new Map<string, MediaFile>()
       const addFiles = (files: MediaFile[]): void => {
         for (const f of files) if (f?.filename) collected.set(f.filename, f)
@@ -484,7 +537,8 @@ export class JobManager {
         }
         finish()
         try {
-          const media = this.store.mediaDir()
+          // 归档到提交任务时的工程，而不是此刻的 current（生成期间用户可能已切工程）
+          const media = projectId ? this.store.mediaDirFor(projectId) : this.store.mediaDir()
           const outputs: ShotOutput[] = []
           for (const f of finalFiles.slice(0, 12)) {
             const safeName = sanitizeOutputName(f.filename)
@@ -570,7 +624,9 @@ export class JobManager {
       const onCached = (e: { promptId?: string; nodes?: string[] }): void => {
         if (e.promptId !== promptId) return
         cachedNodeCount = (e.nodes ?? []).length
-        jobLog(`job缓存提示 promptId=${promptId} 命中缓存节点=${cachedNodeCount} 个`)
+        // 记录具体节点 id：关键路径节点(506 CSGlideCastCS / 277 KSampler / 313 ClipArchive)
+        // 若命中缓存，会复用上一次的 latent —— 表现为"参数改了但产物帧数还是旧的"。
+        jobLog(`job缓存提示 promptId=${promptId} 命中缓存节点=${cachedNodeCount} 个 id=[${(e.nodes ?? []).join(',')}]`)
       }
 
       const onError = (e: { promptId?: string; message?: string }): void => {
@@ -673,34 +729,43 @@ export class JobManager {
     })
   }
 
-  private writeShotOutputs(shotId: string | undefined, outputs: ShotOutput[]): void {
+  private async writeShotOutputs(projectId: string, shotId: string | undefined, outputs: ShotOutput[]): Promise<void> {
     if (!shotId || outputs.length === 0) return
-    const project = this.store.getCurrent()
-    if (!project) return
-    const shot = project.shots.find((s) => s.id === shotId)
-    if (!shot) return
-    // 同一分镜只保留一个"保留版本"：新产物入库时，旧的同段版本标记为弃用
-    for (const o of shot.outputs) o.kept = false
-    shot.outputs.push(...outputs)
-    shot.status = 'done'
-    void this.store.flush()
+    const ok = await this.store.mutateProject(projectId, (project) => {
+      const shot = project.shots.find((s) => s.id === shotId)
+      if (!shot) return
+      // 同一分镜只保留一个"保留版本"：新产物入库时，旧的同段版本标记为弃用
+      for (const o of shot.outputs) o.kept = false
+      shot.outputs.push(...outputs)
+      shot.status = 'done'
+      shot.updatedAt = now()
+    })
+    if (!ok) jobLog(`产物回写失败：工程 ${projectId} 不存在，段 ${shotId} 的产物未归档`)
   }
 
   /** 图片生成完成后，把产物写进资产的 images + coverFile，供剧本分镜引用 */
-  private async writeAssetOutputs(assetId: string | undefined, outputs: ShotOutput[]): Promise<void> {
+  private async writeAssetOutputs(projectId: string, assetId: string | undefined, outputs: ShotOutput[]): Promise<void> {
     if (!assetId || outputs.length === 0) return
-    const project = this.store.getCurrent()
-    if (!project) return
-    const asset = project.assets.find((a) => a.id === assetId)
-    if (!asset) return
-    const imageFiles = outputs.filter((o) => o.kind === 'image').map((o) => o.file)
-    if (imageFiles.length === 0) return
-    // 去重追加（同一 promptId 可能重复回调）
-    for (const f of imageFiles) {
-      if (!asset.images.includes(f)) asset.images.push(f)
-    }
-    if (!asset.coverFile) asset.coverFile = imageFiles[0]
-    asset.updatedAt = now()
-    await this.store.flush() // 等待落盘完成，避免前端重读磁盘读到旧数据
+    jobLog(`资产回写开始 projectId=${projectId} assetId=${assetId} outputs=${outputs.length}`)
+    const ok = await this.store.mutateProject(projectId, (project) => {
+      const asset = project.assets.find((a) => a.id === assetId)
+      if (!asset) {
+        jobLog(`资产回写：工程 ${projectId} 里找不到 assetId=${assetId}`)
+        return
+      }
+      const imageFiles = outputs.filter((o) => o.kind === 'image').map((o) => o.file)
+      if (imageFiles.length === 0) {
+        jobLog(`资产回写：产物里没有图片（${outputs.map((o) => o.kind).join(',')}）`)
+        return
+      }
+      // 去重追加（同一 promptId 可能重复回调）
+      for (const f of imageFiles) {
+        if (!asset.images.includes(f)) asset.images.push(f)
+      }
+      if (!asset.coverFile) asset.coverFile = imageFiles[0]
+      asset.updatedAt = now()
+      jobLog(`资产回写完成 asset=${asset.name} images=${asset.images.length} +${imageFiles.length}`)
+    })
+    if (!ok) jobLog(`资产回写失败：工程 ${projectId} 不可读`)
   }
 }

@@ -110,7 +110,7 @@ export default function Memory(): React.JSX.Element {
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-1.5">
                   <span className="truncate text-sm font-medium">{e.label}</span>
-                  {!e.exists && <span className="shrink-0 text-[10px] text-slate-600">空</span>}
+                  {!e.exists && <span className="shrink-0 text-[11px] text-slate-600">空</span>}
                 </div>
                 <div className="mt-0.5 truncate text-[11px] text-slate-500">{e.hint}</div>
               </div>

@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { ChevronDown, ChevronRight, Film, ImageIcon, Link2, PenLine, Play, Save, SlidersHorizontal, Sparkles, Wand2 } from 'lucide-react'
-import type { Shot, Template, SegmentSettings } from '@shared/types'
+import type { Shot, Template, SegmentSettings, StageSamplerOptionsMap } from '@shared/types'
 import { DESK_PRESETS } from '@shared/node-params'
 import { useApp } from '../store/app'
 import { EmptyState, PageHeader } from '../components/ui'
@@ -13,7 +13,7 @@ import DirectorStage from '../components/DirectorStage'
 import { GenerationInfoPanel } from '../components/GenerationInfoPanel'
 import { readStageDefaults } from '../lib/stageDefaults'
 import NodeParamsPanel from '../components/NodeParamsPanel'
-import { defaultSegment, framesFor, getSegment, ratioOf } from '../lib/segment'
+import { alignFrames, defaultSegment, framesFor, getSegment, ratioOf } from '../lib/segment'
 import Storyboard from './Storyboard'
 
 const byIndex = (a: { index: number }, b: { index: number }): number => a.index - b.index
@@ -67,6 +67,7 @@ export default function Director(): React.JSX.Element {
   const project = useApp((s) => s.project)
   const hardware = useApp((s) => s.hardware)
   const loadHardware = useApp((s) => s.loadHardware)
+  const pushNotice = useApp((s) => s.pushNotice)
 
   // 导演台可能被直接打开（没经过仪表盘），这里自己补一次硬件检测；
   // 否则 preset 为 null → canGenerate=false → 「生成本段」按钮是禁用的，
@@ -82,7 +83,40 @@ export default function Director(): React.JSX.Element {
   const validTab = initialTab === 'storyboard' || initialTab === 'generation' ? initialTab : 'segment'
 
   const [episodeId, setEpisodeId] = useState('')
+  // 剧集选择跨页面保持：切到生成队列会卸载本组件，局部 state 归零；
+  // 这里从项目 settings.activeEpisodeId 恢复，只初始化一次，不覆盖用户后续切换。
+  const episodeInitRef = useRef(false)
+  useEffect(() => {
+    if (episodeInitRef.current || !project) return
+    const saved = project.settings.activeEpisodeId
+    if (saved && project.episodes.some((e) => e.id === saved)) {
+      episodeInitRef.current = true
+      setEpisodeId(saved)
+    } else if (project.episodes.length > 0) {
+      episodeInitRef.current = true // 无保存值，保持 '' → 回退第一集
+    }
+  }, [project])
+
+  /** 切换剧集：同步更新局部 state 并持久化，供下次回到导演台恢复 */
+  const selectEpisode = (id: string): void => {
+    setEpisodeId(id)
+    episodeInitRef.current = true
+    void persistProject((draft) => {
+      draft.settings.activeEpisodeId = id
+    })
+  }
+  // 采样器/调度器白名单（来自本机 ComfyUI object_info）：生成信息页下拉用；离线时为 null → 手填输入框。
+  // ⚠️ hooks 必须放在组件顶部所有提前 return 之前——下面 storyboard/无项目分支会提前 return，
+  // 若 hooks 在其后，切 tab 时 hooks 数量前后不一致会直接崩掉整页（"Rendered fewer hooks than expected"）。
   const [tab, setTab] = useState<'segment' | 'storyboard' | 'generation'>(validTab)
+  const [stageSamplerOptions, setStageSamplerOptions] = useState<StageSamplerOptionsMap | null>(null)
+  useEffect(() => {
+    if (tab !== 'generation') return
+    void window.api
+      .comfyStageSamplers()
+      .then(setStageSamplerOptions)
+      .catch(() => setStageSamplerOptions(null))
+  }, [tab])
   const [nodeParamsOpen, setNodeParamsOpen] = useState(false)
   const [templateId, setTemplateId] = useState('')
   const [selectedShotId, setSelectedShotId] = useState('')
@@ -93,6 +127,15 @@ export default function Director(): React.JSX.Element {
   const [error, setError] = useState<string | null>(null)
   /** 提交成功回执（绿色提示，几秒后自动消失） */
   const [notice, setNotice] = useState<string | null>(null)
+  /** Toast 出口：保留原 state（兼容旧流程），展示统一改由全局通知中心（右上角 Toast）完成 */
+  const showError = (t: string | null): void => {
+    setError(t)
+    if (t) pushNotice('danger', t)
+  }
+  const showNotice = (t: string | null): void => {
+    setNotice(t)
+    if (t) pushNotice(t.startsWith('还没有') ? 'warn' : 'ok', t)
+  }
   /** 导演台内直接编辑本段提示词的草稿（按分镜 id 存），未保存时 dirty */
   const [promptDraft, setPromptDraft] = useState<Record<string, string>>({})
   const [promptDirty, setPromptDirty] = useState(false)
@@ -162,7 +205,7 @@ export default function Director(): React.JSX.Element {
         节点参数
       </button>
       <div className="ml-auto flex items-center gap-1.5">
-        <span className="text-[10px] text-slate-600">工作流</span>
+        <span className="text-[11px] text-slate-600">工作流</span>
         <select
           className="field py-1 text-[11px]"
           value={templateId || pickDirectorTemplate(project?.templates ?? [], '')?.id || ''}
@@ -232,6 +275,11 @@ export default function Director(): React.JSX.Element {
     await persistProject((draft) => {
       const ep = draft.episodes.find((x) => x.id === selectedEpisode.id)
       if (ep) ep.stages = next
+      // 全片开关 = 批量作用到本剧集所有段，和段级 checkbox 保持同一真相
+      const epSceneIds = new Set(draft.scenes.filter((sc) => sc.episodeId === selectedEpisode.id).map((sc) => sc.id))
+      for (const sh of draft.shots) {
+        if (epSceneIds.has(sh.sceneId) && sh.segment) sh.segment.stages = { ...next }
+      }
     })
   }
   const saveGlobalSampler = async (next: typeof globalSampler): Promise<void> => {
@@ -286,19 +334,27 @@ export default function Director(): React.JSX.Element {
       chain: { name: chainName, clip, shot: shot.id }
     }
     // 只有潜空间续接才真正写 cont；历史遗留的 'video' 档不写（避免误导）
-    if (s.contMode === 'latent') h3.cont = { mode: 'latent' }
+    // frames 必须 > 0：csglide_cast.py:2337 里 frames<=0 会直接"独立成段不承接"。
+    // 只传 frames、不传 latent_file —— H3 走自动接续，从档案上一段取尾部 N 帧钉到
+    // 本段开头（_video_tail_from_latent），不把上一段整段潜空间卷进来（那会撑长/翻倍）。
+    if (s.contMode === 'latent') h3.cont = { mode: 'latent', frames: s.contFrames || 22 }
     return h3
   }
 
   const submitJob = async (shot: Shot, index: number): Promise<void> => {
     if (!template || !preset) {
-      setError('还没有可用的工作流模板或生成档位 —— 请在设置里导入工作流、或先检测硬件')
+      showError('还没有可用的工作流模板或生成档位 —— 请在设置里导入工作流、或先检测硬件')
       return
     }
-    // 用 store 里最新项目数据（连续生成时上一段产物刚写回，闭包里的 project 是旧的）
+    // 用 store 里最新项目数据（连续生成时上一段产物刚写回，闭包里的 project 是旧的）。
+    // 注意：绝不在这里改写用户的段参数（帧数/时长等）——显存问题已由 ComfyUI 的
+    // --lowvram 模式根治，再"自动钳制"只会悄悄改掉用户设定的创作参数。
     const liveProject = useApp.getState().project ?? project
     const liveShots = computeShots(liveProject, selectedEpisode.id)
-    const s = getSegment(shot, preset, index)
+    const targetShot = liveShots.find((x) => x.id === shot.id) ?? shot
+    const s = getSegment(targetShot, preset, index)
+    // 后续统一用 targetShot（来自最新 store 快照）
+    shot = targetShot
     // 参考图：仅「参考图」模式；参考视频：仅「视频参考」模式，取上一段成片
     // 封面缺失时回退用资产的第一张图，避免"有图但无封面"导致参考图为空
     // refAliases：把资产名一并传给主进程，H3 靠它把提示词里的角色名绑定到参考图
@@ -320,7 +376,7 @@ export default function Director(): React.JSX.Element {
       const names = shot.assetIds
         .map((id) => liveProject.assets.find((x) => x.id === id)?.name ?? id)
         .join('、')
-      setError(
+      showError(
         `参考图缺失：分镜引用的资产（${names}）还没有生成过图片。` +
           `请先到「资产」页给这些资产生成图片（或把已有图片设为绑定图），再回来生成。` +
           `若想不用参考图直接生成，请把本段生成方式改成「纯文生」。`
@@ -358,11 +414,19 @@ export default function Director(): React.JSX.Element {
     const basePrompt = shot.prompt || shot.description || shot.title
     const positive = charDesc ? `${basePrompt}\n角色位置与动作：${charDesc}` : basePrompt
 
-    // 潜空间续写：向 H3 档案查**上一段当前版本**的续拍存档路径，写进本段 cont。
-    // 这是导演台「全部渲染」逐段衔接的同一套机制（没有存档就当第一段处理）。
+    // 潜空间续写：只写 cont.mode='latent'，让 H3 自己按档案链（chain.order/current）
+    // 做「自动接续」——这正是 ComfyUI 浏览器手动跑的做法，输出正确的本段帧数。
+    //
+    // 【2026-11-23 根因】之前这里额外注入 latent_file + frames，导致 H3 走
+    // 「从文件读整段潜空间」的路径，把上一段整段拼进输出 → 5 秒段变 10 秒（243 帧）。
+    // 对比手动跑的 prompt：cont 只有 {mode:'latent', frames:0}，没有 latent_file，
+    // 输出恒为 124 帧。手动画面能接上靠的是 H3 档案的自动接续，不是显式 latent_file。
+    // 所以这里不再传 latent_file / frames —— 续接交给 H3 自动机制。
     const chainName = `${project.name}·${selectedEpisode.title}`
     const h3Param = buildH3(shot, index)
     if (s.contMode === 'latent' && index > 0) {
+      // 只保留 mode；buildH3 已写入 h3.cont={mode:'latent'}（见 buildH3）。
+      // 保留档案存在性检查用于提示，但不改变 cont 内容。
       const prev = liveShots[index - 1]
       if (prev) {
         try {
@@ -370,24 +434,15 @@ export default function Director(): React.JSX.Element {
             cont_path?: string
             error?: string
           }
-          if (r?.cont_path) {
-            h3Param.cont = {
-              mode: 'latent',
-              latent_file: r.cont_path,
-              // 承接帧数 = 上一段尾部取几帧钉在本段开头（不是上一段整段长度！）
-              frames: s.contFrames ?? 22,
-              audio: true
-            }
-          } else {
-            // 上一段还没跑过 → 本段按第一段处理（与导演台同口径），并在界面上提示
-            setError(
-              `第 ${index + 1} 段设置为 latent 续接，但上一段还没有续拍存档` +
-                `（${r?.error ?? '未找到'}）。本次会按第一段生成；` +
-                `先把上一段跑完，再生成这一段才能接上。`
+          if (!r?.cont_path) {
+            showNotice(
+              `第 ${index + 1} 段是续接段，但档案里上一段还没有续拍存档` +
+                `（${r?.error ?? '未找到'}）——H3 会按自动接续处理；` +
+                `若上一段没跑过，本段会独立成段。`
             )
           }
-        } catch (err) {
-          setError(`查询上一段续拍存档失败：${String((err as Error).message ?? err)}`)
+        } catch {
+          // 档案查询失败不影响提交：H3 自动接续照常工作
         }
       }
     }
@@ -407,15 +462,10 @@ export default function Director(): React.JSX.Element {
       samplerName: genSampler.trim() || undefined,
       scheduler: genScheduler.trim() || undefined,
       seed: genSeed.trim() ? Number(genSeed) || undefined : undefined,
-      // 采样参数与模板一致时标记为未改动，让工作流保留作者原配（含 SelfLift 分段步数）
-      keepTemplateSampler:
-        !!ksDefault &&
-        num(genSteps, 0) === ksDefault.steps &&
-        Number(genCfg) === ksDefault.cfg &&
-        genSampler.trim() === ksDefault.sampler &&
-        genScheduler.trim() === ksDefault.scheduler,
       h3: h3Param,
-      stages: globalStages,
+      // 段级「阶段」checkbox 优先（全片开关在 saveGlobalStages 时已同步写入每段，
+      // 两者是同一真相；段级超分开关也必须生效，不能只看 first/second/third）
+      stages: s.stages ?? globalStages,
       stageParams: stageParams,
       upscale: s.upscale,
       rife: s.rife,
@@ -448,16 +498,17 @@ export default function Director(): React.JSX.Element {
 
   const generateOne = async (shot: Shot): Promise<void> => {
     const index = shots.indexOf(shot)
+    setSelectedShotId(shot.id) // 大窗口/时间轴跟随到本段，生成完成后成片直接贴上来
     setSubmittingShotId(shot.id)
-    setError(null)
+    showError(null)
     try {
       await submitJob(shot, index)
       // 提交完**不跳转**，留在导演台继续编辑；给一条明确的提交回执
       const total = shots.length
-      setNotice(`已提交第 ${index + 1}/${total} 段，正在后台生成…（可继续编辑或提交其它段）`)
-      window.setTimeout(() => setNotice(null), 5000)
+      showNotice(`已提交第 ${index + 1}/${total} 段，正在后台生成…（可继续编辑或提交其它段）`)
+      window.setTimeout(() => showNotice(null), 5000)
     } catch (err) {
-      setError(`提交失败：${String((err as Error).message ?? err)}`)
+      showError(`提交失败：${String((err as Error).message ?? err)}`)
     } finally {
       setSubmittingShotId(null)
     }
@@ -472,16 +523,37 @@ export default function Director(): React.JSX.Element {
       // 每轮用最新项目数据重算分镜（上一段产物写回后 store 已刷新）
       const liveP = useApp.getState().project
       const liveShots = liveP ? computeShots(liveP, selectedEpisode.id) : shots
+      const hasPending = liveShots.some((s) => s.outputs.length === 0)
+      // 有待生成段 → 只渲染未生成的；全部已生成 → 全部重渲染（换种子出新版本）
+      const forceAll = !hasPending
+      let done = 0
+      let aborted = ''
       for (let i = 0; i < liveShots.length; i += 1) {
         const s = liveShots[i]
-        if (s.outputs.length > 0) continue
-        await submitJob(s, i)
-        const result = await waitJobDone(s.id)
-        if (result === 'failed') {
-          // 失败后停止连续生成，让用户去队列看原因，避免后续段空跑
+        if (!forceAll && s.outputs.length > 0) continue
+        try {
+          await submitJob(s, i)
+        } catch (err) {
+          aborted = `第 ${i + 1} 段提交失败：${String((err as Error).message ?? err)}`
           break
         }
+        const result = await waitJobDone(s.id)
+        if (result === 'failed' || result === 'timeout') {
+          // 失败/超时后停止，避免后续段在前一段未就绪时空跑或续错潜空间
+          aborted = result === 'timeout'
+            ? `第 ${i + 1} 段等待超时，已停止后续段（可到「生成队列」查看）`
+            : `第 ${i + 1} 段生成失败，已停止后续段（可到「生成队列」查看原因）`
+          break
+        }
+        done += 1
       }
+      if (aborted) {
+        showError(aborted)
+        if (done > 0) showNotice(`已完成前 ${done} 段`)
+      } else {
+        showNotice(forceAll ? `已提交全部 ${done} 段重渲染（新版本）` : `已提交 ${done} 段渲染`)
+      }
+      window.setTimeout(() => showNotice(null), 4000)
       navigate('/queue')
     } finally {
       setBatchRunning(false)
@@ -506,6 +578,55 @@ export default function Director(): React.JSX.Element {
     const sh = live?.shots.find((x) => x.id === shotId)
     if (!sh) return
     await saveSegment(shotId, { ...segOf(sh), ...patch })
+  }
+
+  /** 重抽本段：换种子重新生成，产生新版本（旧版在「历史」里可切回） */
+  const regenShot = async (shotId: string): Promise<void> => {
+    const target = shots.find((s) => s.id === shotId)
+    if (!target) return
+    const idx = shots.indexOf(target)
+    setSelectedShotId(shotId)
+    setSubmittingShotId(shotId)
+    showError(null)
+    try {
+      await submitJob(target, idx)
+      showNotice(`已重抽第 ${idx + 1}/${shots.length} 段（新版本），旧版本可在「历史」里切回`)
+      window.setTimeout(() => showNotice(null), 5000)
+    } catch (err) {
+      showError(`重抽失败：${String((err as Error).message ?? err)}`)
+    } finally {
+      setSubmittingShotId(null)
+    }
+  }
+
+  /** 潜空间续接：把当前段末尾当作下一段开头 —— 把下一段设为 latent 续接并立即生成 */
+  const continueToNext = async (shotId: string): Promise<void> => {
+    const liveP = useApp.getState().project
+    if (!liveP) return
+    const liveShots = computeShots(liveP, selectedEpisode.id)
+    const idx = liveShots.findIndex((s) => s.id === shotId)
+    const next = liveShots[idx + 1]
+    if (idx < 0 || !next) {
+      showNotice('当前段已经是最后一段，没有可续接的下一段')
+      window.setTimeout(() => showNotice(null), 4000)
+      return
+    }
+    // 1) 把下一段设为潜空间续接（contMode=latent），用 store 快照拿它的段参数
+    const nextSeg = getSegment(next, preset, idx + 1)
+    await saveSegment(next.id, { ...nextSeg, contMode: 'latent' })
+    setSelectedShotId(next.id)
+    // 2) 立即生成下一段。submitJob 内部会重新取最新 shots 并查本段的续拍存档
+    setSubmittingShotId(next.id)
+    showError(null)
+    try {
+      await submitJob(next, idx + 1)
+      showNotice(`已把第 ${idx + 1} 段末尾接到第 ${idx + 2} 段开头，正在潜空间续接生成…`)
+      window.setTimeout(() => showNotice(null), 5000)
+    } catch (err) {
+      showError(`续接生成失败：${String((err as Error).message ?? err)}`)
+    } finally {
+      setSubmittingShotId(null)
+    }
   }
 
   /** 接一段：往当前剧集末尾追加一个新分镜，并选中它 */
@@ -537,8 +658,8 @@ export default function Director(): React.JSX.Element {
     })
     if (newId) {
       setSelectedShotId(newId)
-      setNotice('已接一段 —— 在右侧写好提示词后点「生成本段」')
-      window.setTimeout(() => setNotice(null), 4000)
+      showNotice('已接一段 —— 在右侧写好提示词后点「生成本段」')
+      window.setTimeout(() => showNotice(null), 4000)
     }
   }
 
@@ -548,13 +669,13 @@ export default function Director(): React.JSX.Element {
       const r = await window.api.filmExport(file, `镜序工坊_${project.name}_${name}`)
       if (r.cancelled) return
       if (r.ok) {
-        setNotice(`成片已导出：${r.outPath}`)
-        window.setTimeout(() => setNotice(null), 6000)
+        showNotice(`成片已导出：${r.outPath}`)
+        window.setTimeout(() => showNotice(null), 6000)
       } else if (r.error) {
-        setError(`导出失败：${r.error}`)
+        showError(`导出失败：${r.error}`)
       }
     } catch (err) {
-      setError(`导出失败：${String((err as Error).message ?? err)}`)
+      showError(`导出失败：${String((err as Error).message ?? err)}`)
     }
   }
 
@@ -564,16 +685,16 @@ export default function Director(): React.JSX.Element {
     const liveShots = live ? computeShots(live, selectedEpisode.id) : shots
     const hasFilm = liveShots.some((s) => s.outputs.some((o) => o.kind === 'video' && o.kept !== false))
     if (!hasFilm) {
-      setNotice('还没有可推送的成片 —— 先生成至少一段')
-      window.setTimeout(() => setNotice(null), 4000)
+      showNotice('还没有可推送的成片 —— 先生成至少一段')
+      window.setTimeout(() => showNotice(null), 4000)
       return
     }
     await persistProject((draft) => {
       const ep = draft.episodes.find((e) => e.id === selectedEpisode.id)
       if (ep) ep.wholeFilmAsRef = true
     })
-    setNotice('已把拼接整片设为视频参考（后续段生成时会带上整片）')
-    window.setTimeout(() => setNotice(null), 5000)
+    showNotice('已把拼接整片设为视频参考（后续段生成时会带上整片）')
+    window.setTimeout(() => showNotice(null), 5000)
   }
 
   /**
@@ -584,11 +705,11 @@ export default function Director(): React.JSX.Element {
   const rewritePrompt = async (shot: Shot): Promise<void> => {
     const cur = (promptDraft[shot.id] ?? shot.prompt ?? '').trim()
     if (!cur) {
-      setError('本段还没有提示词，先写几句再改写')
+      showError('本段还没有提示词，先写几句再改写')
       return
     }
     setRewriting(true)
-    setError(null)
+    showError(null)
     try {
       const names = shot.assetIds
         .map((id) => project.assets.find((a) => a.id === id)?.name ?? '')
@@ -618,7 +739,7 @@ export default function Director(): React.JSX.Element {
       setPromptDraft((d) => ({ ...d, [shot.id]: next }))
       setPromptDirty(true)
     } catch (err) {
-      setError(`AI 改写失败：${String((err as Error).message ?? err)}`)
+      showError(`AI 改写失败：${String((err as Error).message ?? err)}`)
     } finally {
       setRewriting(false)
     }
@@ -686,18 +807,39 @@ export default function Director(): React.JSX.Element {
     })
   }
 
-  /** 删除某个产物（不删磁盘文件，仅从分镜移除） */
+  /** 删除某个产物版本（至少保留一个；删掉当前版本时自动切到剩下的第一个） */
   const removeOutput = async (shotId: string, outputId: string): Promise<void> => {
     const shot = project.shots.find((s) => s.id === shotId)
     const output = shot?.outputs.find((o) => o.id === outputId)
+    // 至少保留一个版本：只剩一个时不删
+    if (!shot || shot.outputs.length <= 1) return
     await persistProject((draft) => {
       const sh = draft.shots.find((x) => x.id === shotId)
-      if (!sh) return
+      if (!sh || sh.outputs.length <= 1) return
+      const wasKept = sh.outputs.find((o) => o.id === outputId)?.kept !== false
       sh.outputs = sh.outputs.filter((o) => o.id !== outputId)
+      // 删的是当前版本 → 把剩下的第一个设为当前，保证每段始终有 KEEP
+      if (wasKept && sh.outputs.length > 0) {
+        for (let i = 0; i < sh.outputs.length; i++) sh.outputs[i].kept = i === 0
+      }
       sh.updatedAt = new Date().toISOString()
     })
-    // 清理磁盘文件（主进程检查是否仍被引用，如被下一段视频参考引用则保留）
+    // 清理磁盘文件（主进程先扫描所有工程确认无引用才物理删除）
     if (output?.file) void window.api.mediaDeleteFile(output.file)
+  }
+
+  /** 无缝整片：让 H3 把所有段拼成一个视频，转成 data URL 交给播放器单文件播放。
+   *  这样播放时没有段间切换，彻底无卡顿。失败返回 null，播放器退回分段模式。 */
+  const requestWholeFilm = async (): Promise<string | null> => {
+    const name = `${project.name}·${selectedEpisode.title}`
+    try {
+      const r = await window.api.cglideExportWholeFilm(name)
+      if (!r?.ok || !r.path) return null
+      const url = await window.api.mediaDataUrl(r.path)
+      return url ?? null
+    } catch {
+      return null
+    }
   }
 
   const hint = (): string | undefined => {
@@ -731,7 +873,7 @@ export default function Director(): React.JSX.Element {
           const ep = draft.episodes.find((x) => x.id === selectedEpisode.id)
           if (ep) ep.nodeParams = np
         })
-        setNotice('节点参数已保存，下次生成生效')
+        showNotice('节点参数已保存，下次生成生效')
         setNodeParamsOpen(false)
       }}
       onClose={() => setNodeParamsOpen(false)}
@@ -758,6 +900,7 @@ export default function Director(): React.JSX.Element {
             stages={globalStages}
             stageParams={stageParams}
             defaults={stageDefaults}
+            options={stageSamplerOptions ?? undefined}
             onToggle={(k) => void saveGlobalStages({ ...globalStages, [k]: !globalStages[k] })}
             onParam={(k, patch) => void saveStageParam(k, patch)}
           />
@@ -771,24 +914,12 @@ export default function Director(): React.JSX.Element {
       {tabBar}
       {nodeParamsModal}
       <div className="px-8 pb-8 pt-5">
-        {notice && (
-          <div className="mb-4 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-200">
-            {notice}
-          </div>
-        )}
-        {error && (
-          <div className="mb-4 flex items-start justify-between gap-3 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2.5">
-            <div className="flex-1 text-xs leading-relaxed text-amber-200">{error}</div>
-            <button className="shrink-0 text-amber-400 hover:text-amber-200" onClick={() => setError(null)}>
-              关闭
-            </button>
-          </div>
-        )}
+        {/* notice / error 展示已迁移到全局通知中心（App.tsx ToastStack），这里不再内联渲染 */}
         <DirectorStage
           projectName={project.name}
           episodes={episodes.map((e) => ({ id: e.id, title: e.title }))}
           episodeId={selectedEpisode.id}
-          onEpisode={(id) => setEpisodeId(id)}
+          onEpisode={(id) => selectEpisode(id)}
           shots={shots}
           curShot={curShot}
           onSelect={(id) => setSelectedShotId(id)}
@@ -905,12 +1036,10 @@ export default function Director(): React.JSX.Element {
           onOpenProjects={() => navigate('/')}
           onPatchSegment={(shotId, patch) => void patchSegmentById(shotId, patch)}
           onKeepTake={(shotId, outputId) => void keepOutput(shotId, outputId)}
-          takes={(curShot?.outputs ?? []).map((o, i) => ({
-            id: o.id,
-            label: `v${i + 1}`,
-            file: o.file,
-            kept: o.kept !== false
-          }))}
+          onDeleteTake={(shotId, outputId) => void removeOutput(shotId, outputId)}
+          onRequestWholeFilm={() => requestWholeFilm()}
+          onRegenShot={(shotId) => void regenShot(shotId)}
+          onContinueToNext={(shotId) => void continueToNext(shotId)}
         />
       </div>
       {paramsShotId && (() => {
@@ -1031,7 +1160,18 @@ function SegmentParamsModal({
                 }}
               />
             </div>
-            {numField('帧数', s.frames, (n) => set('frames', n))}
+            <div>
+              <label className="label">帧数</label>
+              <input
+                type="number"
+                className="field"
+                value={s.frames}
+                onChange={(e) => {
+                  const af = alignFrames(Number(e.target.value) || 0)
+                  setS((p) => ({ ...p, frames: af, durationSec: Math.round(((af - 1) / p.fps) * 100) / 100 }))
+                }}
+              />
+            </div>
             <div>
               <label className="label">按秒重算</label>
               <button className="btn-ghost w-full" onClick={() => setS((p) => ({ ...p, frames: framesFor(p.durationSec, p.fps) }))}>
@@ -1195,7 +1335,7 @@ function SegmentParamsModal({
                     <button
                       key={n}
                       type="button"
-                      className={`rounded border px-1.5 py-0.5 text-[10px] ${
+                      className={`rounded border px-1.5 py-0.5 text-[11px] ${
                         (s.contFrames ?? 22) === n
                           ? 'border-accent-500/50 bg-accent-600/20 text-accent-300'
                           : 'border-white/10 bg-white/[0.03] text-slate-400 hover:text-slate-200'
@@ -1207,7 +1347,7 @@ function SegmentParamsModal({
                   ))}
                 </div>
               </div>
-              <div className="mt-1 text-[10px] text-slate-600">
+              <div className="mt-1 text-[11px] text-slate-600">
                 从「上一段尾部」取几帧钉在本段开头（只接受 17k+5：5/22/39/56/73…）。
                 成片里这几帧会被剪掉，不会重复。0 = 独立成段。
               </div>

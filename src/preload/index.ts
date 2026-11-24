@@ -3,11 +3,11 @@ import { CH, type PushEvent } from '../shared/ipc'
 import type {
   ComfyRuntimeConfig,
   ComfyRuntimeState,
-  DownloadTask,
   HardwareReport,
   JobParams,
   Project,
   ComfySettings,
+  StageSamplerOptionsMap,
   UpdateInfo,
 } from '../shared/types'
 
@@ -32,6 +32,7 @@ const api = {
 
   comfyStatus: (settings?: ComfySettings) => ipcRenderer.invoke(CH.comfyStatus, settings),
   comfyTest: (settings?: ComfySettings) => ipcRenderer.invoke(CH.comfyTest, settings),
+  comfyStageSamplers: (): Promise<StageSamplerOptionsMap> => ipcRenderer.invoke(CH.comfyStageSamplers),
 
   comfyRuntimeStatus: (): Promise<ComfyRuntimeState> => ipcRenderer.invoke(CH.comfyRuntimeStatus),
   comfyRuntimeStart: (): Promise<ComfyRuntimeState> => ipcRenderer.invoke(CH.comfyRuntimeStart),
@@ -91,16 +92,12 @@ const api = {
   cglideBase: (): Promise<string> => ipcRenderer.invoke(CH.cglideBase),
   cglideFilmSummary: (name: string): Promise<Record<string, unknown>> =>
     ipcRenderer.invoke(CH.cglideFilmSummary, { name }),
+  cglideExportWholeFilm: (name: string): Promise<{ ok?: boolean; path?: string; error?: string }> =>
+    ipcRenderer.invoke(CH.cglideExportWholeFilm, { name }),
   cglideJoinWaveform: (video: string, bins?: number): Promise<{ bins?: number[]; duration?: number; error?: string }> =>
     ipcRenderer.invoke(CH.cglideJoinWaveform, { video, bins }),
   h3ChainCont: (name: string, shot: string): Promise<{ cont_path?: string; cid?: string; take?: number; error?: string }> =>
     ipcRenderer.invoke(CH.h3ChainCont, { name, shot }),
-  workflowSyncList: (): Promise<{ comfyRoot: string; items: unknown[] }> =>
-    ipcRenderer.invoke(CH.workflowSyncList),
-  workflowSyncApply: (files: string[]): Promise<{ replaced: number; added: number; failed: unknown[] }> =>
-    ipcRenderer.invoke(CH.workflowSyncApply, { files }),
-
-  downloadList: (): Promise<DownloadTask[]> => ipcRenderer.invoke(CH.downloadList),
 
   openPath: (p: string) => ipcRenderer.invoke(CH.shellOpenPath, p),
 

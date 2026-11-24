@@ -2,6 +2,20 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ---------- 设计 token：字号阶梯 + 语义色 ---------- */
+:root {
+  --fs-xs: 11px;
+  --fs-sm: 12px;
+  --fs-md: 13px;
+  --fs-lg: 15px;
+  --fs-xl: 18px;
+  --c-ok: #34d399;      /* emerald-400 */
+  --c-warn: #fbbf24;    /* amber-400 */
+  --c-danger: #fb7185;  /* rose-400 */
+  --c-busy: #9b82ff;    /* accent-400 */
+  --c-muted: #64748b;   /* slate-500 */
+}
+
 @layer base {
   html,
   body,
@@ -36,19 +50,109 @@
   .panel {
     @apply rounded-xl border border-white/5 bg-ink-900 shadow-panel;
   }
+
   .btn {
-    @apply inline-flex items-center justify-center gap-2 rounded-lg px-3.5 py-2 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50;
+    @apply inline-flex items-center justify-center gap-2 rounded-lg font-medium disabled:cursor-not-allowed disabled:opacity-50;
+    font-size: var(--fs-md);
+    padding: 8px 14px;
+    /* 只过渡 transform/opacity/颜色类属性，避免触发大面积重绘 */
+    transition:
+      transform 150ms ease,
+      background-color 150ms ease,
+      border-color 150ms ease,
+      color 150ms ease,
+      opacity 150ms ease;
   }
+  .btn:active:not(:disabled) {
+    transform: scale(0.98);
+  }
+
   .btn-primary {
-    @apply btn bg-accent-600 text-white hover:bg-accent-500;
+    @apply btn bg-accent-600 text-white;
   }
+  .btn-primary:hover:not(:disabled) {
+    background-color: #8d70ff; /* accent-500 略提亮 */
+  }
+
   .btn-ghost {
-    @apply btn border border-white/10 bg-white/[0.03] text-slate-300 hover:bg-white/[0.07];
+    @apply btn border border-white/10 bg-white/[0.03] text-slate-300;
   }
+  .btn-ghost:hover:not(:disabled) {
+    background-color: rgba(255, 255, 255, 0.08);
+  }
+
   .field {
-    @apply w-full rounded-lg border border-white/10 bg-ink-950/60 px-3 py-2 text-sm text-slate-200 outline-none transition-colors placeholder:text-slate-500 focus:border-accent/60;
+    @apply w-full rounded-lg border border-white/10 bg-ink-950/60 px-3 py-2 text-slate-200 outline-none transition-colors placeholder:text-slate-500 focus:border-accent/60;
+    font-size: var(--fs-md);
   }
+
   .label {
-    @apply mb-1.5 block text-xs font-medium uppercase tracking-wide text-slate-400;
+    @apply mb-1.5 block font-medium uppercase tracking-wide text-slate-400;
+    font-size: var(--fs-sm);
+  }
+
+  /* 语义色辅助类（供 Toast / 状态徽标等使用） */
+  .c-ok {
+    color: var(--c-ok);
+  }
+  .c-warn {
+    color: var(--c-warn);
+  }
+  .c-danger {
+    color: var(--c-danger);
+  }
+  .c-busy {
+    color: var(--c-busy);
+  }
+  .c-muted {
+    color: var(--c-muted);
+  }
+
+  /* 状态徽标：颜色平滑过渡 */
+  .badge {
+    @apply inline-flex items-center rounded px-2 py-0.5;
+    font-size: var(--fs-xs);
+    transition:
+      background-color 150ms ease,
+      color 150ms ease;
+  }
+}
+
+/* ---------- 动效 keyframes（只用 transform/opacity） ---------- */
+@keyframes fadeSlide {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.page-enter {
+  animation: fadeSlide 150ms ease-out both;
+}
+
+@keyframes toastIn {
+  from {
+    opacity: 0;
+    transform: translateX(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+.toast-enter {
+  animation: toastIn 150ms ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .page-enter,
+  .toast-enter {
+    animation: none;
+  }
+  .btn:active:not(:disabled) {
+    transform: none;
   }
 }

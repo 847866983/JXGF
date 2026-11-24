@@ -395,6 +395,28 @@ server.tool(
       if (!s) throw new Error(`找不到分镜 ${shotId}`)
       const cur = s.segment ?? ({} as Record<string, unknown>)
       const { upscale, rife, stages, ...rest } = patch as Record<string, unknown>
+      // 时长 / 帧率 / 帧数三者保持联动（与渲染层 SpecPanel 同一口径：17k+5 网格）
+      const segPatch = rest as Record<string, unknown>
+      if (segPatch.durationSec !== undefined || segPatch.fps !== undefined || segPatch.frames !== undefined) {
+        const fps = Number(segPatch.fps ?? cur.fps ?? 24) || 24
+        // 内联 alignFrames（17k+5 网格）：MCP 服务器须脱离 Electron 独立运行，
+        // 不能 import renderer/main 的实现；与 src/renderer/src/lib/segment.ts 同口径
+        const align = (n: number): number => {
+          let v = Math.max(5, Math.round(n))
+          while (v % 17 !== 5) v += 1
+          return v
+        }
+        if (segPatch.frames !== undefined) {
+          const af = align(Number(segPatch.frames) || 0)
+          segPatch.frames = af
+          segPatch.durationSec = Math.round(((af - 1) / fps) * 100) / 100
+        } else {
+          const d = Number(segPatch.durationSec ?? cur.durationSec ?? 5) || 5
+          segPatch.frames = align(d * fps + 1)
+          segPatch.durationSec = d
+        }
+        segPatch.fps = fps
+      }
       s.segment = {
         ...cur,
         ...rest,

@@ -37,9 +37,21 @@
  },
  {
   "id": "tpl_wf07",
-  "name": "千问 Image 2.1 全能编辑",
+  "name": "千问 Image 2.1 图像编辑",
   "kind": "image",
   "file": "tpl_wf07.json"
+ },
+ {
+  "id": "tpl_wf10",
+  "name": "Qwen-image21-文生图",
+  "kind": "image",
+  "file": "tpl_wf10.json"
+ },
+ {
+  "id": "tpl_wf11",
+  "name": "千问 Image 2.1 角色四视图",
+  "kind": "image",
+  "file": "tpl_wf11.json"
  },
  {
   "id": "tpl_wf08",

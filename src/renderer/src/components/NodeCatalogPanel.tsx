@@ -59,24 +59,24 @@ export function NodeCatalogPanel(): React.JSX.Element {
                 {isOpen ? <ChevronDown size={13} className="text-slate-500" /> : <ChevronRight size={13} className="text-slate-500" />}
                 <span>{DOMAIN_ICON[d.icon as keyof typeof DOMAIN_ICON] ?? '•'}</span>
                 <span className="text-xs font-medium text-slate-200">{d.label}</span>
-                <span className="ml-auto text-[10px] text-slate-500">{d.items.length} 项</span>
+                <span className="ml-auto text-[11px] text-slate-500">{d.items.length} 项</span>
               </button>
               {isOpen && (
                 <div className="border-t border-white/5 px-3 py-2">
-                  <div className="mb-2 text-[10px] text-slate-500">{d.desc}</div>
+                  <div className="mb-2 text-[11px] text-slate-500">{d.desc}</div>
                   <div className="space-y-1.5">
                     {d.items.map((it) => (
                       <div key={it.node} className="flex items-start gap-2 text-[11px]">
-                        <span className={`mt-0.5 shrink-0 rounded border px-1.5 py-0.5 text-[9px] ${STATUS_STYLE[it.status]}`}>
+                        <span className={`mt-0.5 shrink-0 rounded border px-1.5 py-0.5 text-[11px] ${STATUS_STYLE[it.status]}`}>
                           {it.status === 'ui' ? <CircleCheck size={9} className="mr-0.5 inline" /> : it.status === 'backend' ? <Cpu size={9} className="mr-0.5 inline" /> : <FileUp size={9} className="mr-0.5 inline" />}
                           {STATUS_LABEL[it.status]}
                         </span>
                         <div className="min-w-0 flex-1">
                           <div className="text-slate-200">
                             {it.label}
-                            <span className="ml-1.5 font-mono text-[9px] text-slate-600">{it.node}</span>
+                            <span className="ml-1.5 font-mono text-[11px] text-slate-600">{it.node}</span>
                           </div>
-                          <div className="text-[10px] text-slate-500">{it.desc} · <span className="text-accent-400/70">{it.where}</span></div>
+                          <div className="text-[11px] text-slate-500">{it.desc} · <span className="text-accent-400/70">{it.where}</span></div>
                         </div>
                       </div>
                     ))}

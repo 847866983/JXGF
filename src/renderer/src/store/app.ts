@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import type {
   ComfySettings,
   ComfySystemStats,
+  ComfyRuntimeState,
   HardwareReport,
   JobInfo,
   Project,
@@ -12,6 +13,18 @@ import type {
 
 /** comfyStatus 在途标记（模块级单例，防止并发重复请求） */
 let comfyInFlight = false
+
+/** 通知自增 id（模块级，保证唯一） */
+let noticeSeq = 1
+
+/** 全局通知类型（纯 UI 状态，不影响业务数据流） */
+export type NoticeType = 'ok' | 'warn' | 'danger' | 'busy'
+
+export interface Notice {
+  id: number
+  type: NoticeType
+  text: string
+}
 
 /** 比较两次状态的关键字段是否一致，避免无意义重渲染 */
 function comfyStatsEqual(a: ComfySystemStats | null, b: ComfySystemStats | null): boolean {
@@ -34,12 +47,19 @@ function comfyStatsEqual(a: ComfySystemStats | null, b: ComfySystemStats | null)
 interface AppState {
   hardware: HardwareReport | null
   comfy: ComfySystemStats | null
+  /** ComfyUI 运行时状态（未安装/已安装/运行中/已停止），由 comfy:runtime 事件与主动刷新维护 */
+  comfyRuntime: ComfyRuntimeState | null
   project: Project | null
   jobs: JobInfo[]
   update: UpdateInfo | null
   hardwareLoading: boolean
+  /** 全局通知中心（右上角 Toast 栈），纯 UI 状态 */
+  notices: Notice[]
+  pushNotice: (type: NoticeType, text: string) => void
+  dismissNotice: (id: number) => void
   loadHardware: () => Promise<void>
   refreshComfy: (settings?: ComfySettings) => Promise<void>
+  refreshComfyRuntime: () => Promise<ComfyRuntimeState | null>
   testComfy: (settings?: ComfySettings) => Promise<{ ok: boolean; version: string; error: string | null }>
   listProjects: () => Promise<ProjectSummary[]>
   openProject: (id: string) => Promise<void>
@@ -53,10 +73,23 @@ interface AppState {
 export const useApp = create<AppState>((set, get) => ({
   hardware: null,
   comfy: null,
+  comfyRuntime: null,
   project: null,
   jobs: [],
   update: null,
   hardwareLoading: false,
+  notices: [],
+
+  pushNotice: (type, text) => {
+    const id = noticeSeq++
+    // 最多保留 5 条，避免长时间操作把栈撑爆
+    set((s) => ({ notices: [...s.notices.slice(-4), { id, type, text }] }))
+    window.setTimeout(() => get().dismissNotice(id), 4000)
+  },
+
+  dismissNotice: (id) => {
+    set((s) => ({ notices: s.notices.filter((n) => n.id !== id) }))
+  },
 
   loadHardware: async () => {
     set({ hardwareLoading: true })
@@ -80,6 +113,16 @@ export const useApp = create<AppState>((set, get) => ({
       if (!comfyStatsEqual(prev, comfy)) set({ comfy })
     } finally {
       comfyInFlight = false
+    }
+  },
+
+  refreshComfyRuntime: async () => {
+    try {
+      const runtime = await window.api.comfyRuntimeStatus()
+      set({ comfyRuntime: runtime })
+      return runtime
+    } catch {
+      return null
     }
   },
 

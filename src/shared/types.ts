@@ -373,6 +373,8 @@ export interface ProjectSettings {
   autoRetry: number
   retryDelaySec: number
   activeScriptId: string | null
+  /** 导演台当前选中的剧集 id（跨页面切换保持） */
+  activeEpisodeId?: string | null
   presetId: string
 }
 
@@ -398,6 +400,8 @@ export interface Project {
   templates: Template[]
   /** AI 助手对话历史，旧项目缺省时按空数组处理 */
   aiChat?: AiChatMessage[]
+  /** 运行时乐观锁版本号：主进程每次写入 current 递增，渲染层保存时校验，防止旧快照覆盖后台写回的产物。不参与业务语义。 */
+  rev?: number
 }
 
 export interface ProjectSummary {
@@ -501,11 +505,6 @@ export interface JobParams {
    * H3 会把槽位 alias 与提示词里的称呼做匹配，写进 alias 后提示词写角色名即可绑定参考图。
    */
   refAliases?: string[]
-  /**
-   * 采样参数与模板完全一致时为 true。
-   * 此时不重算 SelfLift 分段步数，保留工作流作者的原配（如 4 步配 3,3）。
-   */
-  keepTemplateSampler?: boolean
   /** 需要挂载的 LoRA（如千问多角度四视图） */
   loras?: { file: string; strength: number }[]
   /** 参考视频（本段生成方式=视频参考时，传上一段成片） */
@@ -517,8 +516,14 @@ export interface JobParams {
   assetImageIds?: string[]
 }
 
-export type JobStatus = 'queued' | 'running' | 'done' | 'failed' | 'cancelled'
+/** 各生成阶段的采样器/调度器可选清单（来自本机 ComfyUI object_info 的真实白名单） */
+export interface StageSamplerOptions {
+  samplers: string[]
+  schedulers: string[]
+}
+export type StageSamplerOptionsMap = Record<'first' | 'second' | 'third' | 'superRes', StageSamplerOptions>
 
+export type JobStatus = 'queued' | 'running' | 'done' | 'failed' | 'cancelled'
 export interface JobInfo {
   id: string
   kind: OutputKind
@@ -546,71 +551,6 @@ export interface UpdateInfo {
   percent?: number
   downloaded?: boolean
   error?: string
-}
-
-// ---------- 环境检测 ----------
-
-export interface ModelInventory {
-  checkpoints: string[]
-  loras: string[]
-  vaes: string[]
-}
-
-export interface FfmpegInfo {
-  found: boolean
-  path: string | null
-  version?: string
-}
-
-export interface EnvironmentReport {
-  gpu: HardwareReport
-  comfy: ComfySystemStats
-  models: ModelInventory
-  ffmpeg: FfmpegInfo
-  scannedAt: string
-}
-
-// ---------- 下载 ----------
-
-export type DownloadStatus = 'queued' | 'downloading' | 'done' | 'failed' | 'cancelled'
-
-/** 网络与镜像设置（对齐绘世启动器的 network_preference） */
-export interface NetworkSettings {
-  /** HTTP(S) 代理地址，如 http://127.0.0.1:7890；留空表示直连 */
-  proxyAddress: string
-  mirrorPypi: boolean
-  mirrorGit: boolean
-  mirrorHuggingface: boolean
-  mirrorExtensionList: boolean
-  githubAcceleration: boolean
-}
-
-export interface DownloadRequest {
-  id: string
-  label: string
-  url: string
-  dest: string
-  sha256?: string
-  /** 多文件打包下载（一个工作流一套模型） */
-  files?: { url: string; dest: string; sha256?: string; mirrors?: string[] }[]
-  /** 备用镜像地址（主源失败自动回退，单文件下载用） */
-  mirrors?: string[]
-  /** 并行线程数（分块下载），默认 4 */
-  parallel?: number
-}
-
-export interface DownloadTask {
-  id: string
-  label: string
-  url: string
-  dest: string
-  status: DownloadStatus
-  receivedBytes: number
-  totalBytes: number
-  percent: number
-  error?: string
-  startedAt?: string
-  finishedAt?: string
 }
 
 // ---------- 组件目录 ----------
@@ -665,14 +605,5 @@ export interface ComfyRuntimeState {
   port: number
   pid: number | null
   logTail: string
-  error?: string
-}
-
-export type ComfyInstallPhase = 'idle' | 'downloading' | 'extracting' | 'configuring' | 'starting' | 'done' | 'error'
-
-export interface ComfyInstallState {
-  phase: ComfyInstallPhase
-  percent: number
-  message: string
   error?: string
 }

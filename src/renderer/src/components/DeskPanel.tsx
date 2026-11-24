@@ -55,12 +55,12 @@ export default function DeskPanel(props: DeskPanelProps): React.JSX.Element {
       <div className="mb-2 flex items-center gap-2">
         <Sparkles size={13} className="text-accent-400" />
         <span className="text-[11px] font-medium text-slate-300">文案台</span>
-        <span className="ml-auto text-[10px] text-slate-500">片子级 + 本段 → 最终提示词</span>
+        <span className="ml-auto text-[11px] text-slate-500">片子级 + 本段 → 最终提示词</span>
       </div>
 
       {/* 本段提示词（主输入） */}
       <div className="mb-1 flex items-center justify-between">
-        <label className="text-[10px] text-slate-500">本段提示词（自动保存）</label>
+        <label className="text-[11px] text-slate-500">本段提示词（自动保存）</label>
       </div>
       <PromptEditor
         value={segmentPrompt}
@@ -74,7 +74,7 @@ export default function DeskPanel(props: DeskPanelProps): React.JSX.Element {
       {/* presets 快捷短语：点一下追加到本段 */}
       <div className="mt-2 border-t border-white/[0.06] pt-2">
         <button
-          className="flex w-full items-center gap-1.5 text-left text-[10px] text-slate-500 hover:text-slate-300"
+          className="flex w-full items-center gap-1.5 text-left text-[11px] text-slate-500 hover:text-slate-300"
           onClick={() => setPresetOpen((v) => !v)}
         >
           {presetOpen ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
@@ -87,7 +87,7 @@ export default function DeskPanel(props: DeskPanelProps): React.JSX.Element {
               {presets.map((p, i) => (
                 <button
                   key={`${p}-${i}`}
-                  className="group flex items-center gap-1 rounded-full border border-white/10 bg-white/[0.03] px-2 py-0.5 text-[10px] text-slate-400 hover:border-accent-500/40 hover:text-accent-200"
+                  className="group flex items-center gap-1 rounded-full border border-white/10 bg-white/[0.03] px-2 py-0.5 text-[11px] text-slate-400 hover:border-accent-500/40 hover:text-accent-200"
                   title={`追加：${p}`}
                   onClick={() => appendPreset(p)}
                 >
@@ -102,11 +102,11 @@ export default function DeskPanel(props: DeskPanelProps): React.JSX.Element {
                   />
                 </button>
               ))}
-              {presets.length === 0 && <span className="text-[10px] text-slate-600">还没有快捷短语，在下面添加</span>}
+              {presets.length === 0 && <span className="text-[11px] text-slate-600">还没有快捷短语，在下面添加</span>}
             </div>
             <div className="mt-1.5 flex gap-1">
               <input
-                className="field min-w-0 flex-1 text-[10px]"
+                className="field min-w-0 flex-1 text-[11px]"
                 placeholder="新增快捷短语，如：镜头缓慢推近"
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
@@ -117,7 +117,7 @@ export default function DeskPanel(props: DeskPanelProps): React.JSX.Element {
                   }
                 }}
               />
-              <button className="btn-ghost shrink-0 px-2 py-1 text-[10px]" onClick={addPreset} title="添加快捷短语">
+              <button className="btn-ghost shrink-0 px-2 py-1 text-[11px]" onClick={addPreset} title="添加快捷短语">
                 <Plus size={11} />
               </button>
             </div>
@@ -128,7 +128,7 @@ export default function DeskPanel(props: DeskPanelProps): React.JSX.Element {
       {/* 片子级提示词（全片统一基调，折叠收纳） */}
       <div className="mt-2 border-t border-white/[0.06] pt-2">
         <button
-          className="flex w-full items-center gap-1.5 text-left text-[10px] text-slate-500 hover:text-slate-300"
+          className="flex w-full items-center gap-1.5 text-left text-[11px] text-slate-500 hover:text-slate-300"
           onClick={() => setGlobalOpen((v) => !v)}
         >
           {globalOpen ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
@@ -145,7 +145,7 @@ export default function DeskPanel(props: DeskPanelProps): React.JSX.Element {
               placeholder="全片统一的风格 / 基调 / 世界观，如：现代都市，霓虹夜景，冷色调，电影感构图"
               minHeight={80}
             />
-            <div className="mt-1 text-[10px] text-slate-600">生成每段时自动拼在本段提示词前面。</div>
+            <div className="mt-1 text-[11px] text-slate-600">生成每段时自动拼在本段提示词前面。</div>
           </div>
         )}
       </div>

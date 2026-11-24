@@ -65,14 +65,14 @@ export function RefBindingPanel({
         <div className="mb-0.5 flex items-center gap-2">
           <Link2 size={13} className="text-accent-400" />
           <span className="text-[11px] font-medium text-slate-200">参考图绑定</span>
-          <span className="ml-auto text-[10px] text-slate-500">{usedCount}/{picks.length} 已绑定</span>
+          <span className="ml-auto text-[11px] text-slate-500">{usedCount}/{picks.length} 已绑定</span>
         </div>
-        <p className="mb-2 text-[10px] leading-relaxed text-slate-500">
+        <p className="mb-2 text-[11px] leading-relaxed text-slate-500">
           在提示词里写<strong className="font-medium text-slate-300">名字</strong>即可调用对应参考图，点下面的按钮自动写入。
         </p>
 
         {picks.length === 0 ? (
-          <div className="flex items-center gap-1.5 py-1 text-[10px] text-slate-500">
+          <div className="flex items-center gap-1.5 py-1 text-[11px] text-slate-500">
             <ImageIcon size={11} />
             本段还没有引用资产 —— 点「＋ 加参考图」从资产库选。
           </div>
@@ -99,13 +99,13 @@ export function RefBindingPanel({
                       <span className="truncate text-[11px] font-medium text-slate-200" title={p.name}>
                         {p.name}
                       </span>
-                      {p.hasImage === false && <span className="shrink-0 text-[10px] text-amber-400/80">无图</span>}
+                      {p.hasImage === false && <span className="shrink-0 text-[11px] text-amber-400/80">无图</span>}
                     </div>
-                    <span className="text-[9px] text-slate-600">槽位 {tag}</span>
+                    <span className="text-[11px] text-slate-600">槽位 {tag}</span>
                   </div>
                   {p.used && <Check size={12} className="shrink-0 text-accent-400" />}
                   <button
-                    className={`shrink-0 rounded px-2 py-1 text-[10px] transition-colors ${
+                    className={`shrink-0 rounded px-2 py-1 text-[11px] transition-colors ${
                       p.used
                         ? 'bg-white/[0.06] text-slate-400 hover:bg-white/[0.1]'
                         : 'bg-accent-600/20 text-accent-300 hover:bg-accent-600/35'
@@ -134,7 +134,7 @@ export function RefBindingPanel({
         {onAdd && (
           <div className="mt-2 border-t border-white/[0.06] pt-2">
             <button
-              className="flex w-full items-center gap-1.5 text-left text-[10px] text-accent-300 hover:text-accent-200"
+              className="flex w-full items-center gap-1.5 text-left text-[11px] text-accent-300 hover:text-accent-200"
               onClick={() => setPickerOpen((v) => !v)}
             >
               <Plus size={11} />
@@ -143,7 +143,7 @@ export function RefBindingPanel({
             {pickerOpen && (
               <div className="mt-1.5 max-h-40 space-y-1 overflow-y-auto rounded border border-white/[0.06] bg-black/20 p-1">
                 {(available ?? []).length === 0 && (
-                  <div className="px-1 py-2 text-[10px] text-slate-600">资产库里没有未引用的资产了</div>
+                  <div className="px-1 py-2 text-[11px] text-slate-600">资产库里没有未引用的资产了</div>
                 )}
                 {(available ?? []).map((a) => (
                   <button
@@ -162,7 +162,7 @@ export function RefBindingPanel({
                         <ImageIcon size={11} />
                       </span>
                     )}
-                    <span className="min-w-0 flex-1 truncate text-[10px] text-slate-300">{a.name}</span>
+                    <span className="min-w-0 flex-1 truncate text-[11px] text-slate-300">{a.name}</span>
                     <Plus size={11} className="shrink-0 text-accent-400" />
                   </button>
                 ))}
@@ -176,11 +176,11 @@ export function RefBindingPanel({
       <div className="flex items-center justify-between rounded-lg border border-white/[0.06] bg-white/[0.02] px-2.5 py-2">
         <div className="flex items-center gap-1.5">
           <PlugZap size={12} className={aliasMode ? 'text-emerald-400' : 'text-amber-400'} />
-          <span className="text-[10px] text-slate-400">名字绑定模式</span>
+          <span className="text-[11px] text-slate-400">名字绑定模式</span>
         </div>
         <button
           onClick={() => onToggleAlias(!aliasMode)}
-          className={`rounded px-2 py-0.5 text-[10px] transition-colors ${
+          className={`rounded px-2 py-0.5 text-[11px] transition-colors ${
             aliasMode
               ? 'bg-emerald-600/25 text-emerald-300'
               : 'bg-amber-600/20 text-amber-300 hover:bg-amber-600/35'
@@ -192,12 +192,12 @@ export function RefBindingPanel({
       </div>
 
       {!aliasMode && picks.length > 0 && (
-        <div className="rounded bg-amber-500/10 px-2 py-1.5 text-[10px] leading-relaxed text-amber-300/90">
+        <div className="rounded bg-amber-500/10 px-2 py-1.5 text-[11px] leading-relaxed text-amber-300/90">
           名字绑定已关闭 —— 现在写名字不生效，只能手写 @图片N。建议打开上面的开关。
         </div>
       )}
       {aliasMode && prompt.trim().length > 0 && picks.length > 0 && picks.every((p) => !p.used) && (
-        <div className="rounded bg-amber-500/10 px-2 py-1.5 text-[10px] leading-relaxed text-amber-300/90">
+        <div className="rounded bg-amber-500/10 px-2 py-1.5 text-[11px] leading-relaxed text-amber-300/90">
           提示词里还没写这些资产的名字 —— 按 H3「写了才送」的规则，这些参考图这次不会被送进模型。点上面的「绑定」把名字写进去。
         </div>
       )}

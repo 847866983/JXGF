@@ -19,8 +19,6 @@ export interface WorkflowParams {
   cfg?: number
   samplerName?: string
   scheduler?: string
-  /** 采样参数与模板一致时为 true：不重算 SelfLift 分段步数，保留作者原配 */
-  keepTemplateSampler?: boolean
   /** 生成模式：t2v（文生视频）/ fl2va（首尾帧）/ ref2va（参考图生视频） */
   mode?: 't2v' | 'fl2va' | 'ref2va'
   /** 分段导演台：覆盖 h3_data 的字段（ratio、pin_head、ref_* 、bridge_* 、cont、push_whole、chain） */
@@ -100,6 +98,44 @@ function isQwenEditNode(classType: string): boolean {
   return QWEN_EDIT_NODES.includes(classType)
 }
 
+/**
+ * 【千问编辑·删除类指令失效的工程修复】
+ *
+ * 实测结论（多组对照实验）：Qwen-Image 2.1 编辑节点对「去掉机甲 / 删除衣服」这类
+ * **否定式祈使句**几乎不响应——输出接近原图；而同一工作流、同一 seed 换成
+ * 「戴红帽」这种**肯定式描述**就完美生效。原因是否定词在扩散模型的图文对齐里
+ * 权重极低，模型只看到画面里"有机甲"，反而把它重建出来。
+ *
+ * 更关键的是：把目标状态用**肯定句**描述（"只穿白色紧身衣，没有机械部件"）
+ * 就能明显生效（实测机甲腿甲/绿色发光部件被去掉）。所以这里在注入前做一次
+ * 指令规范化：识别"去掉/删除/移除 X"，改写成"移除 X 后应呈现的状态"的肯定描述，
+ * 并把被删对象补进负面提示词，双向夹击提升编辑成功率。
+ *
+ * 不改动用户已写成肯定句的正常指令，避免破坏"戴红帽"这类本来就有效的编辑。
+ */
+function normalizeQwenEditPrompt(prompt: string): { prompt: string; extraNegative: string } {
+  const text = (prompt || '').trim()
+  if (!text) return { prompt: text, extraNegative: '' }
+
+  // 匹配「去掉/删除/移除/脱掉/卸掉 + 宾语（可选修饰）」
+  const m = text.match(/^(?:请?|帮我)?(?:去掉|删除|移除|去除|脱掉|脱下|卸掉|拿掉|清除)(?:掉|了)?\s*([\u4e00-\u9fa5A-Za-z0-9]{1,20})$/)
+  if (!m) return { prompt: text, extraNegative: '' }
+
+  const object = m[1]
+  // 肯定式目标描述：明确"不穿/不含该物体"的最终画面状态，而不是喊"去掉"。
+  // 实测这句能驱动模型真正移除机甲部件（对照"去掉机甲"完全无效）。
+  // 【防过界（20261124 e2e 实测①）】只写"只保留自然的身体"，模型会把「移除机甲」
+  // 过度执行成移除全部服装（turbo 模型对"简洁服装"的理解就是没衣服）——必须
+  // 显式写明衣物覆盖。
+  // 【防打架（20261124 e2e 实测②）】写"不穿机甲…仍穿着完整得体的服装"时，
+  // 当机甲本身就是角色的服装，两句互相冲突，模型会整个保留机甲。正确口径是
+  // 「卸下装备后露出里面的贴身基础服装」——既明确移除对象，又给出替代物。
+  const rewritten =
+    `角色卸下${object}之后的样子，画面中没有任何${object}的部件，人物身上仍穿着贴身的上衣和短裤等基础服装，` +
+    `四肢与躯干被衣物正常覆盖，画面健康得体，保持人物的身份、发型、姿态和纯白背景完全不变，其余细节维持原样`
+  return { prompt: rewritten, extraNegative: `${object}，裸露，nsfw，nude，暴露隐私部位` }
+}
+
 function injectQwenEdit(clone: Workflow, params: WorkflowParams): void {
   const hasRefs = Array.isArray(params.refImages) && params.refImages.length > 0
   for (const node of Object.values(clone)) {
@@ -107,8 +143,32 @@ function injectQwenEdit(clone: Workflow, params: WorkflowParams): void {
     const raw = node.inputs.qwen_data
     const data = tryParse<QwenData>(typeof raw === 'string' ? raw : '')
     if (!data) continue
-    if (params.positive) data.prompt = params.positive
-    if (params.negative) data.negative_prompt = params.negative
+    // 【编辑失效的真正根因（20261124 确证）】模板 qwen_data 里残留 "rewrite":true
+    // （从 ComfyUI 面板导出时带出来的）。CSGlideImageCastCS 在编码前会用接入的
+    // qwen3vl_8b 以 temperature=0.7 随机采样**改写提示词**，且 rewrite_system 为空
+    // 时 Qwen 2.1 模式连系统提示词都不给——8B 模型自由发挥，精心构造的编辑指令
+    // （肯定式目标描述 + 负面词夹击）被改得面目全非，表现就是「图没被编辑」。
+    // 节点作者自己的注释也承认改写是「提示词看着对、画面却跑偏」的头号嫌疑。
+    // 软件注入的提示词本来就是最终口径，绝不允许被二次改写，一律强制关闭。
+    // （文生图同此分支：长段完整描述更不该被 8B 模型随机重写。）
+    data.rewrite = false
+    delete data.rewrite_system
+    delete data.rewrite_max_length
+    if (params.positive) {
+      const normalized = normalizeQwenEditPrompt(params.positive)
+      data.prompt = normalized.prompt
+      // 被删对象补进负面词，避免模型继续把它画回来
+      if (normalized.extraNegative) {
+        const neg = (data.negative_prompt || params.negative || '').trim()
+        if (!neg.includes(normalized.extraNegative)) {
+          data.negative_prompt = neg ? `${neg}，${normalized.extraNegative}` : normalized.extraNegative
+        }
+      } else if (params.negative) {
+        data.negative_prompt = params.negative
+      }
+    } else if (params.negative) {
+      data.negative_prompt = params.negative
+    }
     // 有参考图时画布跟随参考图（编辑模式最自然）；显式给了宽高才用它
     if (hasRefs && !(params.width && params.height)) {
       data.canvas_from_ref = true
@@ -517,6 +577,68 @@ function syncH3DeskChain(clone: Workflow): void {
  * 放大重绘参数注入（BanZhang_MMH3_Upscale / UpscaleParams）。
  */
 function applyUpscaleParams(clone: Workflow, up: UpscaleSettings): void {
+  // 【图片编辑·重影根因】关闭放大时，必须同时旁路「高清放大 → 低 denoise 二次重绘」链。
+  // 千问全能编辑模板焊死了 2× 放大 + denoise=0.25 的二次 KSampler（281）：
+  // 旧实现只把放大倍数压到 1，二次重绘仍在跑，把主编辑结果往回拉 25%，
+  // 而交付层对图片取「最后一个产物」——正是这条被重绘的链（N267），
+  // 于是表现为「图几乎没被编辑 + 右腿等处出现半透明重影」。
+  // 做法：把重绘链 VAEDecode 的 samples 改接主链 KSampler，直接解码主编辑 latent；
+  // 二次重绘 KSampler 与放大节点随之变成孤儿节点，ComfyUI 不再执行（还省一半时间）。
+  // 仅对存在「BanZhang_ImageHiResUpscale」的图片模板生效，H3 视频链不受影响。
+  // 放大节点 id 集合：关闭旁路、开启压 denoise 两处共用
+  const upscaleIds = new Set<string>()
+  for (const [id, node] of Object.entries(clone)) {
+    if (String(node.class_type) === 'BanZhang_ImageHiResUpscale') upscaleIds.add(id)
+  }
+  if (up.enabled && upscaleIds.size > 0) {
+    // 【编辑 2K 交付的关键】放大链开启时，「放大后二次重绘 KSampler」的 denoise
+    // 是模板里焊死的 1（完全重绘）——2048 画布上完全重新生成会把编辑结果整个
+    // 抹掉（等于白编辑）。压到 0.25 做轻度细化：保住编辑内容，只补高清细节。
+    for (const node of Object.values(clone)) {
+      if (!/^KSampler(Advanced)?$/.test(String(node.class_type))) continue
+      const lat = node.inputs.latent_image
+      if (Array.isArray(lat) && upscaleIds.has(String(lat[0]))) {
+        if ('denoise' in node.inputs) node.inputs.denoise = 0.25
+        if ('steps' in node.inputs) node.inputs.steps = Math.min(Number(node.inputs.steps) || 3, 4)
+      }
+    }
+  }
+  if (!up.enabled) {
+    if (upscaleIds.size > 0) {
+      // 二次重绘 KSampler：latent_image 来自放大节点
+      const refineIds = new Set<string>()
+      for (const [id, node] of Object.entries(clone)) {
+        if (!/^KSampler(Advanced)?$/.test(String(node.class_type))) continue
+        const lat = node.inputs.latent_image
+        if (Array.isArray(lat) && upscaleIds.has(String(lat[0]))) refineIds.add(id)
+      }
+      // 主链 KSampler：被某个 VAEDecode 引用、且不是重绘 KSampler 的那个（denoise=1）
+      let mainRef: [string, number] | null = null
+      for (const node of Object.values(clone)) {
+        if (String(node.class_type) !== 'VAEDecode') continue
+        const s = node.inputs.samples
+        if (!Array.isArray(s)) continue
+        const srcId = String(s[0])
+        if (refineIds.has(srcId)) continue
+        const src = clone[srcId]
+        if (src && /^KSampler(Advanced)?$/.test(String(src.class_type))) {
+          mainRef = [srcId, Number(s[1]) || 0]
+          break
+        }
+      }
+      if (mainRef) {
+        const target = mainRef
+        for (const node of Object.values(clone)) {
+          if (String(node.class_type) !== 'VAEDecode') continue
+          const s = node.inputs.samples
+          if (Array.isArray(s) && refineIds.has(String(s[0]))) {
+            node.inputs.samples = [target[0], target[1]]
+          }
+        }
+      }
+    }
+  }
+
   for (const node of Object.values(clone)) {
     const ct = String(node.class_type)
     const i = node.inputs
@@ -806,6 +928,38 @@ export function extractH3Chain(workflow: unknown): { name: string; shot: string 
     return { name, shot: h3?.chain?.shot?.trim() ?? '' }
   }
   return null
+}
+
+/**
+ * 把 H3 工作流里 chain.clip 覆盖成服务端登记返回的真实 clip id。
+ *
+ * 前端 buildH3 只能按工程段序猜 `clip_000N`，但档案里的 clip 编号由 H3 服务端
+ * 分配，历史错乱（删段/重建/顺序调整）后工程段序与档案 clip 序会不一致。
+ * 若带着错的 clip 提交，H3 会把本段当成另一个 clip 的续写 → 输出含承接帧的
+ * 累积片（243 帧/10 秒），表现为「5 秒的段渲染出 10 秒、播完又重播下一段」。
+ * 用 registerClip 的真实 cid 回填即可根治。同时同步 CSGlideDeskCS 的 desk_data，
+ * 与 syncH3DeskChain 的口径保持一致。
+ */
+export function setH3ChainClip(workflow: unknown, cid: string): void {
+  if (!cid || !isWorkflowObject(workflow)) return
+  for (const node of Object.values(workflow)) {
+    const ct = String(node.class_type)
+    if (ct === 'CSGlideCastCS') {
+      const field = h3DataField(node)
+      if (!field) continue
+      const h3 = tryParse<{ chain?: { clip?: string } }>(node.inputs[field])
+      if (!h3?.chain) continue
+      h3.chain.clip = cid
+      node.inputs[field] = JSON.stringify(h3)
+    } else if (ct === 'CSGlideDeskCS') {
+      const field = deskDataField(node)
+      if (!field) continue
+      const desk = tryParse<{ chain?: { clip?: string } }>(node.inputs[field])
+      if (!desk?.chain) continue
+      desk.chain.clip = cid
+      node.inputs[field] = JSON.stringify(desk)
+    }
+  }
 }
 
 /** 从工作流里读出各 节点包节点的当前参数（节点级参数面板回填用） */

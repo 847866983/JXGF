@@ -4,6 +4,31 @@ import type { GpuInfo, GpuVendor } from '@shared/types'
 
 const execFileAsync = promisify(execFile)
 
+/**
+ * 读取 NVIDIA 显卡的真实显存占用（MB）。
+ * 用途：ComfyUI system_stats 在 cudaMallocAsync 模式下 vram_free/torch_vram_* 会上报 0
+ * （并非真的占满），状态卡片若据此计算会误显示 100%。nvidia-smi 是所有进程占用的权威来源。
+ * 返回 null 表示不可用（无 N 卡 / 命令失败），调用方应回退到 ComfyUI 上报值。
+ */
+export async function nvidiaVramUsage(): Promise<{ usedMB: number; totalMB: number } | null> {
+  try {
+    const { stdout } = await execFileAsync(
+      'nvidia-smi',
+      ['--query-gpu=memory.used,memory.total', '--format=csv,noheader,nounits'],
+      { timeout: 5000, windowsHide: true }
+    )
+    const line = stdout.trim().split(/\r?\n/)[0]
+    if (!line) return null
+    const parts = line.split(',').map((s) => s.trim())
+    const usedMB = Number(parts[0])
+    const totalMB = Number(parts[1])
+    if (!Number.isFinite(usedMB) || !Number.isFinite(totalMB) || totalMB <= 0) return null
+    return { usedMB, totalMB }
+  } catch {
+    return null
+  }
+}
+
 function classify(name: string): GpuVendor {
   const n = name.toLowerCase()
   if (n.includes('nvidia') || n.includes('geforce') || n.includes('rtx') || n.includes('gtx') || n.includes('quadro')) {

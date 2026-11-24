@@ -142,7 +142,7 @@ export default function NodeParamsPanel({ initial, loraFiles, onSave, onClose }:
                 {isOpen ? <ChevronDown size={13} className="text-slate-500" /> : <ChevronRight size={13} className="text-slate-500" />}
                 <span className="text-accent-400">{sec.icon}</span>
                 <span className="text-xs font-medium text-slate-200">{sec.label}</span>
-                <span className="ml-auto text-[10px] text-slate-500">{sec.hint}</span>
+                <span className="ml-auto text-[11px] text-slate-500">{sec.hint}</span>
               </button>
               {isOpen && (
                 <div className="border-t border-white/5 px-3 py-3">

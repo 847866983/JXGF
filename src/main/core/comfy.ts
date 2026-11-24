@@ -4,7 +4,7 @@ import fsp from 'node:fs/promises'
 import path from 'node:path'
 import crypto from 'node:crypto'
 import WebSocket from 'ws'
-import type { ComfySettings, ComfySystemStats, ModelInventory } from '@shared/types'
+import type { ComfySettings, ComfySystemStats } from '@shared/types'
 
 export interface UploadedImage {
   name: string
@@ -90,27 +90,6 @@ export class ComfyClient extends EventEmitter {
     }
   }
 
-  /**
-   * 读取 /object_info，提取常见加载节点能选到的模型清单。
-   * 不同自定义节点可能有不同的加载器，这里只列最通用的三类作为环境自检参考。
-   */
-  async modelInventory(): Promise<ModelInventory> {
-    const res = await fetch(`${this.base}/object_info`, { signal: AbortSignal.timeout(10000) })
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    const info = (await res.json()) as Record<string, unknown>
-    const pick = (node: string, key: string): string[] => {
-      const nodeInfo = info[node] as { input?: { required?: Record<string, unknown> } } | undefined
-      const arr = nodeInfo?.input?.required?.[key]
-      const list = Array.isArray(arr) ? (arr[0] as unknown[]) : []
-      return Array.isArray(list) ? list.map(String) : []
-    }
-    return {
-      checkpoints: pick('CheckpointLoaderSimple', 'ckpt_name'),
-      loras: pick('LoraLoader', 'lora_name'),
-      vaes: pick('VAELoader', 'vae_name')
-    }
-  }
-
   async uploadImage(filePath: string): Promise<UploadedImage> {
     const buf = await fsp.readFile(filePath)
     const form = new FormData()
@@ -156,6 +135,20 @@ export class ComfyClient extends EventEmitter {
     }
     const data = (await res.json()) as { id?: string; error?: string }
     if (!data.id) throw new Error(data.error ?? '登记段落未返回 id')
+    // 关键：add_clip 命中「已有段」(同一 shot 重新生成) 时只补字段、不会把该段
+    // 设为 chain.current（见 csglide_chain.py add_clip）。而 collect_run 收片要求
+    // current === cid，否则拒绝 → 重抽的段拿不到 cont 存档 → 下一段续接时
+    // chainCont 查不到上一段 cont，退化成「独立生成」（用户看到「续接变单飞」）。
+    // 所以登记后显式把本段设为当前段，保证后续 collect_run 能收片并写 cont。
+    try {
+      await fetch(`${this.base}/cglide/chain/current`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, id: data.id })
+      })
+    } catch {
+      // 设当前段失败不阻断生成；collect_run 仍有机会成功（current 本就指向本段）
+    }
     return data.id
   }
 
@@ -195,6 +188,21 @@ export class ComfyClient extends EventEmitter {
     const res = await fetch(url, { signal: AbortSignal.timeout(12000) })
     if (!res.ok) throw new Error(`读取成片时间轴失败：HTTP ${res.status}`)
     return (await res.json()) as Record<string, unknown>
+  }
+
+  /**
+   * 把所有段按净长拼成一条整片（H3 侧流复制、零损失）。
+   * 播放器用这条单文件播放，就能像原视频一样无缝、没有段间卡顿。
+   */
+  async exportWholeFilm(name: string): Promise<{ ok?: boolean; path?: string; error?: string }> {
+    const res = await fetch(`${this.base}/cglide/chain/export_film`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
+      signal: AbortSignal.timeout(60000)
+    })
+    if (!res.ok) return { error: `HTTP ${res.status}` }
+    return (await res.json()) as { ok?: boolean; path?: string; error?: string }
   }
 
   /** 单条成片的音频峰值包络（时间轴波形层用） */

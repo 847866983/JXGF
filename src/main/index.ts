@@ -6,23 +6,21 @@ import { spawnSync } from 'node:child_process'
 import { CH, type PushEvent } from '../shared/ipc'
 import type {
   ComfyRuntimeConfig,
-  DownloadRequest,
-  FfmpegInfo,
   HardwareReport,
   JobParams,
   Project,
+  StageSamplerOptionsMap,
   UpdateInfo
 } from '../shared/types'
-import { detectGpu } from './core/hardware'
+import { detectGpu, nvidiaVramUsage } from './core/hardware'
 import { buildHardwareReport } from './core/presets'
 import { makeClient } from './core/comfy'
 import { ProjectStore, uid, now } from './core/store'
 import { JobManager } from './core/jobs'
 import { ComfyRuntime } from './core/comfy-runtime'
 import { isUiWorkflow, convertUiToApi, detectWorkflowKind } from './core/workflow-convert'
-import { adaptTemplateForGpu, degradeMissingLoras, resetVramFieldsToAuthor } from './core/template-adapt'
+import { adaptTemplateForGpu } from './core/template-adapt'
 import { buildBuiltinTemplates } from './core/builtin-workflows'
-import { listComfyWorkflows, readComfyWorkflow, normalizeKey } from './core/workflow-sync'
 import { exportProjectToFile, importProjectFromFile } from './core/project-archive'
 import { listMemory, readMemory, writeMemory, appendMemory } from './core/memory'
 import { AiAssistant } from './core/ai-assistant'
@@ -35,10 +33,15 @@ let hardwarePending: Promise<HardwareReport> | null = null
 let store: ProjectStore
 let jobs: JobManager
 let comfyRuntime: ComfyRuntime
+/** 最近一次已知的 ComfyUI 根目录（同步读，供生成时的缺失 LoRA 降级用） */
+let lastKnownComfyRoot: string | null = null
 const updater = new Updater()
 let aiAssistant: AiAssistant
 let skillsRoot = ''
 let aiConfigFile = ''
+
+// 仅开发模式：开放 CDP 调试端口（打包版绝不开启），供自动化 UI 验证截图用
+if (!app.isPackaged) app.commandLine.appendSwitch('remote-debugging-port', '9222')
 
 // 必须在 app ready 前注册自定义协议特权
 protocol.registerSchemesAsPrivileged([
@@ -92,6 +95,42 @@ function getHardware(): Promise<HardwareReport> {
   return hardwarePending
 }
 
+/** 媒体文件扩展名 → MIME（mediaDataUrl 与 appmedia:// 协议共用） */
+function mimeOfExt(p: string): string {
+  const ext = path.extname(p).toLowerCase()
+  return ext === '.png'
+    ? 'image/png'
+    : ext === '.jpg' || ext === '.jpeg'
+      ? 'image/jpeg'
+      : ext === '.webp'
+        ? 'image/webp'
+        : ext === '.gif'
+          ? 'image/gif'
+          : ext === '.mp4'
+            ? 'video/mp4'
+            : ext === '.webm'
+              ? 'video/webm'
+              : 'application/octet-stream'
+}
+
+/** 收集一个工程里所有被引用的媒体文件绝对路径（小写、resolve 过），供删除/孤儿清理共用 */
+function collectMediaRefs(proj: Project): Set<string> {
+  const refs = new Set<string>()
+  for (const a of proj.assets ?? []) {
+    if (a.coverFile) refs.add(path.resolve(a.coverFile).toLowerCase())
+    for (const i of a.images ?? []) if (i) refs.add(path.resolve(i).toLowerCase())
+    for (const v of (a as { versions?: { file?: string }[] }).versions ?? []) {
+      if (v?.file) refs.add(path.resolve(v.file).toLowerCase())
+    }
+  }
+  for (const s of proj.shots ?? []) {
+    for (const o of s.outputs ?? []) if (o?.file) refs.add(path.resolve(o.file).toLowerCase())
+    const ref = (s as { refImage?: string }).refImage
+    if (ref) refs.add(path.resolve(ref).toLowerCase())
+  }
+  return refs
+}
+
 function registerIpc(): void {
   ipcMain.handle(CH.appInfo, () => {
     const userData = app.getPath('userData')
@@ -140,14 +179,21 @@ function registerIpc(): void {
     const project = store.getCurrent()
     const s = settings ?? project?.settings.comfy ?? { host: '127.0.0.1', port: 8188, protocol: 'http' }
     const client = makeClient(s)
-    // 并行拉取，避免两次 4s 超时串行叠加拖慢状态刷新
-    const [stats, q] = await Promise.all([
+    // 并行拉取，避免多次请求串行叠加拖慢状态刷新
+    const [stats, q, vram] = await Promise.all([
       client.systemStats(),
-      client.queueStatus()
+      client.queueStatus(),
+      nvidiaVramUsage()
     ])
     if (stats.online) {
       stats.queueRemaining = q.queueRemaining
       stats.queueRunning = q.queueRunning
+    }
+    // ComfyUI 在 cudaMallocAsync 下 vram_free/torch_vram_* 会上报 0（假满载）。
+    // 用 nvidia-smi 的真实占用覆盖，保证显存进度条显示真实值。
+    if (vram && stats.gpu) {
+      stats.gpu.vramTotal = vram.totalMB * 1024 * 1024
+      stats.gpu.vramFree = Math.max(0, (vram.totalMB - vram.usedMB)) * 1024 * 1024
     }
     return stats
   })
@@ -157,6 +203,44 @@ function registerIpc(): void {
     const s = settings ?? project?.settings.comfy ?? { host: '127.0.0.1', port: 8188, protocol: 'http' }
     const stats = await makeClient(s).systemStats()
     return { ok: stats.online, version: stats.version, error: stats.online ? null : '无法连接 ComfyUI，请确认已启动且地址正确' }
+  })
+
+  // 各生成阶段的采样器/调度器可选清单（从本机 ComfyUI object_info 拉真实白名单，60s 缓存）。
+  // UI 据此渲染下拉框，从源头杜绝手填非法值导致的 value_not_in_list。
+  let stageSamplerCache: { at: number; data: StageSamplerOptionsMap } | null = null
+  ipcMain.handle(CH.comfyStageSamplers, async () => {
+    if (stageSamplerCache && Date.now() - stageSamplerCache.at < 60_000) return stageSamplerCache.data
+    const project = store.getCurrent()
+    const s = project?.settings.comfy ?? { host: '127.0.0.1', port: 8188, protocol: 'http' }
+    const base = `${s.protocol}://${s.host}:${s.port}`
+    const info = (await (
+      await fetch(`${base}/object_info`, { signal: AbortSignal.timeout(15000) })
+    ).json()) as Record<string, { input?: { required?: Record<string, unknown>; optional?: Record<string, unknown> } }>
+    const combo = (nodeType: string, field: string): string[] => {
+      const spec = {
+        ...(info[nodeType]?.input?.required ?? {}),
+        ...(info[nodeType]?.input?.optional ?? {})
+      }[field]
+      const t = Array.isArray(spec) ? spec[0] : spec
+      return Array.isArray(t) ? t.map(String) : []
+    }
+    const ksType = info['KSamplerAdvanced'] ? 'KSamplerAdvanced' : info['KSampler'] ? 'KSampler' : null
+    const firstSamplers = ksType ? combo(ksType, 'sampler_name') : []
+    const firstSchedulers = ksType ? combo(ksType, 'scheduler') : []
+    const hasMm = Boolean(info['BanZhang_MMH3_Upscale'])
+    const mmSamplers = hasMm ? combo('BanZhang_MMH3_Upscale', '采样器') : firstSamplers
+    const mmSchedulers = hasMm ? combo('BanZhang_MMH3_Upscale', '调度器') : firstSchedulers
+    const data: StageSamplerOptionsMap = {
+      first: { samplers: firstSamplers, schedulers: firstSchedulers },
+      second: { samplers: mmSamplers, schedulers: mmSchedulers },
+      third: { samplers: mmSamplers, schedulers: mmSchedulers },
+      superRes: {
+        samplers: [...new Set([...firstSamplers, ...mmSamplers])],
+        schedulers: [...new Set([...firstSchedulers, ...mmSchedulers])]
+      }
+    }
+    stageSamplerCache = { at: Date.now(), data }
+    return data
   })
 
 
@@ -194,65 +278,16 @@ function registerIpc(): void {
     await seedBuiltinTemplates(project)
     // 打开工程时清一次孤儿媒体文件（没被任何资产/分镜引用的旧图）
     void cleanupOrphansNow()
-    // 打开旧项目时按本机显存适配模板（修 12GB 放大模型在 6GB 卡上的 OOM）。
-    // 注意：先重置成作者原配再适配 —— 老项目里存的模板可能被旧版降级逻辑写坏
-    // （放大倍数锁成 1、显存预设硬编码 6GB），单纯再适配一次无法恢复。
-    try {
-      const hw = await getHardware()
-      // 内置模板（作者原配）作为参考，用于恢复被旧版降级写坏的放大倍数。
-      // 注意：buildBuiltinTemplates 会重新生成 id，所以按 name 匹配。
-      const builtins = buildBuiltinTemplates([], uid, now)
-      const authorByName = new Map<string, unknown>()
-      for (const b of builtins) authorByName.set(b.name, b.apiJson)
-      let changed = false
-      for (const tpl of project.templates) {
-        const author = authorByName.get(tpl.name)
-        const reset = resetVramFieldsToAuthor(tpl.apiJson, author)
-        if (reset !== tpl.apiJson) {
-          tpl.apiJson = reset
-          changed = true
-        }
-        const adapted = adaptTemplateForGpu(tpl.apiJson, hw.gpu)
-        if (adapted !== tpl.apiJson) {
-          tpl.apiJson = adapted
-          changed = true
-        }
-      }
-      if (changed) await store.flush()
-    } catch {
-      // 适配失败不阻断打开
-    }
-    // 缺失 LoRA 自动降级（私有/社区 LoRA 无公开源时，置 0 强度保证工作流可跑）
-    try {
-      const st2 = await comfyRuntime.status()
-      if (st2.root) {
-        const modelsRoot = fs.existsSync(path.join(st2.root, 'ComfyUI', 'models'))
-          ? path.join(st2.root, 'ComfyUI', 'models')
-          : path.join(st2.root, 'models')
-        let changed2 = false
-        for (const tpl of project.templates) {
-          const d = degradeMissingLoras(tpl.apiJson, modelsRoot)
-          if (d !== tpl.apiJson) {
-            tpl.apiJson = d
-            changed2 = true
-          }
-        }
-        if (changed2) await store.flush()
-      }
-    } catch {
-      // 降级失败不阻断打开
-    }
-    // 补全内置工作流（老项目缺失的图片/视频工作流，跟随软件自动补齐）
-    await seedBuiltinTemplates(project)
+    // 注意：不再在打开工程时改写并持久化模板参数（显存适配 / LoRA 降级 / 重置作者原配）。
+    // 那些降级现在只在「生成时」作用于工作流副本（见 jobs.ts），绝不碰用户存下来的模板——
+    // 之前每次打开都静默改调度器/LoRA 强度/放大倍数并写回，会把用户手动调过的参数洗掉。
+    // 仅补齐缺失的内置工作流（老项目可跑起来用），这一步只增不改。
     return project
   })
   ipcMain.handle(CH.projectSave, (_e, project: Project) => store.save(project))
   // 返回主进程当前项目的深拷贝：渲染层 persistProject 用它做 base，
   // 避免用旧快照覆盖主进程 side-effect 写入（如生成完成后写回的 shot.outputs）
-  ipcMain.handle(CH.projectGetCurrent, () => {
-    const cur = store.getCurrent()
-    return cur ? (structuredClone(cur) as Project) : null
-  })
+  ipcMain.handle(CH.projectGetCurrent, () => store.snapshot())
 
   ipcMain.handle(CH.projectImportTemplate, async (_e, payload: { name: string; kind?: 'image' | 'video'; apiJson: unknown }) => {
     const project = store.getCurrent()
@@ -288,18 +323,26 @@ function registerIpc(): void {
     const projects = await store.list()
     const meta = projects.find((p) => p.id === payload.id)
     if (!meta) throw new Error('工程不存在')
-    const project = store.getCurrent()?.id === payload.id ? store.getCurrent()! : await store.open(payload.id)
+    // 导出可能作用于非当前工程；store.open 会切换 current，务必记住原本的工程并在结束时恢复，
+    // 否则渲染层的 project 与主进程 current 错位，之后 persistProject 会写到错误的工程。
+    const originalId = store.getCurrent()?.id
+    const switched = originalId !== payload.id
+    const project = switched ? await store.open(payload.id) : store.getCurrent()!
     const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
     const safe = (meta.name || '工程').replace(/[\\/:*?"<>|]/g, '_')
-    const res = await dialog.showSaveDialog(win!, {
-      title: '导出整个工程',
-      defaultPath: path.join(app.getPath('documents'), `${safe}.jxproj`),
-      filters: [{ name: '镜序工坊工程包', extensions: ['jxproj'] }]
-    })
-    if (res.canceled || !res.filePath) return { cancelled: true }
-    const out = await exportProjectToFile(project, res.filePath)
-    // 导出后把当前工程恢复成原来那个（store.open 会切换当前）
-    if (store.getCurrent()?.id !== payload.id) await store.open(payload.id)
+    let out: Awaited<ReturnType<typeof exportProjectToFile>>
+    try {
+      const res = await dialog.showSaveDialog(win!, {
+        title: '导出整个工程',
+        defaultPath: path.join(app.getPath('documents'), `${safe}.jxproj`),
+        filters: [{ name: '镜序工坊工程包', extensions: ['jxproj'] }]
+      })
+      if (res.canceled || !res.filePath) return { cancelled: true }
+      out = await exportProjectToFile(project, res.filePath)
+    } finally {
+      // 无论导出成功/取消/失败，都把当前工程恢复成导出前的那个
+      if (switched && originalId) await store.open(originalId)
+    }
     return { ok: true, ...out }
   })
 
@@ -332,6 +375,15 @@ function registerIpc(): void {
       return { error: String((err as Error).message ?? err) }
     }
   })
+  ipcMain.handle(CH.cglideExportWholeFilm, async (_e, payload: { name: string }) => {
+    const project = store.getCurrent()
+    if (!project) throw new Error('请先打开一个项目')
+    try {
+      return await makeClient(project.settings.comfy).exportWholeFilm(payload.name)
+    } catch (err) {
+      return { error: String((err as Error).message ?? err) }
+    }
+  })
   ipcMain.handle(CH.cglideJoinWaveform, async (_e, payload: { video: string; bins?: number }) => {
     const project = store.getCurrent()
     if (!project) throw new Error('请先打开一个项目')
@@ -356,59 +408,6 @@ function registerIpc(): void {
     } catch (err) {
       return { error: String((err as Error).message ?? err) }
     }
-  })
-
-  // ---- 从 ComfyUI 网页端同步工作流（整份替换）----
-  ipcMain.handle(CH.workflowSyncList, async () => {
-    const project = store.getCurrent()
-    const st = await comfyRuntime.status()
-    const comfyRoot = st.root
-    if (!comfyRoot) throw new Error('还没配置 ComfyUI 根目录，请先在设置里指定')
-    const list = listComfyWorkflows(comfyRoot, project?.templates ?? null)
-    return { comfyRoot, items: list }
-  })
-  ipcMain.handle(CH.workflowSyncApply, async (_e, payload: { files: string[] }) => {
-    const project = store.getCurrent()
-    if (!project) throw new Error('请先打开一个项目')
-    const hw = await getHardware()
-    let replaced = 0
-    let added = 0
-    const failed: { file: string; error: string }[] = []
-    for (const file of payload.files ?? []) {
-      try {
-        const wf = readComfyWorkflow(file)
-        if (!wf) {
-          failed.push({ file, error: '不是有效的 ComfyUI 工作流文件（缺 nodes）' })
-          continue
-        }
-        // 按归一化名字匹配项目里已有的模板（容忍 emoji、大小写、版本号差异）
-        const key = normalizeKey(wf.name)
-        const existing = project.templates.find((t) => normalizeKey(t.name) === key)
-        const adapted = adaptTemplateForGpu(wf.apiJson, hw.gpu)
-        if (existing) {
-          // 整份替换：以网页端为准
-          existing.apiJson = adapted
-          replaced++
-        } else {
-          const kind = detectWorkflowKind(
-            (isUiWorkflow(wf.apiJson) ? {} : (wf.apiJson as Record<string, { class_type: string }>)) as Record<string, { class_type: string }>
-          )
-          project.templates.push({
-            id: uid('tpl_'),
-            name: wf.name,
-            kind,
-            apiJson: adapted,
-            mapping: { version: 1 },
-            createdAt: now()
-          })
-          added++
-        }
-      } catch (err) {
-        failed.push({ file, error: String((err as Error).message ?? err) })
-      }
-    }
-    await store.flush()
-    return { replaced, added, failed }
   })
 
   // ---- 记忆库 ----
@@ -502,21 +501,7 @@ function registerIpc(): void {
       const stat = await fsp.stat(p)
       if (stat.size > 200 * 1024 * 1024) return null
       const buf = await fsp.readFile(p)
-      const ext = path.extname(p).toLowerCase()
-      const mime =
-        ext === '.png'
-          ? 'image/png'
-          : ext === '.jpg' || ext === '.jpeg'
-            ? 'image/jpeg'
-            : ext === '.webp'
-              ? 'image/webp'
-              : ext === '.gif'
-                ? 'image/gif'
-                : ext === '.mp4'
-                  ? 'video/mp4'
-                  : ext === '.webm'
-                    ? 'video/webm'
-                    : 'application/octet-stream'
+      const mime = mimeOfExt(p)
       return `data:${mime};base64,${buf.toString('base64')}`
     } catch {
       return null
@@ -560,25 +545,6 @@ function registerIpc(): void {
       const key = abs.toLowerCase()
       const projectsDir = path.join(app.getPath('userData'), 'projects')
 
-      const collectRefs = (proj: Project): { cover: string[]; images: string[]; outputs: string[] } => {
-        const cover: string[] = []
-        const images: string[] = []
-        const outputs: string[] = []
-        for (const a of proj.assets ?? []) {
-          if (a.coverFile) cover.push(path.resolve(a.coverFile).toLowerCase())
-          for (const i of a.images ?? []) if (i) images.push(path.resolve(i).toLowerCase())
-          for (const v of (a as { versions?: { file?: string }[] }).versions ?? []) {
-            if (v?.file) images.push(path.resolve(v.file).toLowerCase())
-          }
-        }
-        for (const s of proj.shots ?? []) {
-          for (const o of s.outputs ?? []) if (o?.file) outputs.push(path.resolve(o.file).toLowerCase())
-          const ref = (s as { refImage?: string }).refImage
-          if (ref) images.push(path.resolve(ref).toLowerCase())
-        }
-        return { cover, images, outputs }
-      }
-
       // 扫描所有工程（磁盘为准），确认没有别的地方还在用这个文件
       let usedBy = ''
       let entries: string[] = []
@@ -594,8 +560,7 @@ function registerIpc(): void {
         try {
           const raw = await fsp.readFile(file, 'utf8')
           const proj = JSON.parse(raw) as Project
-          const refs = collectRefs(proj)
-          if ([...refs.cover, ...refs.images, ...refs.outputs].includes(key)) {
+          if (collectMediaRefs(proj).has(key)) {
             usedBy = proj.name || dir
             break
           }
@@ -605,16 +570,18 @@ function registerIpc(): void {
       }
       if (usedBy) return { deleted: false, reason: `该文件仍被「${usedBy}」使用` }
 
-      // 物理删除（重试，处理缩略图/杀毒短暂占用）
+      // 物理删除（重试，处理缩略图/杀毒/预览的短暂占用）
       let lastErr = ''
-      for (let i = 0; i < 4; i++) {
+      for (let i = 0; i < 8; i++) {
         try {
+          // 先清除只读属性（个别来源的图片带只读位，Windows 下 rm 会失败）
+          try { await fsp.chmod(abs, 0o666) } catch { /* 忽略：不存在或无需改 */ }
           await fsp.rm(abs, { force: true })
           if (!fs.existsSync(abs)) return { deleted: true }
         } catch (err) {
           lastErr = String((err as Error).message ?? err)
         }
-        await new Promise((r) => setTimeout(r, 250))
+        await new Promise((r) => setTimeout(r, 300))
       }
       if (!fs.existsSync(abs)) return { deleted: true }
       return { deleted: false, reason: lastErr || '文件仍存在（可能被其它程序占用）' }
@@ -629,19 +596,7 @@ function registerIpc(): void {
     const project = store.getCurrent()
     if (!project) return { removed: 0 }
     const media = store.mediaDir()
-    const refs = new Set<string>()
-    for (const a of project.assets ?? []) {
-      if (a.coverFile) refs.add(path.resolve(a.coverFile).toLowerCase())
-      for (const i of a.images ?? []) if (i) refs.add(path.resolve(i).toLowerCase())
-      for (const v of (a as { versions?: { file?: string }[] }).versions ?? []) {
-        if (v?.file) refs.add(path.resolve(v.file).toLowerCase())
-      }
-    }
-    for (const s of project.shots ?? []) {
-      for (const o of s.outputs ?? []) if (o?.file) refs.add(path.resolve(o.file).toLowerCase())
-      const ref = (s as { refImage?: string }).refImage
-      if (ref) refs.add(path.resolve(ref).toLowerCase())
-    }
+    const refs = collectMediaRefs(project)
     let removed = 0
     let list: string[] = []
     try { list = await fsp.readdir(media) } catch { return { removed: 0 } }
@@ -691,21 +646,7 @@ app.whenReady().then(() => {
       let p = decodeURIComponent(u.pathname)
       if (/^\/[a-zA-Z]:/.test(p)) p = p.slice(1) // /C:/foo -> C:/foo
       const buf = await fsp.readFile(p)
-      const ext = path.extname(p).toLowerCase()
-      const mime =
-        ext === '.png'
-          ? 'image/png'
-          : ext === '.jpg' || ext === '.jpeg'
-            ? 'image/jpeg'
-            : ext === '.webp'
-              ? 'image/webp'
-              : ext === '.gif'
-                ? 'image/gif'
-                : ext === '.mp4'
-                  ? 'video/mp4'
-                  : ext === '.webm'
-                    ? 'video/webm'
-                    : 'application/octet-stream'
+      const mime = mimeOfExt(p)
       return new Response(new Uint8Array(buf), { headers: { 'content-type': mime, 'cache-control': 'no-cache' } })
     } catch (err) {
       return new Response(`not found: ${String((err as Error).message ?? err)}`, { status: 404 })
@@ -717,15 +658,25 @@ app.whenReady().then(() => {
 
   comfyRuntime = new ComfyRuntime(path.join(app.getPath('userData'), 'runtime'))
   comfyRuntime.on('state', (state) => push({ type: 'comfy:runtime', state }))
+  // 启动时异步读一次 root 缓存（provider 需同步返回，不能每次 await status()）
+  void comfyRuntime.status().then((st) => { if (st.root) lastKnownComfyRoot = st.root }).catch(() => undefined)
 
   // AI 助手：内置技能目录 + 全局 AI 配置
   skillsRoot = app.isPackaged ? path.join(process.resourcesPath, 'skills') : path.join(app.getAppPath(), 'skills')
   aiConfigFile = path.join(app.getPath('userData'), 'ai-config.json')
   aiAssistant = new AiAssistant(store, skillsRoot)
 
-  jobs = new JobManager(store, (type, payload) => {
-    push({ type, ...(payload as Record<string, unknown>) } as PushEvent)
-  })
+  jobs = new JobManager(
+    store,
+    (type, payload) => { push({ type, ...(payload as Record<string, unknown>) } as PushEvent) },
+    () => {
+      const root = lastKnownComfyRoot
+      if (!root) return null
+      return fs.existsSync(path.join(root, 'ComfyUI', 'models'))
+        ? path.join(root, 'ComfyUI', 'models')
+        : path.join(root, 'models')
+    }
+  )
 
   updater.setEmitter((payload) => push(payload))
 
@@ -740,18 +691,17 @@ app.whenReady().then(() => {
   // 启动后静默检查一次更新（仅打包版本有效）
   setTimeout(() => void updater.check(), 5000)
 
-  // 启动后自动检测本机是否已装 ComfyUI，找到则接管；若已装未运行则自动启动
+  // 启动后只检测本机是否已装 ComfyUI 并推送状态，不自动拉起。
+  // ComfyUI 的启动/停止由用户决定：设置页或左下角状态卡片手动操作。
+  // 这样软件与 ComfyUI 生命周期解耦，避免抢占 GPU / 端口 / 缓存。
   setTimeout(() => {
     void (async () => {
       try {
         const found = await comfyRuntime.autoDetect()
         if (!found) return
         const st = await comfyRuntime.status()
+        if (st.root) lastKnownComfyRoot = st.root
         push({ type: 'comfy:runtime', state: st })
-        // 已安装但未运行 → 自动启动（后台，不阻塞）
-        if (st.status === 'installed' || st.status === 'stopped') {
-          void comfyRuntime.start().catch(() => undefined)
-        }
       } catch {
         // 忽略
       }

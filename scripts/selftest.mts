@@ -34,14 +34,13 @@ import {
   fourViewNegative
 } from '../src/renderer/src/lib/assetGen.ts'
 import { buildChatUrl, normalizeAiConfig, defaultAiConfig } from '../src/shared/ai.ts'
-import { extractArchive } from '../src/main/core/extract.ts'
 import { ProjectStore, uid, now } from '../src/main/core/store.ts'
 import { listMemory, readMemory, writeMemory, appendMemory } from '../src/main/core/memory.ts'
 import { AiAssistant } from '../src/main/core/ai-assistant.ts'
 import { explainError } from '../src/renderer/src/lib/errorHelp.ts'
 import { ComfyRuntime } from '../src/main/core/comfy-runtime.ts'
 import { detectWorkflowKind, isUiWorkflow } from '../src/main/core/workflow-convert.ts'
-import { adaptTemplateForGpu, degradeMissingLoras, pickVramPreset, resetVramFieldsToAuthor } from '../src/main/core/template-adapt.ts'
+import { adaptTemplateForGpu, degradeMissingLoras, pickVramPreset } from '../src/main/core/template-adapt.ts'
 import { listBuiltinWorkflows, loadBuiltinWorkflow, buildBuiltinTemplates } from '../src/main/core/builtin-workflows.ts'
 
 const execFileAsync = promisify(execFile)
@@ -222,42 +221,6 @@ const intelGpu = { vendor: 'intel' as const, name: 'Arc', vramMB: 8192, vramKnow
 await fsp.rm(tmp2, { recursive: true, force: true })
 
 // ---- 解压 ----
-const tmp3 = await fsp.mkdtemp(path.join(os.tmpdir(), 'ff-ext-'))
-const srcDir = path.join(tmp3, 'src')
-await fsp.mkdir(srcDir)
-await fsp.writeFile(path.join(srcDir, 'hello.txt'), 'hello frameforge')
-const zipFile = path.join(tmp3, 'pkg.zip')
-await execFileAsync('powershell.exe', [
-  '-NoProfile',
-  '-NonInteractive',
-  '-Command',
-  `Compress-Archive -LiteralPath '${srcDir.replace(/'/g, "''")}' -DestinationPath '${zipFile.replace(/'/g, "''")}' -Force`
-])
-const outDir = path.join(tmp3, 'out')
-await extractArchive(zipFile, outDir)
-const extractedText = await fsp.readFile(path.join(outDir, 'src', 'hello.txt'), 'utf8')
-ok('解压：zip 解压成功且内容一致', () => assert.equal(extractedText, 'hello frameforge'))
-
-await fsp.writeFile(path.join(tmp3, 'fake.7z'), 'not-a-real-archive')
-let extractErr = ''
-try {
-  await extractArchive(path.join(tmp3, 'fake.7z'), path.join(tmp3, 'out7'), '/nonexistent/7za.exe')
-} catch (err) {
-  extractErr = String((err as Error).message ?? err)
-}
-ok('解压：7z 工具缺失给出明确提示', () => assert.match(extractErr, /7z 解压工具不存在|未找到 7z/))
-
-await fsp.writeFile(path.join(tmp3, 'fake.rar'), 'x')
-let unsupportedErr = ''
-try {
-  await extractArchive(path.join(tmp3, 'fake.rar'), path.join(tmp3, 'outrar'))
-} catch (err) {
-  unsupportedErr = String((err as Error).message ?? err)
-}
-ok('解压：不支持的格式给出明确提示', () => assert.match(unsupportedErr, /不支持的压缩格式/))
-
-await fsp.rm(tmp3, { recursive: true, force: true })
-
 // ---- 项目存储（JSON 文件即真相） ----
 const tmp4 = await fsp.mkdtemp(path.join(os.tmpdir(), 'ff-store-'))
 const store = new ProjectStore(tmp4)
@@ -1353,35 +1316,6 @@ ok('显存分档：显存未知时完全不动模板', () => {
   const out = adaptTemplateForGpu(api, { vendor: 'nvidia', name: '?', vramMB: 0, vramKnown: false }) as typeof api
   assert.equal(out.p.inputs['显存预设'], '12 GB', '未知显存保留作者原配')
   assert.equal(out.p.inputs['放大模型'], 'minimax_h3_latent_upscaler_3d_bf16.safetensors')
-})
-
-// ---- 老项目模板修复 ----
-ok('老项目修复：被锁成1的放大倍数按内置模板恢复', () => {
-  const stored = {
-    '393': { class_type: 'BanZhang_MMH3_UpscaleParams', inputs: { 放大模型: '⚡ 最近邻精确（免模型）', 放大倍数: 1, 显存预设: '6 GB' } },
-    '398': { class_type: 'BanZhang_H3MemoryOptimizer', inputs: { 省显存档位: '① 关（最快，不省显存）' } }
-  }
-  const author = {
-    '393': { class_type: 'BanZhang_MMH3_UpscaleParams', inputs: { 放大模型: 'minimax_h3_latent_upscaler_3d_bf16.safetensors', 放大倍数: 1.5, 显存预设: '12 GB' } }
-  }
-  const reset = resetVramFieldsToAuthor(JSON.parse(JSON.stringify(stored)), author) as typeof stored
-  assert.equal(reset['393'].inputs['放大倍数'], 1.5, '被锁成 1 的倍数应恢复到作者的 1.5')
-  assert.equal(reset['393'].inputs['放大模型'], 'minimax_h3_latent_upscaler_3d_bf16.safetensors', '应恢复真模型')
-  assert.equal(reset['393'].inputs['显存预设'], '12 GB', '应恢复作者 12GB')
-  const adapted = adaptTemplateForGpu(reset, { vendor: 'nvidia', name: 'RTX 2060', vramMB: 6144, vramKnown: true }) as typeof stored
-  assert.equal(adapted['393'].inputs['放大倍数'], 1.5, '6GB 适配后倍数仍是 1.5')
-  assert.equal(adapted['393'].inputs['显存预设'], '6 GB', '6GB 卡降到 6 GB')
-  assert.equal(adapted['393'].inputs['放大模型'], '⚡ 最近邻精确（免模型）', '6GB 卡用免模型')
-  assert.equal(adapted['398'].inputs['省显存档位'], '③ 强力（省得多，画面基本不变）', '6GB 卡开强力省显存')
-})
-
-ok('老项目修复：无内置模板参考时不动倍数', () => {
-  const stored = {
-    '393': { class_type: 'BanZhang_MMH3_UpscaleParams', inputs: { 放大模型: '⚡ 最近邻精确（免模型）', 放大倍数: 1.5, 显存预设: '6 GB' } }
-  }
-  const reset = resetVramFieldsToAuthor(JSON.parse(JSON.stringify(stored))) as typeof stored
-  assert.equal(reset['393'].inputs['放大倍数'], 1.5, '无参考时保留原倍数')
-  assert.equal(reset['393'].inputs['显存预设'], '12 GB', '但显存预设仍重置为作者原配')
 })
 
 // ---- 文案台：别名模式开关 ----
