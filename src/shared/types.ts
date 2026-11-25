@@ -244,6 +244,9 @@ export interface UpscaleSettings {
   scheduler: string
   tileFrames: number
   overlapFrames: number
+  /** 纯放大模式：跳过放大后的二次重绘 KSampler（画面内容 100% 忠实原图，只提分辨率）。
+   *  文生图用（0.25 重绘会改变画风质感，用户实测反馈"跟之前不一样"）；编辑保持重绘。 */
+  skipRefine?: boolean
 }
 
 /** 抽帧 / 插帧参数（映射 ref_video_fps 与 BanZhang_RIFE_Interpolation） */

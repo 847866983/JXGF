@@ -9,7 +9,8 @@ import {
   QWEN_QUADVIEW_PROMPT,
   fourViewNegative,
   pickAssetTemplate,
-  pickQwenEditTemplate
+  pickQwenEditTemplate,
+  pickQwenFourViewTemplate
 } from '../lib/assetGen'
 
 /**
@@ -27,12 +28,11 @@ const isMossTpl = (t: Template): boolean => /MOSS/i.test(t.name)
 const isQwenTpl = (t: Template): boolean => /千问|Qwen/i.test(t.name)
 const isKreaTpl = (t: Template): boolean => /Krea2/i.test(t.name)
 
-/** 画布预设档（与向导/模板出厂口径一致）。千问文生图默认原生 2K
- *  （20261124 用户指定），四视图 2000×1200。 */
+/** 画布预设档。千问 turbo 4 步在 1024 原生直出的观感最佳（用户实测认可），
+ *  与第一/二版老工作流口径一致；分辨率需求由用户按档位自行选择。 */
 const CANVAS_PRESETS: { label: string; w: string; h: string }[] = [
-  { label: '2048×2048 千问 2K（推荐）', w: '2048', h: '2048' },
+  { label: '1024×1024 标准（推荐）', w: '1024', h: '1024' },
   { label: '1328×1328 高清', w: '1328', h: '1328' },
-  { label: '1024×1024 方形', w: '1024', h: '1024' },
   { label: '1184×896 MOSS', w: '1184', h: '896' },
   { label: '2000×1200 四视图', w: '2000', h: '1200' },
   { label: '1536×640 横幅', w: '1536', h: '640' }
@@ -55,8 +55,8 @@ export function AssetGenerateDialog({
   const [mode, setMode] = useState<GenMode>(isCharacter ? 'fourView' : 't2i')
   const [positive, setPositive] = useState(asset.prompt || asset.description || '')
   const [negative, setNegative] = useState(asset.negative || '')
-  const [width, setWidth] = useState(isCharacter ? '2000' : '2048')
-  const [height, setHeight] = useState(isCharacter ? '1200' : '2048')
+  const [width, setWidth] = useState(isCharacter ? '2000' : '1024')
+  const [height, setHeight] = useState(isCharacter ? '1200' : '1024')
   const [batch, setBatch] = useState('1')
   const [refImages, setRefImages] = useState<string[]>([])
   const [submitting, setSubmitting] = useState(false)
@@ -88,7 +88,8 @@ export function AssetGenerateDialog({
   const switchMode = (m: GenMode): void => {
     setMode(m)
     if (m === 'fourView') {
-      const qwen = pickQwenEditTemplate(imageTemplates)
+      // 【20261125】千问编辑模板已删，四视图用专用模板
+      const qwen = pickQwenFourViewTemplate(imageTemplates)
       if (qwen) setTemplateId(qwen.id)
       setWidth('2000')
       setHeight('1200')
@@ -99,8 +100,8 @@ export function AssetGenerateDialog({
       setWidth('')
       setHeight('') // 跟随参考图（canvas_from_ref）
     } else {
-      setWidth('2048')
-      setHeight('2048')
+      setWidth('1024')
+      setHeight('1024')
     }
   }
 
@@ -149,8 +150,11 @@ export function AssetGenerateDialog({
         templateId,
         positive: finalPositive,
         negative: finalNegative,
-        width: Number(width) || undefined,
-        height: Number(height) || undefined,
+        // 【编辑模式必须把宽高让给参考图（20261125）】显式宽高会让注入层走
+        // canvas=固定画布分支，与参考图尺寸不一致 → 模型重排构图 → 人物偏移。
+        // 编辑时传 undefined → 注入层 canvas_from_ref=true 按原图尺寸出图。
+        width: mode === 'edit' && refImages.length > 0 ? undefined : Number(width) || undefined,
+        height: mode === 'edit' && refImages.length > 0 ? undefined : Number(height) || undefined,
         batch: Number(batch) || 1,
         steps: isQwenFour ? 8 : undefined,
         loras: isQwenFour ? [{ file: QWEN_QUADVIEW_LORA, strength: 0.9 }] : undefined,
@@ -333,7 +337,8 @@ export function AssetGenerateDialog({
               </div>
             )}
             <div className="mt-1.5 text-[11px] text-slate-600">
-              画布自动跟随参考图尺寸；需要固定画布可在下方「画布」里填。
+              画布自动跟随参考图尺寸，1024 原生直出（与老版本一致）。
+              编辑结果受随机种子影响——指令没生效时直接再点一次「生成」，换个种子通常就能成功。
             </div>
           </div>
         )}

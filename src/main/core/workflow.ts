@@ -172,6 +172,16 @@ function injectQwenEdit(clone: Workflow, params: WorkflowParams): void {
     // 有参考图时画布跟随参考图（编辑模式最自然）；显式给了宽高才用它
     if (hasRefs && !(params.width && params.height)) {
       data.canvas_from_ref = true
+      // 【人物偏移 + 图片大小改变的根因（20261125 实锤）】模板 ref_long/ref_cap=1024
+      // 会把画布和参考图编码统统压到长边 1024：1184×896 的原图 → 输出 1024×768、
+      // 2048×1536 → 1024×768。画布与原图尺寸不同，模型等于在"新坐标系"里重新
+      // 构图——人物整体偏移、交付尺寸和原图对不上，逐轮编辑还会越改越小。
+      // 节点源码（csglide_qwen.py）：ref_long=0 画布跟随取第一张参考图的**原尺寸**
+      // （仅 4096 硬顶），ref_cap=0 参考图按原尺寸编码（非 32 倍数图向下取 32 对齐，
+      // 误差 ≤31px）。参考潜空间与输出潜空间同尺寸时 Qwen-Image 编辑才对齐，
+      // 才能做到"只改指定区域，其余（人物位置、构图、尺寸）全部不动"。
+      data.ref_long = 0
+      data.ref_cap = 0
     } else if (params.width && params.height) {
       data.canvas_from_ref = false
       data.canvas = { ...(data.canvas ?? {}), w: params.width, h: params.height }
@@ -490,6 +500,26 @@ export function injectH3RefImages(clone: unknown, refImages: string[], aliases?:
     }
     return
   }
+  // 【千问 25 步编辑（20261125）】TextEncodeQwenImage21 的 images 是 COMFY_AUTOGROW
+  // 字段，UI→API 转换器会把它丢掉；这里显式补回：LoadImage 节点写上传后的文件名，
+  // TE 节点补 images.image_1 → LoadImage 节点 id 的连线引用。
+  const teEntry = Object.entries(clone).find(([, n]) => String(n.class_type) === 'TextEncodeQwenImage21')
+  if (teEntry) {
+    const [teId, te] = teEntry
+    let loadId: string | undefined
+    for (const [id, node] of Object.entries(clone)) {
+      if (String(node.class_type) === 'LoadImage') {
+        node.inputs.image = refImages[0]
+        if (!loadId) loadId = id
+      }
+    }
+    if (loadId) {
+      te.inputs['images.image_1'] = [loadId, 0]
+      // 画布跟随参考图原尺寸（32 对齐），避免人物偏移/尺寸变化
+      te.inputs.resolution = 0
+    }
+    return
+  }
   for (const node of Object.values(clone)) {
     const ct = String(node.class_type)
     // ① 媒体架：顶层 + 当前段两层都写
@@ -589,6 +619,25 @@ function applyUpscaleParams(clone: Workflow, up: UpscaleSettings): void {
   const upscaleIds = new Set<string>()
   for (const [id, node] of Object.entries(clone)) {
     if (String(node.class_type) === 'BanZhang_ImageHiResUpscale') upscaleIds.add(id)
+  }
+  if (up.enabled && up.skipRefine && upscaleIds.size > 0) {
+    // 【纯放大模式（20261124 用户实测反馈）】文生图的 0.25 重绘会改变画风质感
+    // （用户："文生图跟之前不一样了，是不是取消了 LoRA"——LoRA 没动，是重绘链）。
+    // 纯放大：放大后 VAEDecode 直接解码放大节点的潜空间，二次重绘 KSampler
+    // 变孤儿不执行——画面内容 100% 忠实原生生成，只提升分辨率，还省一段采样时间。
+    for (const node of Object.values(clone)) {
+      if (String(node.class_type) !== 'VAEDecode') continue
+      const s = node.inputs.samples
+      if (!Array.isArray(s)) continue
+      const srcNode = clone[String(s[0])]
+      if (!srcNode || !/^KSampler(Advanced)?$/.test(String(srcNode.class_type))) continue
+      // 该 VAEDecode 的输入是「latent 来自放大节点的重绘 KSampler」→ 改接放大节点直出
+      const lat = srcNode.inputs.latent_image
+      if (Array.isArray(lat) && upscaleIds.has(String(lat[0]))) {
+        // 放大节点的「潜空间」输出是 slot 0，直接解码 = 纯放大结果
+        node.inputs.samples = [String(lat[0]), 0]
+      }
+    }
   }
   if (up.enabled && upscaleIds.size > 0) {
     // 【编辑 2K 交付的关键】放大链开启时，「放大后二次重绘 KSampler」的 denoise

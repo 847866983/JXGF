@@ -758,8 +758,16 @@ const qTpl = [
   { id: 'z', name: '01 Z-Image-Turbo', kind: 'image', apiJson: {}, mapping: { version: 1 }, createdAt: '', description: '' }
 ]
 const qAsset = { id: 'a', kind: 'character', name: '测试角色', tags: [], description: 'd', prompt: 'p', negative: '', coverFile: null, images: [], versions: [], createdAt: '', updatedAt: '' }
+// 【20261125 用户指令】千问文生图已用新 25步工作流重新接入，编辑仍删除，只留文生图+四视图
 ok('三步：pickQwenT2ITemplate 选中文生图', () => assert.equal(pickQwenT2ITemplate(qTpl).id, 't2i'))
-ok('三步：pickQwenEditTemplate 选中编辑', () => assert.equal(pickQwenEditTemplate(qTpl).id, 'edit'))
+ok('三步：千问编辑选择器只认 25 步编辑模板', () => {
+  const list = [
+    { id: 'q-edit', name: '千问 Image 2.1 图片编辑（25步）', kind: 'image', apiJson: {}, mapping: { version: 1 }, createdAt: '', description: '' },
+    { id: 'q-4v', name: '千问 Image 2.1 角色四视图', kind: 'image', apiJson: {}, mapping: { version: 1 }, createdAt: '', description: '' }
+  ]
+  assert.equal(pickQwenEditTemplate(list).id, 'q-edit')
+  assert.equal(pickQwenEditTemplate(qTpl), undefined, '旧全能编辑模板不应再被选中')
+})
 ok('三步：T2I 不带参考图', () => { const r = buildCharacterT2IInput(qAsset, qTpl); assert.equal(r.templateId, 't2i'); assert.ok(!r.refImages) })
 ok('三步：四视图用Krea2模板+参考图', () => {
   const krea = [{ id: 'k4', name: '04-Krea2-角色资产四视图', kind: 'image', apiJson: {}, mapping: { version: 1 }, createdAt: '', description: '' }]
@@ -804,8 +812,8 @@ ok('文件名：空名兜底', () => assert.equal(sanitizeOutputName(''), 'outpu
 
 // ---- 双引擎 ----
 const engTpl = [
-  { id: 'q-t2i', name: 'Qwen-image21-文生图流', kind: 'image', apiJson: {}, mapping: { version: 1 }, createdAt: '', description: '' },
-  { id: 'q-edit', name: '千问图片编辑(全能编辑)', kind: 'image', apiJson: {}, mapping: { version: 1 }, createdAt: '', description: '' },
+  { id: 'q-t2i', name: 'Qwen-image21-文生图（25步全质量）', kind: 'image', apiJson: {}, mapping: { version: 1 }, createdAt: '', description: '' },
+  { id: 'q-4v', name: '千问 Image 2.1 角色四视图', kind: 'image', apiJson: {}, mapping: { version: 1 }, createdAt: '', description: '' },
   { id: 'k-t2i', name: '02-Krea2-单双采', kind: 'image', apiJson: {}, mapping: { version: 1 }, createdAt: '', description: '' },
   { id: 'k-4v', name: '04-Krea2-角色资产四视图', kind: 'image', apiJson: {}, mapping: { version: 1 }, createdAt: '', description: '' }
 ]
@@ -813,7 +821,7 @@ ok('双引擎：Krea2文生图模板选中单双采', () => assert.equal(pickKre
 ok('双引擎：Krea2四视图模板选中04', () => assert.equal(pickFourViewTemplate(engTpl).id, 'k-4v'))
 ok('双引擎：千问四视图带多角度LoRA', () => {
   const r = buildCharacterFourViewInput(qAsset, engTpl, undefined, 'ref.png', 'qwen')
-  assert.equal(r.templateId, 'q-edit')
+  assert.equal(r.templateId, 'q-4v')
   assert.ok(Array.isArray(r.loras) && r.loras.length === 1)
   assert.ok(/multiple_angles/.test(r.loras[0].file))
 })
@@ -875,13 +883,14 @@ ok('双引擎：Krea2编辑走Krea2编辑模板(非四视图)', () => {
   const r = buildCharacterEditInput(qAsset, list, undefined, 'ref.png', '加红围巾', 'krea2')
   assert.equal(r.templateId, 'k-edit')
 })
-ok('双引擎：千问编辑走千问编辑模板', () => {
+ok('双引擎：千问编辑走 25步编辑模板', () => {
   const list = [
-    { id: 'k-edit', name: '05-Krea2-图片编辑', kind: 'image' as const, apiJson: {}, mapping: { version: 1 }, createdAt: '', description: '' },
-    { id: 'q-edit', name: '千问图片编辑(全能编辑)', kind: 'image' as const, apiJson: {}, mapping: { version: 1 }, createdAt: '', description: '' }
+    { id: 'q-edit', name: '千问 Image 2.1 图片编辑（25步）', kind: 'image' as const, apiJson: {}, mapping: { version: 1 }, createdAt: '', description: '' },
+    { id: 'q-4v', name: '千问 Image 2.1 角色四视图', kind: 'image' as const, apiJson: {}, mapping: { version: 1 }, createdAt: '', description: '' }
   ]
   const r = buildCharacterEditInput(qAsset, list, undefined, 'ref.png', '加红围巾', 'qwen')
   assert.equal(r.templateId, 'q-edit')
+  assert.deepEqual(r.refImages, ['ref.png'])
 })
 ok('四视图：提示词含半身特写+正侧背全身', () => {
   const p = buildFourViewPositive()

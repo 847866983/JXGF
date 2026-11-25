@@ -1,68 +1,68 @@
 [
- {
-  "id": "tpl_wf01",
-  "name": "01 Z-Image-Turbo",
-  "kind": "image",
-  "file": "tpl_wf01.json"
- },
- {
-  "id": "tpl_wf02",
-  "name": "02-Krea2-单双采",
-  "kind": "image",
-  "file": "tpl_wf02.json"
- },
- {
-  "id": "tpl_wf03",
-  "name": "04-Krea2-角色资产四视图",
-  "kind": "image",
-  "file": "tpl_wf03.json"
- },
- {
-  "id": "tpl_wf04",
-  "name": "05-Krea2-图像编辑",
-  "kind": "image",
-  "file": "tpl_wf04.json"
- },
- {
-  "id": "tpl_wf05",
-  "name": "MiniMax H3 三采",
-  "kind": "video",
-  "file": "tpl_wf05.json"
- },
- {
-  "id": "tpl_wf06",
-  "name": "MOSS-Image 文生图",
-  "kind": "image",
-  "file": "tpl_wf06.json"
- },
- {
-  "id": "tpl_wf07",
-  "name": "千问 Image 2.1 图像编辑",
-  "kind": "image",
-  "file": "tpl_wf07.json"
- },
- {
-  "id": "tpl_wf10",
-  "name": "Qwen-image21-文生图",
-  "kind": "image",
-  "file": "tpl_wf10.json"
- },
- {
-  "id": "tpl_wf11",
-  "name": "千问 Image 2.1 角色四视图",
-  "kind": "image",
-  "file": "tpl_wf11.json"
- },
- {
-  "id": "tpl_wf08",
-  "name": "ACE 音乐生成",
-  "kind": "image",
-  "file": "tpl_wf08.json"
- },
- {
-  "id": "tpl_wf09",
-  "name": "YuE2 智能乐谱",
-  "kind": "image",
-  "file": "tpl_wf09.json"
- }
+  {
+    "id": "tpl_wf01",
+    "name": "01 Z-Image-Turbo",
+    "kind": "image",
+    "file": "tpl_wf01.json"
+  },
+  {
+    "id": "tpl_wf02",
+    "name": "02-Krea2-单双采",
+    "kind": "image",
+    "file": "tpl_wf02.json"
+  },
+  {
+    "id": "tpl_wf03",
+    "name": "04-Krea2-角色资产四视图",
+    "kind": "image",
+    "file": "tpl_wf03.json"
+  },
+  {
+    "id": "tpl_wf04",
+    "name": "05-Krea2-图像编辑",
+    "kind": "image",
+    "file": "tpl_wf04.json"
+  },
+  {
+    "id": "tpl_wf05",
+    "name": "MiniMax H3 三采",
+    "kind": "video",
+    "file": "tpl_wf05.json"
+  },
+  {
+    "id": "tpl_wf06",
+    "name": "MOSS-Image 文生图",
+    "kind": "image",
+    "file": "tpl_wf06.json"
+  },
+  {
+    "id": "tpl_wf10",
+    "name": "Qwen-image21-文生图（25步全质量）",
+    "kind": "image",
+    "file": "tpl_wf10.json"
+  },
+  {
+    "id": "tpl_wf12",
+    "name": "千问 Image 2.1 图片编辑（25步）",
+    "kind": "image",
+    "file": "tpl_wf12.json"
+  },
+  {
+    "id": "tpl_wf11",
+    "name": "千问 Image 2.1 角色四视图",
+    "kind": "image",
+    "file": "tpl_wf11.json"
+  },
+  {
+    "id": "tpl_wf08",
+    "name": "ACE 音乐生成",
+    "kind": "image",
+    "file": "tpl_wf08.json"
+  },
+  {
+    "id": "tpl_wf09",
+    "name": "YuE2 智能乐谱",
+    "kind": "image",
+    "file": "tpl_wf09.json"
+  }
 ]

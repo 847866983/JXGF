@@ -206,10 +206,13 @@ export class JobManager {
       // 所以用户没指定种子时，一律随机一个，确保每次都真正执行出新图。
       const effectiveSeed = params.seed ?? randomSeed()
       jobLog(`job种子 promptId=- 种子=${effectiveSeed} ${params.seed === undefined ? '(随机)' : '(用户指定)'}`)
-      // 「编辑跟随参考图」判定：有参考图 + 没给显式宽高（0/undefined 均视为未给）。
-      // 文生图无参考图、四视图给了显式宽高，都不命中——只有图片编辑走放大链 2K 交付。
-      const refCount = Array.isArray(params.refImages) ? params.refImages.filter(Boolean).length : 0
-      const editFollowRef = template.kind === 'image' && refCount > 0 && !(params.width && params.height)
+      // 【20261124 23:20 用户最终决策】图片任务放大链一律关闭，回到「1024 原生
+      // 直出」的第一/二版老工作流口径。实测对比：老图（资产前两张 QW21，1024²
+      // 直出）用户认可可用；放大链交付（OmniSR 2×，含/不含 0.25 重绘）观感用户
+      // 均不认可。skipRefine 纯放大通道保留在 applyUpscaleParams 里备用，
+      // 显式传 upscale.enabled=true 仍可打开。
+      const openUpscale = false
+      const t2iOnly = false
       const workflow = buildWorkflow(useTemplate, {
         positive: params.positive,
         globalPrompt: params.globalPrompt,
@@ -224,23 +227,13 @@ export class JobManager {
         samplerName: params.samplerName,
         scheduler: params.scheduler,
         h3: params.h3,
-        // 图片任务放大链口径（20261124 与 2K 需求一起重定）：
-        //   · 文生图（无参考图/显式宽高）——画布已是原生 2K（2048²），不再放大；
-        //   · 四视图——画布 2000×1200 已是 2K 级，且放大链会把排版二次放大到
-        //     4000 宽破坏面板结构，必须关闭；
-        //   · 图片编辑（有参考图且未给显式宽高，画布跟随参考图）——主输出只有
-        //     参考图的 1MP，开启模板自带的「高清放大 2×」把交付拉到 2K 长边，
-        //     这也是用户指定「编辑也原样 2K」的实现路径。
-        // 之前一刀切关闭是因为旧模板链路会把 2000 宽放大到 4000+ 卡死 6GB 卡；
-        // 现在只对「编辑跟随参考图」这一种场景开启，且 denoise 已在
-        // applyUpscaleParams 里压到 0.25（轻度细化，不毁编辑内容）。
         upscale:
           params.upscale ??
           (template.kind === 'image'
             ? {
-                enabled: editFollowRef,
+                enabled: openUpscale,
                 mode: '倍数' as const,
-                scale: editFollowRef ? 2 : 1,
+                scale: openUpscale ? 2 : 1,
                 targetWidth: 2048,
                 targetHeight: 2048,
                 steps: 2,
@@ -249,7 +242,8 @@ export class JobManager {
                 sampler: 'euler',
                 scheduler: 'simple',
                 tileFrames: 107,
-                overlapFrames: 22
+                overlapFrames: 22,
+                skipRefine: t2iOnly
               }
             : undefined),
         rife: params.rife,

@@ -8,6 +8,8 @@ import { persistProject } from './mutate'
 import {
   pickQwenT2ITemplate,
   pickQwenEditTemplate,
+  pickQwenFourViewTemplate,
+  engineSupports,
   pickKrea2T2ITemplate,
   pickKrea2EditTemplate,
   pickFourViewTemplate,
@@ -254,19 +256,25 @@ export function CharacterAssetWizard({ asset, onClose }: { asset: Asset; onClose
     window.setTimeout(() => setStatus(null), 2000)
   }
 
-  const hasT2I =
+  // 【20261125 用户指令】千问只保留转四视图：t2i/edit 恒不可用，四视图独立判断
+  const hasT2I = engineSupports(engine, 't2i') && (
     engine === 'krea2'
       ? Boolean(pickKrea2T2ITemplate(templates))
       : engine === 'moss'
         ? Boolean(pickMossTemplate(templates))
         : Boolean(pickQwenT2ITemplate(templates))
-  // MOSS 仅支持纯文生图（模板无参考图通道），编辑/四视图在这两个引擎下做
-  const hasEdit =
-    engine === 'moss'
-      ? false
-      : engine === 'krea2'
-        ? Boolean(pickKrea2EditTemplate(templates) ?? pickQwenEditTemplate(templates))
-        : Boolean(pickQwenEditTemplate(templates))
+  )
+  const hasEdit = engineSupports(engine, 'edit') && (
+    engine === 'krea2'
+      ? Boolean(pickKrea2EditTemplate(templates))
+      : Boolean(pickQwenEditTemplate(templates))
+  )
+  // 四视图可用性：千问看专用四视图模板，Krea2 看其四视图模板，MOSS 不支持
+  const hasFourView = engineSupports(engine, 'fourView') && (
+    engine === 'krea2'
+      ? Boolean(pickFourViewTemplate(templates))
+      : Boolean(pickQwenFourViewTemplate(templates))
+  )
 
   return (
     <Modal
@@ -390,7 +398,13 @@ export function CharacterAssetWizard({ asset, onClose }: { asset: Asset; onClose
             {busy ? <Loader2 size={15} className="animate-spin" /> : <Wand2 size={15} />}
             生成新版形象
           </button>
-          {!hasT2I && <div className="text-xs text-amber-400/80">缺少文生图模板，无法生成形象</div>}
+          {!hasT2I && (
+            <div className="text-xs text-amber-400/80">
+              {engine === 'qwen'
+                ? '千问当前只保留转四视图，生成新形象请切换到 Krea2 / MOSS 引擎'
+                : '缺少文生图模板，无法生成形象'}
+            </div>
+          )}
 
           {/* 引擎选择（弱化） */}
           <div className="flex items-center gap-2 text-xs text-slate-500">
@@ -460,7 +474,7 @@ export function CharacterAssetWizard({ asset, onClose }: { asset: Asset; onClose
           <div className="grid grid-cols-2 gap-2">
             <button
               className="btn-ghost"
-              disabled={busy || !selected || !hasEdit}
+              disabled={busy || !selected || !hasFourView}
               title={engine === 'moss' ? 'MOSS 为纯文生图，转四视图请切换到千问或 Krea2 引擎' : undefined}
               onClick={() => void toFourView()}
             >
@@ -476,11 +490,13 @@ export function CharacterAssetWizard({ asset, onClose }: { asset: Asset; onClose
               设为角色图
             </button>
           </div>
-          {!hasEdit && selected && (
+          {!hasFourView && selected && (
             <div className="text-xs text-amber-400/80">
-              {engine === 'moss'
-                ? 'MOSS 为纯文生图引擎，不支持参考图编辑/四视图——请切换到千问或 Krea2 引擎'
-                : '缺少千问「全能编辑」模板，无法编辑或转四视图'}
+              {engine === 'qwen'
+                ? '千问当前只保留转四视图功能，缺少「角色四视图」模板'
+                : engine === 'moss'
+                  ? 'MOSS 为纯文生图引擎，不支持转四视图——请切换到千问或 Krea2 引擎'
+                  : '缺少四视图模板，无法转四视图'}
             </div>
           )}
 

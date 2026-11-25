@@ -180,9 +180,9 @@ export function buildAssetJobInput(asset: Asset, templates: Template[], styleId?
     templateId: template.id,
     positive: styledPositive(desc, styleId),
     negative: asset.negative?.trim() || undefined,
-    // 与 buildCharacterT2IInput 同口径：原生 2K 画布
-    width: 2048,
-    height: 2048,
+    // 与 buildCharacterT2IInput 同口径：1024 原生，2K 交给放大链
+    width: 1024,
+    height: 1024,
     batch: 1
   }
 }
@@ -199,7 +199,10 @@ export const ENGINE_LABEL: Record<ImageEngine, string> = {
   moss: 'MOSS-Image'
 }
 
-/** MOSS 是否支持某模式 */
+/**
+ * 引擎是否支持某模式。
+ * 【20261125】千问重新接入文生图 + 25步编辑 + 四视图，三种模式全支持。
+ */
 export function engineSupports(engine: ImageEngine, mode: 't2i' | 'edit' | 'fourView'): boolean {
   if (engine === 'moss') return mode === 't2i'
   return true
@@ -251,40 +254,27 @@ export function pickKrea2EditTemplate(templates: Template[]): Template | undefin
 }
 
 /**
- * 千问文生图模板。
- *
- * 优先用专门的「文生图 / t2i」模板；没有就退回**千问 Image 2.1 全能编辑**——
- * 那个模板（CSGlideImageCastCS）不接参考图时就是纯文生图，能力覆盖，
- * 所以「只有全能编辑、没有单独文生图」不该被判成「缺少工作流」。
+ * 【20261125 用户指令更新】千问文生图已用 D:/下载资源/Qwen-image21-文生图流.json 重新接入
+ * （25 步全质量管线，QW21 好图同款）；编辑模板仍然删除，只留文生图 + 四视图。
  */
 export function pickQwenT2ITemplate(templates: Template[]): Template | undefined {
   const imgs = templates.filter((t) => t.kind === 'image')
-  return (
-    imgs.find((t) => /Qwen-image21-文生图|qwen_image_2_1_t2i/i.test(t.name)) ||
-    imgs.find((t) => /Qwen/i.test(t.name) && /文生图|t2i/i.test(t.name)) ||
-    pickQwenEditTemplate(imgs)
-  )
+  return imgs.find((t) => /Qwen-image21-文生图/i.test(t.name))
 }
 
-/** 千问图片编辑模板（CSGlideImageCastCS，支持参考图） */
+/**
+ * 【20261125 重新写】千问 25 步图片编辑模板（基于 25 步全质量文生图管线 + 原生
+ * TextEncodeQwenImage21 的 images/vae 编辑路径）。绝不回退到四视图模板顶替。
+ */
 export function pickQwenEditTemplate(templates: Template[]): Template | undefined {
   const imgs = templates.filter((t) => t.kind === 'image')
-  return (
-    // 三套千问工作流各司其职：编辑 / 文生图 / 四视图。
-    // 先排除后两类，避免旧的兜底正则把「文生图」「四视图」误当编辑模板。
-    imgs.filter((t) => !/文生图|t2i/i.test(t.name) && !/四视图|four.?view|multi.?angle/i.test(t.name)).find((t) => /千问.*2\.1.*图像编辑/i.test(t.name)) ||
-    imgs.find((t) => /千问图片编辑|全能编辑/i.test(t.name)) ||
-    imgs.find((t) => /Qwen/i.test(t.name) && /编辑|edit/i.test(t.name))
-  )
+  return imgs.find((t) => /千问.*图片编辑.*25步|Qwen.*Edit.*25/i.test(t.name))
 }
 
-/** 千问角色四视图模板（默认挂多角度 LoRA） */
+/** 千问角色四视图模板（默认挂多角度 LoRA）——千问引擎现在唯一的可用能力 */
 export function pickQwenFourViewTemplate(templates: Template[]): Template | undefined {
   const imgs = templates.filter((t) => t.kind === 'image')
-  return (
-    imgs.find((t) => /千问.*四视图|Qwen.*四视图|Qwen.*four.?view|Qwen.*multi.?angle/i.test(t.name)) ||
-    pickQwenEditTemplate(imgs)
-  )
+  return imgs.find((t) => /千问.*四视图|Qwen.*四视图|Qwen.*four.?view|Qwen.*multi.?angle/i.test(t.name))
 }
 
 /** Krea2 文生图模板 */
@@ -320,9 +310,10 @@ export function buildCharacterT2IInput(
   if (!template) return null
   const desc = asset.prompt || asset.description || asset.name || ''
   // MOSS 的出厂画布是 1184×896（qwen_data canvas），尊重模板设计不用方形。
-  // 千问文生图直接用原生 2K 画布（2048×2048，4.2MP）：原生分辨率生成的细节
-  // 远好于小图后期放大；四视图 2.9MP 在同卡已验证可行（20261124 用户指定 2K）。
-  const [w, h] = engine === 'moss' ? [1184, 896] : [2048, 2048]
+  // 千问文生图保持 1024×1024 原生画布：实测 2048² 原生 4 步 turbo 会质量漂移
+  // （体型变胖、画面发暗、8 分钟才出图，20261124 用户反馈）；2K 由 jobs 层的
+  // 「放大链 2×」交付——与编辑同路径，画质与原口径一致、分辨率仍是 2K。
+  const [w, h] = engine === 'moss' ? [1184, 896] : [1024, 1024]
   return {
     templateId: template.id,
     positive: desc,
